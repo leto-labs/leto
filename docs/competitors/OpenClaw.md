@@ -58,6 +58,72 @@ The repo is best described as a modular monolith centered on a long-running gate
 
 Compared with `brain`, the key difference is where extensibility lives. `OpenClaw` leans on registries, config, and in-process plugins. `brain` aims for explicit swappable traits and a smaller orchestration center.
 
+## Server/Client Architecture
+
+### Process Model
+
+OpenClaw uses a **long-lived Gateway daemon** as its central server. All clients (CLI, macOS app, web UI, mobile nodes, channel adapters) connect to the Gateway over WebSocket. This is the only framework in the comparison set that uses a persistent daemon as the default architecture.
+
+| Component | Role | Transport |
+|-----------|------|-----------|
+| `openclaw gateway` | Central daemon | WebSocket + HTTP on configured port (default 18789) |
+| `openclaw` (CLI) | Client | WebSocket to Gateway |
+| macOS app / web UI | Client | WebSocket to Gateway |
+| iOS/Android nodes | Client | WebSocket to Gateway (role: node) |
+| Channel adapters | In-Gateway | WhatsApp (Baileys), Telegram (grammY), Slack (Bolt), Discord, Signal, etc. |
+
+### Gateway
+
+The Gateway is the only process that owns messaging surfaces and agent execution:
+
+- One Gateway per host.
+- Owns all channel connections (WhatsApp session, Telegram bot, etc.).
+- Runs the embedded Pi agent runtime for inference.
+- Binds to `127.0.0.1:18789` by default.
+- Can be installed as a launchd/systemd service via `openclaw onboard --install-daemon`.
+
+### Wire Protocol (WebSocket)
+
+All client/server communication uses JSON over WebSocket:
+
+- First frame must be `connect` (handshake with capabilities, version).
+- **Requests**: `{type:"req", id, method, params}` → `{type:"res", id, ok, payload|error}`.
+- **Events**: `{type:"event", event, payload, seq?, stateVersion?}`.
+- Node connections declare `role: node` with explicit capabilities and commands.
+
+### CLI as Client
+
+The CLI is a thin client. Commands like `openclaw agent` call `callGateway()` / `GatewayClient` which connect over WebSocket to the running Gateway:
+
+```typescript
+// src/gateway/client.ts
+export type GatewayClientOptions = {
+  url?: string; // ws://127.0.0.1:18789
+  connectDelayMs?: number;
+```
+
+### HTTP Surface
+
+Same port serves static content:
+
+- `/__openclaw__/canvas/` -- agent-editable HTML/CSS/JS
+- `/__openclaw__/a2ui/` -- A2UI host
+
+No REST API for agent operations -- everything goes through WebSocket.
+
+### DM Pairing / Node Pairing
+
+- Unknown senders are paired via DM pairing flow.
+- Device nodes (iOS/Android/macOS/headless) pair with explicit capabilities.
+
+### Server Lifecycle
+
+The Gateway is a **persistent daemon**. It survives CLI exits and continues serving channels and nodes. It can be stopped manually or via service management. This is fundamentally different from all other frameworks in this set where the server dies with the CLI.
+
+### Client/Server Boundary
+
+The boundary is the WebSocket JSON-RPC protocol. `GatewayClient` in `src/gateway/client.ts` is the client-side implementation. The Gateway handles requests by dispatching to the embedded Pi agent runtime, channel adapters, and plugin system.
+
 ## Mapping To `brain` Core Traits
 
 - `Provider`: first-class boundary through provider plugins and provider-loading infrastructure.
@@ -115,6 +181,10 @@ Global root: `~/.openclaw/`. Per-agent sessions: `~/.openclaw/agents/<agentId>/s
 
 ## Key Evidence
 
+- `repocache/openclaw/openclaw/docs/concepts/architecture.md`
+- `repocache/openclaw/openclaw/docs/gateway/protocol.md`
+- `repocache/openclaw/openclaw/src/gateway/call.ts`
+- `repocache/openclaw/openclaw/src/gateway/client.ts`
 - `repocache/openclaw/openclaw/README.md`
 - `repocache/openclaw/openclaw/docs/concepts/architecture.md`
 - `repocache/openclaw/openclaw/docs/concepts/agent-loop.md`

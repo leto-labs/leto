@@ -52,6 +52,54 @@ The repo looks mostly Unix-first from the current code and dependencies. The doc
 
 As a result, it is more useful for policy ideas than for package or trait architecture.
 
+## Server/Client Architecture
+
+### Process Model
+
+IronClaw is a **single-process monolith**. Everything runs in one `tokio::main` process. There is no separate server, no daemon, and no client attachment mechanism.
+
+| Command | Server Location | Transport |
+|---------|-----------------|-----------|
+| `ironclaw run` | Same process | stdin/stdout |
+| `ironclaw run --ui` / `ironclaw ui` | Same process | stdin + Web UI (Axum, port 9090) |
+
+### Default Flow
+
+1. `main.rs` → `Commands::Run` → optionally starts `WebUi::new().start()`.
+2. Creates `Engine::new()`.
+3. `engine.run_interactive()` blocks on a stdin loop.
+4. Engine reads from stdin, calls provider, prints to stdout.
+
+### Web UI (Partial)
+
+An Axum-based Web UI server can be started alongside the CLI:
+
+- Routes: `GET /` (HTML), `/ui/static/app.js`, `/ui/static/style.css`, `GET /ui/ws` (WebSocket).
+- Server → client: `broadcast::Sender<UiMessage>` pushes events to WebSocket clients.
+- Client → server: WebSocket JSON messages are re-broadcast as `user_input`, **but the engine does not consume them**. The engine only reads stdin.
+- Result: Web UI and CLI run together, but the engine is driven exclusively by stdin.
+
+### API Gateway (Exists But Not Wired)
+
+A `GatewayServer` module exists with REST + SSE + WebSocket routes:
+
+- `POST /v1/chat`, `GET /v1/chat/stream` (SSE), `GET /v1/chat/ws` (WebSocket)
+- `GET /v1/models`, `/v1/tools`, `/v1/sessions`, `/v1/health`, `/v1/metrics`
+
+However, this gateway is **never started from `main.rs`**. Config exists but there is no CLI path to run it. Handler implementations are placeholders ("Engine integration pending").
+
+### Channel Abstraction (Exists But Not Wired)
+
+A `Channel` trait with 20+ stubs (Slack, Discord, WebUi, RestApi, etc.) and a `ChannelManager` with `mpsc` inbound stream exists. But `take_inbound_rx()` is never called from `main` or the engine, so the channel pipeline is unused.
+
+### Server Lifecycle
+
+Single process; exit terminates everything. No daemon, no PID file, no socket. Only memory DB (`memory.db`) and cost DB (`costs.db`) persist on disk.
+
+### Client/Server Boundary
+
+No realized client/server boundary. The `Engine` is used as an in-process library. The gateway, channel, and Web UI abstractions exist architecturally but are not connected to the engine's execution path.
+
 ## Mapping To `brain` Core Traits
 
 - `Provider`: first-class boundary through an explicit trait and provider factory.
@@ -109,6 +157,10 @@ XDG dirs via `directories` crate. Memory DB at `~/.ironclaw/memory.db`. No proje
 
 ## Key Evidence
 
+- `repocache/JoasASantos/ironclaw/src/ui/mod.rs`
+- `repocache/JoasASantos/ironclaw/src/gateway/mod.rs`
+- `repocache/JoasASantos/ironclaw/src/channels/mod.rs`
+- `repocache/JoasASantos/ironclaw/src/core/engine.rs`
 - `repocache/JoasASantos/ironclaw/README.md`
 - `repocache/JoasASantos/ironclaw/Cargo.toml`
 - `repocache/JoasASantos/ironclaw/src/main.rs`

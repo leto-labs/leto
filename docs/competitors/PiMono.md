@@ -58,6 +58,54 @@ The repo has clear package layering:
 
 This is more composable than the product-heavy monoliths in this comparison set, but still more opinionated than `brain`'s explicit five-trait design. Persistence, compaction, and transport are concrete implementations before they are abstract engine concepts.
 
+## Server/Client Architecture
+
+### Process Model
+
+pi-mono is a **single-process** design with three modes. There is no HTTP server. The only client/server boundary is an RPC mode over stdin/stdout JSONL.
+
+| Command | Server Location | Transport |
+|---------|-----------------|-----------|
+| `pi` (interactive TUI) | Same process | In-process (`AgentSession` direct calls) |
+| `pi --mode print` | Same process | Single-shot, exit |
+| `pi --mode rpc` | Same process | stdin/stdout JSONL |
+
+### Default Flow (Interactive TUI)
+
+1. `main.ts` → `createAgentSession()` → `AgentSession`.
+2. Creates `InteractiveMode(session, ...)` which holds both `AgentSession` and `TUI` (from `@mariozechner/pi-tui`).
+3. TUI subscribes to `session.subscribe()` for events and calls `session.prompt()`, `session.steer()` for actions.
+4. No RPC, HTTP, or WebSocket between TUI and agent -- only direct method calls in the same process.
+
+### RPC Mode (stdin/stdout JSONL)
+
+`pi --mode rpc` starts the agent as an RPC server over stdio:
+
+- **Protocol**: LF-delimited JSONL (`\n` only) over stdin (commands) and stdout (responses + events).
+- **Commands**: JSON objects like `{"type": "prompt", "message": "Hello!"}`.
+- **Responses**: `{"type": "response", "command": "...", "success": true|false, ...}`.
+- **Events**: Agent events streamed on stdout as JSON lines.
+
+`RpcClient` (in `rpc-client.ts`) spawns `pi --mode rpc` as a child process and communicates over piped stdin/stdout:
+
+```
+spawn("node", [cliPath, "--mode", "rpc", ...args], { stdio: ["pipe", "pipe", "pipe"] })
+```
+
+This is used by IDE extensions and external integrations. The agent process exits when stdin closes.
+
+### No HTTP Server
+
+There is no HTTP, WebSocket, or SSE server anywhere in pi-mono. The web UI (`pi-web-ui`) uses the `Agent` from `pi-agent-core` directly in the browser, making API calls to LLM providers from the client side.
+
+### Server Lifecycle
+
+No persistence of the process. Interactive and print modes exit when the user quits. RPC mode exits when stdin closes. Sessions are persisted to disk (`~/.pi/agent/sessions/`) but no process survives.
+
+### Client/Server Boundary
+
+The only boundary is RPC mode's JSONL protocol over stdin/stdout. There is no trait or interface for this boundary -- `runRpcMode` reads commands and dispatches to `AgentSession` methods directly.
+
 ## Mapping To `brain` Core Traits
 
 - `Provider`: first-class boundary through `pi-ai` and the model registry layer.
@@ -119,6 +167,11 @@ Sessions at `~/.pi/agent/sessions/<encoded-cwd>/`. Credentials at `~/.pi/agent/a
 
 ## Key Evidence
 
+- `repocache/badlogic/pi-mono/packages/coding-agent/src/main.ts`
+- `repocache/badlogic/pi-mono/packages/coding-agent/src/modes/interactive/interactive-mode.ts`
+- `repocache/badlogic/pi-mono/packages/coding-agent/src/modes/rpc/rpc-mode.ts`
+- `repocache/badlogic/pi-mono/packages/coding-agent/src/modes/rpc/rpc-client.ts`
+- `repocache/badlogic/pi-mono/packages/coding-agent/docs/rpc.md`
 - `repocache/badlogic/pi-mono/package.json`
 - `repocache/badlogic/pi-mono/packages/ai/README.md`
 - `repocache/badlogic/pi-mono/packages/ai/src/types.ts`

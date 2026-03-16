@@ -93,6 +93,30 @@ Legend:
 | `ZeroClaw` | first-class | first-class | first-class | implicit | first-class via channels | Closest Rust trait-driven comparison |
 | `Codex` | implicit (concrete `ModelClient`, no trait) | first-class (`ToolHandler` trait) | implicit (SQLite + JSONL, no trait) | implicit (embedded in `Codex`/`Session`) | implicit (app-server, TUI, exec modes) | Strong product, but few clean trait seams |
 
+## Server/Client Architecture Matrix
+
+How each framework structures the relationship between the UI (CLI/TUI), the agent runtime, and any server process. This matters for `brain`'s decision on in-process vs. server architecture and how the TUI connects to `BrainApi`.
+
+| Project | Default Mode | Server Process | TUI → Agent Transport | Headless Server | Client Attachment | Server Persists After Exit? |
+| --- | --- | --- | --- | --- | --- | --- |
+| `brain` | CLI + in-process `BrainServer` | In-process (via `server.client()` → `Arc<dyn BrainApi>`) | In-process trait calls | `brain serve` (planned, axum router exists) | Planned (`brain attach`) | No |
+| `OpenCode` | TUI + Worker thread | In-process by default; optional HTTP with `--port` | In-process `fetch` (Worker RPC) or HTTP | `opencode serve` (Bun.serve) | `opencode attach <url>` (HTTP + SSE) | No |
+| `Codex` | TUI + embedded app server | In-process (mpsc channels via `InProcessAppServerClient`) | In-memory JSON-RPC channels | `codex app-server` (stdio or WebSocket) | `codex --remote ws://...` | No |
+| `ZeroClaw` | CLI agent, in-process | No server by default; optional Axum gateway | In-process (`CliChannel` + `mpsc`) | `zeroclaw gateway start` (Axum HTTP/WS/SSE) | Web dashboard + WebSocket `/ws/chat` | Gateway: yes (long-running); CLI: no |
+| `IronClaw` | CLI + optional Web UI | No server by default; Web UI (Axum port 9090) half-wired | In-process (stdin only) | Gateway exists but not wired to CLI | Not supported | No |
+| `pi-mono` | Interactive TUI, in-process | No server | In-process (`AgentSession` direct calls) | `pi --mode rpc` (stdin/stdout JSONL) | RPC client spawns subprocess | No |
+| `OpenClaw` | Gateway daemon + CLI clients | **Persistent daemon** (WebSocket port 18789) | WebSocket JSON-RPC to Gateway | Gateway is always headless-capable | CLI, macOS app, web UI, mobile nodes all attach | **Yes** (daemon) |
+| `Gastown` | CLI-only, no server | No server (tmux + Dolt for coordination) | N/A (agents are external CLIs in tmux) | `gt dashboard` (read-only HTTP) | Not applicable | No (CLI exits); Dolt daemon persists |
+
+### Architecture Takeaways
+
+- **In-process is the default everywhere.** 6 of 8 frameworks (OpenCode, Codex, ZeroClaw, IronClaw, pi-mono, brain) run the agent in-process by default. Only OpenClaw uses a persistent daemon, and Gastown has no server at all.
+- **Server is optional, not required.** Every framework that supports a server (`opencode serve`, `codex app-server`, `zeroclaw gateway`) treats it as an opt-in mode. The TUI works without a running server.
+- **The TUI is always a client.** In every framework with a server/TUI split, the TUI talks through an API boundary (trait, SDK, RPC), never to the agent runtime directly. This validates `brain`'s `BrainApi` trait design.
+- **SSE is the dominant event transport** for HTTP-based architectures (OpenCode, ZeroClaw). Codex uses JSON-RPC over channels/WebSocket. pi-mono uses JSONL over stdin/stdout.
+- **No framework uses lock files or PID detection** for server discovery. If a server is running, the client needs the URL explicitly.
+- **`brain`'s architecture is already correct.** In-process `BrainServer` with `server.client()` returning `Arc<dyn BrainApi>` matches the Codex pattern (in-memory channels) and the OpenCode pattern (in-process fetch). Adding `brain serve` and `brain attach` later is the same progression every competitor made.
+
 ## Tool Implementation Matrix
 
 Legend:

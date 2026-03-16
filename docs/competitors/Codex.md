@@ -78,6 +78,61 @@ The binary is `codex` from `cli/src/main.rs`, with additional binaries for `code
 
 The architecture is more modular than a monolith but less trait-driven than `brain` aims to be. Tools and MCP are pluggable via the `ToolHandler` trait, but provider, loop, and store are concrete implementations embedded in `core`.
 
+## Server/Client Architecture
+
+### Process Model
+
+Codex uses a **hybrid in-process / out-of-process** model. The default `codex` command runs everything in one process, with the TUI talking to an embedded app server via in-memory channels. For IDE integration, a separate `codex app-server` process communicates over stdio or WebSocket.
+
+| Command | Server Location | Transport |
+|---------|-----------------|-----------|
+| `codex` (interactive TUI) | Same process | In-memory channels (no process boundary) |
+| `codex exec` (batch mode) | Same process | In-memory channels |
+| `codex app-server` | Separate process | stdio or WebSocket (`--listen ws://...`) |
+| `codex --remote ws://...` | External | WebSocket to `codex app-server` |
+
+### Default Flow (`codex`)
+
+1. `cli/main.rs` → `run_interactive_tui()` → checks `should_use_app_server_tui()` feature flag.
+2. Creates `InProcessAppServerClient` which runs `MessageProcessor` on Tokio tasks.
+3. stdio transports are replaced by bounded in-memory `mpsc` channels.
+4. TUI connects to app server via these channels using the same JSON-RPC protocol as the out-of-process version.
+5. `App::run(tui, app_server, ...)` starts the terminal UI.
+
+The TUI is **always a client** of the app server -- it never talks to `Codex`/`CodexThread` directly.
+
+### App Server (Out-of-Process)
+
+`codex app-server` runs `MessageProcessor` as a standalone server:
+
+- **stdio mode** (default): JSON-RPC over stdin/stdout, used by VSCode extension.
+- **WebSocket mode** (`--listen ws://IP:PORT`): for remote TUI connections.
+- Hidden helper subcommands: `stdio-to-uds` (Unix domain socket relay), `responses-api-proxy` (HTTP proxy).
+
+### Remote TUI
+
+`codex --remote ws://...` starts a TUI that connects to a running `codex app-server` instance over WebSocket instead of using in-memory channels. Same UI, different transport.
+
+### Server Lifecycle
+
+No persistent daemon for normal CLI use. The process exits when the user quits. The app server only persists while the `codex app-server` process is alive.
+
+### Binary Layout
+
+| Binary | Purpose |
+|--------|---------|
+| `codex` | Main CLI: subcommands, interactive TUI |
+| `codex-exec` | Non-interactive batch mode |
+| `codex-app-server` | Standalone server (stdio/WebSocket) for IDE |
+| `codex-tui` | Standalone TUI binary |
+| `codex-tui-app-server` | TUI that talks to app server |
+| `codex-mcp-server` | MCP server mode |
+| `codex-linux-sandbox` | Linux sandbox binary |
+
+### Client/Server Boundary
+
+The boundary is the app server's JSON-RPC protocol (requests + notifications). `InProcessAppServerClient` implements the same protocol over channels that `RemoteAppServerClient` implements over WebSocket. The TUI code is transport-agnostic -- it works identically with either client type.
+
 ## Mapping To `brain` Core Traits
 
 - `Provider`: no explicit trait; `ModelProviderInfo` + concrete `ModelClient` + HTTP/WebSocket adapters in `codex-api`/`codex-connectors`.
@@ -175,6 +230,10 @@ SQLite (`state_5.sqlite`): tables for threads, logs, thread_dynamic_tools, memor
 
 ## Key Evidence
 
+- `repocache/openai/codex/codex-rs/cli/src/main.rs`
+- `repocache/openai/codex/codex-rs/tui/src/lib.rs`
+- `repocache/openai/codex/codex-rs/tui-app-server/src/lib.rs`
+- `repocache/openai/codex/codex-rs/app-server/src/in_process.rs`
 - `repocache/openai/codex/codex-rs/Cargo.toml`
 - `repocache/openai/codex/codex-rs/cli/src/main.rs`
 - `repocache/openai/codex/codex-rs/core/src/lib.rs`

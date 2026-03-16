@@ -51,6 +51,54 @@ This repo is still more centralized than `brain` should be, but it is far more a
 
 The main takeaway is that `ZeroClaw` validates the direction of a trait-driven Rust agent runtime, while also showing the risks of letting that runtime accumulate too many responsibilities in one place.
 
+## Server/Client Architecture
+
+### Process Model
+
+ZeroClaw is a **single-binary design**: CLI, gateway, and agent all compile into one binary. The interactive CLI runs the agent in-process with no server. The gateway is an optional HTTP/WebSocket layer on top of the same in-process runtime.
+
+| Command | Server Location | Transport |
+|---------|-----------------|-----------|
+| `zeroclaw` (agent CLI) | Same process | In-process (stdin via `CliChannel` + `mpsc`) |
+| `zeroclaw gateway start` | Same process | Axum HTTP/WebSocket/SSE |
+| `zeroclaw daemon` | Same process | Gateway + channels + heartbeat + cron |
+
+### Default Flow (`zeroclaw`)
+
+1. `main.rs` → `Commands::Agent` → `agent::run(config, message, provider, model, ...)`
+2. `CliChannel` reads stdin and sends to `tokio::sync::mpsc::Sender<ChannelMessage>`.
+3. Agent loop (`run_tool_call_loop`) processes messages in the same process.
+4. No IPC, no network, no server -- purely in-process.
+
+### Gateway Mode
+
+`zeroclaw gateway start` starts an Axum HTTP server:
+
+- REST API: status, config, tools, memory, admin
+- WebSocket: `GET /ws/chat` -- each connection creates an in-process `Agent` and calls `agent.turn(&content)` directly
+- SSE: `GET /api/events` via `tokio::sync::broadcast::channel`
+- Health: `GET /health`, `GET /metrics`
+- Admin: `POST /admin/shutdown`
+- Security: refuses public bind without tunnel or explicit `allow_public_bind` config
+
+### Daemon Mode
+
+`zeroclaw daemon` is the gateway plus long-running services (channel adapters, heartbeat, cron tasks). Can be installed as a systemd/launchd service via `zeroclaw service install`.
+
+### Web Dashboard
+
+The gateway serves an embedded web dashboard (via `rust-embed`). Clients connect over the browser to the gateway HTTP port for a web UI.
+
+### Server Lifecycle
+
+- **CLI agent**: Process exits when user quits.
+- **Gateway/Daemon**: Long-running; exits on Ctrl+C or `POST /admin/shutdown`.
+- **Persistence**: SQLite (`brain.db`), config, memory survive process exit. No agent process persistence.
+
+### Client/Server Boundary
+
+No formal client/server trait. The boundary is `AppState` (shared config, provider, memory, tools, event channels) passed to Axum handlers. Each WebSocket connection creates its own in-process `Agent`. The `Channel` trait abstracts messaging platforms (Telegram, Discord, etc.) but is separate from the gateway layer.
+
 ## Mapping To `brain` Core Traits
 
 - `Provider`: first-class boundary with explicit provider capabilities and routing hooks.
@@ -108,6 +156,10 @@ Global config in `~/.zeroclaw/config.toml`. Workspace data in `workspace_dir/` (
 
 ## Key Evidence
 
+- `repocache/zeroclaw-labs/zeroclaw/src/main.rs`
+- `repocache/zeroclaw-labs/zeroclaw/src/gateway/mod.rs`
+- `repocache/zeroclaw-labs/zeroclaw/src/gateway/ws.rs`
+- `repocache/zeroclaw-labs/zeroclaw/src/channels/cli.rs`
 - `repocache/zeroclaw-labs/zeroclaw/README.md`
 - `repocache/zeroclaw-labs/zeroclaw/Cargo.toml`
 - `repocache/zeroclaw-labs/zeroclaw/src/lib.rs`

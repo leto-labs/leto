@@ -53,6 +53,69 @@ The repo is a monorepo, but the important architectural fact is that a large amo
 
 That makes `OpenCode` highly capable and extensible through plugins and config, but less aligned with `brain`'s goal of a cleanly swappable engine core. It is best described as a modular monolith rather than a small composable substrate.
 
+## Server/Client Architecture
+
+### Process Model
+
+OpenCode uses a **Worker thread** model. The default `opencode` command runs both the TUI and the server logic in one process, with the server running on a Worker thread. There is no persistent daemon.
+
+| Command | Server Location | Process Model |
+|---------|-----------------|---------------|
+| `opencode` (default TUI) | Worker thread, same process | In-process by default; Worker starts HTTP with `--port` |
+| `opencode run` | Same process | No HTTP; direct `Server.Default().fetch()` |
+| `opencode serve` | Same process | Starts `Bun.serve()` on configured port and blocks |
+| `opencode attach <url>` | External (connect to running server) | TUI-only client over HTTP |
+| `opencode run --attach <url>` | External (connect to running server) | Headless client over HTTP |
+
+### Default Flow (`opencode`)
+
+1. Main thread spawns a Worker (`worker.ts`).
+2. Worker starts an event stream via `Server.Default().fetch(request)` -- **no HTTP server**, just in-process calls.
+3. TUI connects to Worker via `createWorkerFetch(client)` -- RPC to Worker, which calls `Server.Default().fetch()`.
+4. If `--port` / `--hostname` / `--mdns` flags are set, Worker starts `Bun.serve()` and TUI connects over HTTP instead.
+
+### Headless Server Mode
+
+`opencode serve` starts a standalone HTTP server using `Bun.serve()`:
+
+- Binds to configured port (tries 4096 first, then falls back to 0).
+- Same REST + SSE API as the embedded server.
+- Password protection via `OPENCODE_SERVER_PASSWORD` (HTTP Basic auth, username `opencode`).
+- Optional mDNS advertisement with `--mdns`.
+
+### Client Attachment
+
+`opencode attach <url>` connects a TUI to a running server:
+
+- Client creates `OpencodeClient` via `createOpencodeClient({ baseUrl, headers })`.
+- SDK is generated from an OpenAPI 3.1 spec (`@opencode-ai/sdk/v2`).
+- Events are received via **SSE** (`GET /event`) with 10-second heartbeat.
+- REST calls for actions (`POST /session`, `POST /session/:id/message`, etc.).
+- Authentication is HTTP Basic from `--password` or `$OPENCODE_SERVER_PASSWORD`.
+- URL is always provided manually; no auto-discovery despite optional mDNS publish.
+
+`opencode run --attach <url>` is the same but with stdout output instead of TUI rendering.
+
+### Server Lifecycle
+
+The server does **not** persist after the CLI exits. Worker shutdown calls `Instance.disposeAll()` and `server.stop()`. No lock files, no PID detection, no socket-based reconnection.
+
+### API Surface
+
+The server exposes a Hono-based HTTP API:
+
+- `GET /event` -- SSE event stream (all bus events)
+- `POST /session` -- create session
+- `POST /session/:id/message` -- send message
+- `GET /session` -- list sessions
+- `GET /config`, `PATCH /config` -- config management
+- `GET /provider` -- list providers
+- Plus: MCP, permissions, file, and TUI endpoints
+
+### Client/Server Boundary
+
+The boundary is the HTTP API (REST + SSE), exposed as a typed SDK generated from OpenAPI. In-process mode bypasses HTTP entirely via `Server.Default().fetch()`. The TUI never talks to the agent runtime directly -- always through the server API, whether in-process or remote.
+
 ## Mapping To `brain` Core Traits
 
 - `Provider`: first-class boundary via dedicated provider modules and runtime model resolution.
@@ -110,6 +173,15 @@ Global data in `~/.local/share/opencode/` (XDG data dir), config in `~/.config/o
 
 ## Key Evidence
 
+- `repocache/anomalyco/opencode/packages/opencode/src/cli/cmd/tui/thread.ts`
+- `repocache/anomalyco/opencode/packages/opencode/src/cli/cmd/tui/worker.ts`
+- `repocache/anomalyco/opencode/packages/opencode/src/cli/cmd/tui/attach.ts`
+- `repocache/anomalyco/opencode/packages/opencode/src/cli/cmd/tui/app.tsx`
+- `repocache/anomalyco/opencode/packages/opencode/src/cli/cmd/tui/context/sdk.tsx`
+- `repocache/anomalyco/opencode/packages/opencode/src/cli/cmd/serve.ts`
+- `repocache/anomalyco/opencode/packages/opencode/src/cli/cmd/run.ts`
+- `repocache/anomalyco/opencode/packages/opencode/src/server/server.ts`
+- `repocache/anomalyco/opencode/packages/sdk/js/src/v2/client.ts`
 - `repocache/anomalyco/opencode/README.md`
 - `repocache/anomalyco/opencode/packages/web/src/content/docs/agents.mdx`
 - `repocache/anomalyco/opencode/packages/web/src/content/docs/permissions.mdx`
