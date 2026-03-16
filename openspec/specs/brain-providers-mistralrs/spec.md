@@ -1,0 +1,67 @@
+# brain-providers-mistralrs Specification
+
+## Purpose
+In-process LLM inference via mistral.rs. Provides `MistralRsProvider` (implementing the `Provider` trait) for running GGUF models locally without an external server, with automatic HuggingFace model downloading and preset configurations for common small models.
+## Requirements
+### Requirement: MistralRsConfig
+The system SHALL define a `MistralRsConfig` struct with `model_id` (HuggingFace repo ID or local directory path), `gguf_files` (list of GGUF filenames), and `device` (DevicePreference enum: Auto or Cpu). This configures which model to load and how.
+
+#### Scenario: Config from preset
+- **WHEN** `MistralRsModelPreset::QWEN3_0_6B.into_config()` is called
+- **THEN** the resulting `MistralRsConfig` SHALL have `model_id` pointing to the Qwen 3 0.6B GGUF repo and `device` set to `Auto`
+
+#### Scenario: Custom model path
+- **WHEN** `MistralRsConfig` is constructed with a local directory path
+- **THEN** the provider SHALL load GGUF files from that directory without downloading
+
+### Requirement: MistralRsProvider
+The system SHALL implement the `Provider` trait for `MistralRsProvider` in the `brain-providers` crate. It SHALL use mistral.rs `GgufModelBuilder` to load GGUF models and `stream_chat_request` to stream inference results. Construction via `new()` accepts multiple named model configs and a default model name. All models are lazy-loaded on first use. A `preload()` method allows callers to eagerly load specific models before the first `chat()` call.
+
+#### Scenario: Text response
+- **WHEN** `chat()` is called with user messages
+- **THEN** the provider SHALL yield `ChatChunk::Delta` for each text fragment and `ChatChunk::Done` with usage at the end
+
+#### Scenario: Model auto-download
+- **WHEN** a HuggingFace repo ID is provided and the model is not cached
+- **THEN** the provider SHALL download the GGUF files on first use and cache them locally
+
+#### Scenario: Cached model
+- **WHEN** a model has been previously downloaded
+- **THEN** the provider SHALL load from the local cache without network access
+
+#### Scenario: Lazy multi-model construction
+- **WHEN** `MistralRsProvider::new(configs, default)` is called with multiple `(name, MistralRsConfig)` pairs
+- **THEN** no models SHALL be loaded at construction time
+- **AND** the first `chat()` call for a given model name SHALL trigger loading (download + GPU/CPU init) for that model only
+- **AND** subsequent calls for the same model SHALL reuse the cached instance
+
+#### Scenario: Explicit preload
+- **WHEN** `provider.preload("model-name")` is called for a registered model
+- **THEN** that model SHALL be loaded immediately (download + GPU/CPU init) and cached
+- **AND** subsequent `chat()` calls for that model SHALL reuse the cached instance without loading delay
+
+#### Scenario: Model selection via InferenceConfig
+- **WHEN** `chat()` is called with `InferenceConfig.model` set to a registered model name
+- **THEN** that specific model SHALL be resolved and used
+- **WHEN** `InferenceConfig.model` is `None`
+- **THEN** the default model SHALL be used
+
+### Requirement: MistralRsModelPreset
+The system SHALL define a `MistralRsModelPreset` struct with `name`, `model_id`, and `gguf_files` fields. It SHALL provide const presets for at least Qwen 3 0.6B, 1.7B, and 4B GGUF models. An `ALL` slice and `by_name()` lookup SHALL be provided.
+
+#### Scenario: Preset lookup
+- **WHEN** `MistralRsModelPreset::by_name("qwen3-0.6b")` is called
+- **THEN** it SHALL return the Qwen 3 0.6B preset
+
+#### Scenario: ALL contains presets
+- **WHEN** `MistralRsModelPreset::ALL` is accessed
+- **THEN** it SHALL contain at least 3 entries
+
+### Requirement: Feature Gate
+The `MistralRsProvider` SHALL be gated behind the `mistralrs` feature flag (off by default). Building without the `mistralrs` feature SHALL not compile mistral.rs or any of its dependencies.
+
+#### Scenario: Feature disabled
+- **WHEN** `brain-providers` is compiled without the `mistralrs` feature
+- **THEN** `MistralRsProvider`, `MistralRsConfig`, and `MistralRsModelPreset` SHALL not be available
+
+
