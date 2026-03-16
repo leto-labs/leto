@@ -1,0 +1,6 @@
+- [x] Rename `local/` → `mistralrs/` in brain-providers
+- [x] Rename types: LocalConfig → MistralRsConfig, LocalProvider → MistralRsProvider, LocalModelPreset → MistralRsModelPreset
+- [x] Rename feature flag: `local` → `mistralrs` in brain-providers and brain-core
+- [x] Refactor flat `openai.rs`/`openai_types.rs`/`presets.rs` into `openai/` folder
+- [x] Update cli-local and smoke tests
+- [x] Update openspec spec to reflect new names

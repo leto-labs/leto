@@ -1,0 +1,4 @@
+- [x] 1. Create `crates/brain-core/src/router.rs` with `ProviderRouter` implementing `Provider`
+- [x] 2. Re-export `ProviderRouter` from `brain-core/src/lib.rs`
+- [x] 3. Update `examples/cli-echo/src/main.rs` to demo multi-provider routing
+- [x] 4. Verify `cargo check --workspace` and `cargo test --workspace`
