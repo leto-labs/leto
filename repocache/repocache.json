@@ -1,0 +1,144 @@
+[
+  {
+    "name": "opencode",
+    "url": "https://github.com/anomalyco/opencode",
+    "tag": "main",
+    "searchPath": "packages/opencode/src",
+    "notes": "TypeScript/Bun AI coding agent monorepo. Core runtime lives in packages/opencode/src with client/server architecture, OpenAPI 3.1, SSE, agent profiles (build/plan/general/explore), session compaction, plugin and MCP tool dispatch, and SQLite-backed persistence. Study packages/opencode/src for provider wiring, session loop, permissions, and built-in tools.",
+    "enabled": true
+  },
+  {
+    "name": "openclaw",
+    "url": "https://github.com/openclaw/openclaw",
+    "tag": "main",
+    "notes": "TypeScript personal AI assistant (312K+ stars). Multi-platform channels (WhatsApp, Telegram, Slack, Discord, Matrix, etc.). Voice/audio support. Study for channel abstraction, plugin/tool system, session architecture, multi-platform patterns.",
+    "enabled": true
+  },
+  {
+    "name": "zeroclaw",
+    "url": "https://github.com/zeroclaw-labs/zeroclaw",
+    "tag": "v0.2.0",
+    "searchPath": "src",
+    "notes": "PRIMARY REFERENCE. Rust AI agent (26K+ stars). Trait-driven architecture, 3.4MB binary, <5MB RAM. Swappable providers/channels/tools via traits (not plugins). SQLite + hybrid keyword/vector memory. 22+ model providers. Security: gateway pairing, sandboxing, fs scoping. Study for trait design, provider abstraction, tool system, memory architecture.",
+    "enabled": true
+  },
+  {
+    "name": "ironclaw",
+    "url": "https://github.com/JoasASantos/ironclaw",
+    "tag": "main",
+    "searchPath": "src",
+    "notes": "Rust AI agent framework (~25K lines, 432+ tests). Security-first: 13-step security pipeline, zero-trust, WASM sandboxing, encrypted vault for API keys. 25+ LLM providers, 20+ channels. Study for security patterns, WASM sandboxing, permission validation, provider presets.",
+    "enabled": true
+  },
+  {
+    "name": "oh-my-pi",
+    "url": "https://github.com/can1357/oh-my-pi",
+    "tag": "main",
+    "searchPath": "packages",
+    "notes": "TypeScript/Rust monorepo AI coding agent (1.9K stars). Layered packages: pi-ai (LLM comms), pi-agent-core (agent loop), pi-coding-agent (full runtime + sessions), pi-tui (terminal UI). Study for agent loop layering, RPC protocol (packages/coding-agent/docs/rpc.md), session compaction, tool system, conventional commit generation.",
+    "enabled": true
+  },
+  {
+    "name": "pi-mono",
+    "url": "https://github.com/badlogic/pi-mono",
+    "tag": "v0.58.1",
+    "searchPath": "packages",
+    "notes": "TypeScript monorepo AI agent toolkit. Includes pi-ai (provider abstraction), pi-agent-core (runtime), pi-coding-agent (coding agent CLI), pi-tui, pi-web-ui, pi-pods, and Slack bot tooling. Study for package layering, unified provider API, agent runtime boundaries, coding-agent tool execution, and terminal/web UI integration.",
+    "enabled": true
+  },
+  {
+    "name": "vercel-ai",
+    "url": "https://github.com/vercel/ai",
+    "tag": "main",
+    "searchPath": "packages",
+    "notes": "Vercel AI SDK (22K+ stars). TypeScript toolkit for AI apps. Study for unified provider abstraction (switch providers by changing one line), streaming protocol, tool calling interface, structured output with type-safe schemas. Multi-framework (Next.js, React, Vue, Svelte, Node). packages/ai-sdk-core is the key package.",
+    "enabled": true
+  },
+  {
+    "name": "rig",
+    "url": "https://github.com/0xPlaygrounds/rig",
+    "tag": "main",
+    "searchPath": "rig/rig-core/src",
+    "notes": "Rust LLM and agent SDK workspace. Core library lives in rig/rig-core/src with first-class provider abstractions, tool traits, agent loops, vector-store integrations, and app-focused building blocks. Study for provider/tool/RAG composition rather than a full coding-agent runtime.",
+    "enabled": true
+  },
+  {
+    "name": "async-openai",
+    "url": "https://github.com/64bit/async-openai",
+    "tag": "main",
+    "searchPath": "async-openai/src",
+    "notes": "Rust OpenAI client (688K downloads/month). Study for SSE streaming implementation, tool calling wire format, chat completion types, reqwest usage patterns. Will be used directly or as reference for brain-providers OpenAI implementation.",
+    "enabled": true
+  },
+  {
+    "name": "gastown",
+    "url": "https://github.com/steveyegge/gastown",
+    "tag": "v0.12.0",
+    "notes": "Advanced Go-based multi-agent orchestration layer for Claude Code and compatible runtimes. Focus on persistent work tracking via git worktrees/hooks, mayor-style coordination, convoy workflow, agent identities, runtime abstraction for Claude/Codex/Cursor/OpenCode/pi, dashboard/TUI surfaces, and orchestration concerns above a core engine.",
+    "enabled": true
+  },
+  {
+    "name": "llama_cpp-rs",
+    "url": "https://github.com/edgenai/llama_cpp-rs",
+    "tag": "main",
+    "searchPath": "llama_cpp",
+    "notes": "DEPRECATED for our use. High-level async Rust bindings to llama.cpp but stuck at v0.3.2 (April 2024). Does NOT support Qwen3.5 GATED_DELTA_NET. Kept for reference only.",
+    "enabled": false
+  },
+  {
+    "name": "llama-cpp-2",
+    "url": "https://github.com/utilityai/llama-cpp-rs",
+    "tag": "main",
+    "searchPath": "llama-cpp-2/src",
+    "notes": "ACTIVELY MAINTAINED Rust bindings to llama.cpp (v0.1.138, March 2026). 309K downloads. Lower-level than edgenai but much more current. Wraps llama.cpp with GATED_DELTA_NET support for Qwen3.5. Key types: LlamaModel, LlamaContext (session). Features: CUDA, Metal, Vulkan. Used as the basis for LlamaCppProvider.",
+    "enabled": true
+  },
+  {
+    "name": "mistral.rs",
+    "url": "https://github.com/EricLBuehler/mistral.rs",
+    "tag": "v0.7.0",
+    "searchPath": "mistralrs/src",
+    "notes": "Rust inference engine for LLMs. Supports GGUF, ISQ, and multiple architectures. Used by brain-providers MistralRsProvider. Study for GgufModelBuilder API, stream_chat_request, Model type, TextMessages. Does NOT support Qwen3.5 Gated DeltaNet architecture as of v0.7.",
+    "enabled": true
+  },
+  {
+    "name": "axum",
+    "url": "https://github.com/tokio-rs/axum",
+    "tag": "main",
+    "searchPath": "axum/src",
+    "notes": "Tokio-native HTTP framework (20K+ stars). Built on Tower/hyper. Built-in SSE support via axum::response::sse. Used for brain-server network mode (REST + SSE). Key modules: routing, extract, response (including sse), middleware.",
+    "enabled": true
+  },
+  {
+    "name": "agent-client-protocol",
+    "url": "https://github.com/agentclientprotocol/rust-sdk",
+    "tag": "main",
+    "searchPath": "src",
+    "notes": "Official Rust SDK for Agent Client Protocol (ACP). JSON-RPC 2.0 over stdio. Provides Agent and Client traits. Used by Zed editor. v0.10.2 (March 2026). brain implements the Agent trait to be accessible from any ACP-compatible editor. Key: examples/agent.rs for reference implementation.",
+    "enabled": true
+  },
+  {
+    "name": "ratatui",
+    "url": "https://github.com/ratatui/ratatui",
+    "tag": "main",
+    "searchPath": "ratatui/src",
+    "notes": "Leading Rust TUI library (19K+ stars). Immediate-mode rendering with crossterm/termion/termwiz backends. Built-in widgets: Paragraph, List, Table, Block, Scrollbar, Gauge, Tabs. Study for layout system (Constraint, Layout, Rect), widget trait, Frame/Buffer rendering, styling, and the app loop pattern. Key dependency for brain-cli TUI.",
+    "enabled": true
+  },
+  {
+    "name": "tui-textarea",
+    "url": "https://github.com/rhysd/tui-textarea",
+    "tag": "main",
+    "searchPath": "src",
+    "notes": "Multiline text editor widget for ratatui (489 stars). Emacs keybindings, undo/redo, search, selection, line numbers, yank, mouse scroll. Used as input widget for brain-cli TUI prompt. Also see ratatui-textarea (community fork, v0.8.0).",
+    "enabled": true
+  },
+  {
+    "name": "models.dev",
+    "url": "https://github.com/anomalyco/models.dev",
+    "tag": "dev",
+    "searchPath": "providers",
+    "notes": "Open-source AI model database (3K+ stars). TOML-based model specs organized by provider in providers/<name>/models/<id>.toml. Schema: name, family, reasoning (bool), tool_call, attachment, structured_output, temperature, knowledge, release_date, cost (input/output/reasoning/cache_read/cache_write), limit (context/input/output), modalities, status. Used as canonical data source for brain ModelInfo presets.",
+    "enabled": true
+  }
+]
