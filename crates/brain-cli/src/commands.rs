@@ -44,6 +44,14 @@ pub enum CredentialsAction {
         #[arg(long, default_value = "default")]
         id: String,
     },
+    /// Log in to a provider via OAuth (browser or device code flow)
+    Login {
+        /// Provider name (currently: openai-oauth)
+        provider: String,
+        /// Use device code flow instead of browser
+        #[arg(long)]
+        device: bool,
+    },
     /// List all stored credentials
     List,
     /// Remove a credential

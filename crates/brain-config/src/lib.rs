@@ -105,11 +105,28 @@ pub enum ConfigError {
 
 pub type Result<T> = std::result::Result<T, ConfigError>;
 
-/// Resolve a project configuration from `.agents/config.toml` on the filesystem.
+/// Resolve a project configuration by layering global and project-local configs.
 ///
-/// Discovery walks `root` upward and stops at the first file match, at `.git`, or at FS root.
+/// Precedence (lowest to highest):
+/// 1. Defaults
+/// 2. `~/.brain/config.toml` (global user preferences)
+/// 3. `.agents/config.toml` (project-local, discovered by walking up from `root`)
 pub fn resolve_fs_config(root: &Path) -> Result<ProjectConfig> {
+    let global_config = brain_stores::brain_home().join("config.toml");
+    resolve_fs_config_with_global(root, Some(&global_config))
+}
+
+/// Like [`resolve_fs_config`] but with an explicit global config path.
+pub fn resolve_fs_config_with_global(root: &Path, global_config: Option<&Path>) -> Result<ProjectConfig> {
     let mut config = ProjectConfig::default();
+
+    if let Some(global) = global_config {
+        if global.exists() {
+            if let Some(agent_config) = load_project_config(global)? {
+                merge_agent(&mut config, &agent_config);
+            }
+        }
+    }
 
     if let Some(config_path) = find_config_path(root)? {
         if let Some(agent_config) = load_project_config(&config_path)? {
@@ -327,7 +344,7 @@ mod tests {
     #[test]
     fn resolve_missing_config_returns_default() {
         let dir = tempdir().unwrap();
-        let cfg = resolve_fs_config(dir.path()).unwrap();
+        let cfg = resolve_fs_config_with_global(dir.path(), None).unwrap();
         assert_eq!(cfg.agent.max_iterations, 20);
         assert!(cfg.agent.system_prompt.is_none());
         assert!(cfg.agent.inference.model.is_none());
@@ -345,7 +362,7 @@ mod tests {
         )
         .unwrap();
 
-        let cfg = resolve_fs_config(dir.path()).unwrap();
+        let cfg = resolve_fs_config_with_global(dir.path(), None).unwrap();
         assert_eq!(cfg.agent.system_prompt.as_deref(), Some("hello"));
         unsafe { env::remove_var("BRAIN_CONFIG_TEST_SYSTEM_PROMPT") };
     }
@@ -358,7 +375,7 @@ mod tests {
         fs::write(agents_dir.join("config.toml"), "[agent]\nsystem_prompt = \"$DOES_NOT_EXIST_VAR\"\n")
             .unwrap();
 
-        let err = resolve_fs_config(dir.path()).unwrap_err();
+        let err = resolve_fs_config_with_global(dir.path(), None).unwrap_err();
         match err {
             ConfigError::MissingEnvVar { name } => assert_eq!(name, "DOES_NOT_EXIST_VAR"),
             _ => panic!("unexpected error: {err:?}"),
@@ -379,7 +396,7 @@ mod tests {
         )
         .unwrap();
 
-        let cfg = resolve_fs_config(&nested).unwrap();
+        let cfg = resolve_fs_config_with_global(&nested, None).unwrap();
         assert_eq!(cfg.agent.max_iterations, 20);
     }
 
@@ -392,6 +409,54 @@ mod tests {
 
         let got = load_root_agents_md(dir.path()).unwrap().unwrap();
         assert!(got.contains("root instructions"));
+    }
+
+    #[test]
+    fn resolve_merges_global_and_project_config() {
+        let global_home = tempdir().unwrap();
+        let global_config = global_home.path().join("config.toml");
+        fs::write(
+            &global_config,
+            "[agent]\nmax_iterations = 50\n",
+        )
+        .unwrap();
+
+        let project = tempdir().unwrap();
+        let agents_dir = project.path().join(".agents");
+        fs::create_dir_all(&agents_dir).unwrap();
+        fs::write(
+            agents_dir.join("config.toml"),
+            "[agent]\nsystem_prompt = \"project prompt\"\n",
+        )
+        .unwrap();
+
+        let cfg = resolve_fs_config_with_global(project.path(), Some(&global_config)).unwrap();
+        assert_eq!(cfg.agent.max_iterations, 50);
+        assert_eq!(cfg.agent.system_prompt.as_deref(), Some("project prompt"));
+    }
+
+    #[test]
+    fn resolve_project_overrides_global() {
+        let global_home = tempdir().unwrap();
+        let global_config = global_home.path().join("config.toml");
+        fs::write(
+            &global_config,
+            "[agent]\nmax_iterations = 50\nsystem_prompt = \"global\"\n",
+        )
+        .unwrap();
+
+        let project = tempdir().unwrap();
+        let agents_dir = project.path().join(".agents");
+        fs::create_dir_all(&agents_dir).unwrap();
+        fs::write(
+            agents_dir.join("config.toml"),
+            "[agent]\nmax_iterations = 10\n",
+        )
+        .unwrap();
+
+        let cfg = resolve_fs_config_with_global(project.path(), Some(&global_config)).unwrap();
+        assert_eq!(cfg.agent.max_iterations, 10);
+        assert_eq!(cfg.agent.system_prompt.as_deref(), Some("global"));
     }
 
     #[test]

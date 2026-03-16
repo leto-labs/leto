@@ -488,8 +488,11 @@ dependencies = [
  "brain-config",
  "brain-core",
  "brain-server",
+ "brain-stores",
  "chrono",
  "clap",
+ "futures",
+ "reqwest 0.12.28",
  "tempfile",
  "tokio",
  "tracing",
@@ -501,7 +504,9 @@ dependencies = [
 name = "brain-config"
 version = "0.1.0"
 dependencies = [
+ "brain-stores",
  "brain-types",
+ "dirs",
  "serde",
  "tempfile",
  "thiserror 2.0.18",
@@ -597,6 +602,7 @@ version = "0.1.0"
 dependencies = [
  "brain-types",
  "chrono",
+ "dirs",
  "futures",
  "serde",
  "serde_json",
@@ -3407,18 +3413,6 @@ name = "number_prefix"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "830b246a0e5f20af87141b25c173cd1b609bd7779a4617d6ec582abaf90870f3"
-
-[[package]]
-name = "oauth-login"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "brain-providers",
- "brain-stores",
- "brain-types",
- "futures",
- "tokio",
-]
 
 [[package]]
 name = "objc2-core-foundation"

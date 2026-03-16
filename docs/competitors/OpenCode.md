@@ -86,6 +86,28 @@ This makes `OpenCode` a good example of a product that keeps file mutation local
 - Prefer a harder execution boundary than approval rules alone.
 - Avoid coupling the engine core to desktop, TUI, SDK, and server concerns.
 
+## Data Model
+
+### Project
+
+`ProjectTable` (Drizzle SQLite): id, worktree, vcs, name, icon_url, icon_color, sandboxes (JSON array), commands (JSON), timestamps. `worktree` is the git worktree root. A separate `WorkspaceTable` links workspaces (branches) to projects.
+
+### Session
+
+`SessionTable` (SQLite): id, project_id, workspace_id, parent_id, slug, directory, title, version, share_url, summary_additions, summary_deletions, summary_files, summary_diffs (JSON), revert (JSON), permission (JSON ruleset), timestamps, time_compacting, time_archived. Supports fork (via parent_id), compaction, and archiving.
+
+### Message + Part
+
+Two-table design. `MessageTable`: id, session_id, timestamps, data (JSON blob). `PartTable`: id, message_id, session_id, timestamps, data (JSON blob). Part types include: text, reasoning, file, tool, snapshot, patch, agent, compaction, subtask, retry, step-start, step-finish. Tool calls are `ToolPart` with callID, tool name, and state (pending/running/completed/error).
+
+### Credentials
+
+`AccountTable` (SQLite): id, email, url, access_token, refresh_token, token_expiry, timestamps. `AccountStateTable` tracks the active account. Single active account model, not multi-credential-per-provider.
+
+### Storage
+
+Global data in `~/.local/share/opencode/` (XDG data dir), config in `~/.config/opencode/`. All persistence is SQLite (`opencode.db`). Project-local: `.opencode/` directory and `opencode.json`.
+
 ## Key Evidence
 
 - `repocache/anomalyco/opencode/README.md`

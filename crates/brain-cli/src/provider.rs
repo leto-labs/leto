@@ -25,6 +25,7 @@ pub async fn build_provider(
     let mut providers: Vec<(String, Arc<dyn Provider>, bool)> = Vec::new();
 
     discover_api_providers(default_name, model_override, &pool, &mut providers).await;
+    discover_oauth_providers(default_name, model_override, &pool, &mut providers).await;
     discover_local_providers(default_name, model_override, config, &mut providers).await;
 
     if providers.is_empty() {
@@ -76,6 +77,41 @@ async fn discover_api_providers(
         let provider: Arc<dyn Provider> = Arc::new(OpenAiProvider::with_pool(config, pool.clone()));
         providers.push((model_name, provider, is_default));
     }
+}
+
+#[cfg(feature = "openai-oauth")]
+async fn discover_oauth_providers(
+    default_name: &str,
+    model_override: Option<&str>,
+    pool: &Arc<CredentialPool>,
+    providers: &mut Vec<(String, Arc<dyn Provider>, bool)>,
+) {
+    let preset = &OpenAiOAuthPreset::OPENAI;
+
+    let has_credentials = pool.resolve(preset.name, None).await.is_ok();
+    if !has_credentials {
+        return;
+    }
+
+    let is_default = preset.name == default_name;
+    let model = if is_default {
+        model_override.unwrap_or(preset.default_model)
+    } else {
+        preset.default_model
+    };
+
+    let provider: Arc<dyn Provider> = Arc::new(OpenAiOAuthProvider::with_pool(pool.clone(), preset));
+    tracing::info!("provider: {} (OAuth) | model: {model}", preset.name);
+    providers.push((model.to_owned(), provider, is_default));
+}
+
+#[cfg(not(feature = "openai-oauth"))]
+async fn discover_oauth_providers(
+    _default_name: &str,
+    _model_override: Option<&str>,
+    _pool: &Arc<CredentialPool>,
+    _providers: &mut Vec<(String, Arc<dyn Provider>, bool)>,
+) {
 }
 
 #[cfg(all(feature = "llamacpp", not(feature = "mistralrs")))]

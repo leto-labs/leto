@@ -91,6 +91,32 @@ This is the cleanest TypeScript comparison for `brain` because all five concerns
 - Make permission and sandbox behavior more consistent across surfaces.
 - Avoid letting coding-agent assumptions become the default engine shape.
 
+## Data Model
+
+### Sessions
+
+`SessionHeader { type: "session", version, id, timestamp, cwd, parentSession }`. Sessions stored as JSONL files at `~/.pi/agent/sessions/<encoded-cwd>/<timestamp>_<uuid>.jsonl`. First line is header; rest are `SessionEntry` records. `SessionInfo` (for listing): path, id, cwd, name, parentSessionPath, created, modified, messageCount, firstMessage.
+
+### Messages
+
+Union type: `UserMessage { role: "user", content, timestamp }`, `AssistantMessage { role: "assistant", content: (TextContent | ThinkingContent | ToolCall)[], api, provider, model, usage, stopReason, timestamp }`, `ToolResultMessage { role: "toolResult", toolCallId, toolName, content, details, isError, timestamp }`. Tool calls are content blocks inside AssistantMessage, not separate messages. Coding-agent adds custom roles: `BashExecutionMessage`, `CompactionSummaryMessage`, `BranchSummaryMessage`, `CustomMessage`.
+
+### Session Entries
+
+JSONL entries are a tree structure via parentId: `SessionMessageEntry`, `ThinkingLevelChangeEntry`, `ModelChangeEntry`, `CompactionEntry` (summary, firstKeptEntryId, tokensBefore), `BranchSummaryEntry`, `LabelEntry`, `SessionInfoEntry`, `CustomEntry`, `CustomMessageEntry`.
+
+### Credentials
+
+`AuthCredential = ApiKeyCredential { type: "api_key", key } | OAuthCredential { type: "oauth", ...OAuthCredentials }`. Stored in `~/.pi/agent/auth.json` (chmod 0600) as flat dict keyed by provider. Resolution: runtime override -> auth.json -> env vars -> fallback resolver.
+
+### Compaction
+
+`CompactionSettings { enabled, reserveTokens: 16384, keepRecentTokens: 20000 }`. Flow: `prepareCompaction()` -> `findCutPoint()` -> `generateSummary()` -> `compact()` -> append `CompactionEntry` to JSONL.
+
+### Storage
+
+Sessions at `~/.pi/agent/sessions/<encoded-cwd>/`. Credentials at `~/.pi/agent/auth.json`. Config in `.pi/` project-local. No dedicated project entity; sessions keyed by encoded cwd.
+
 ## Key Evidence
 
 - `repocache/badlogic/pi-mono/package.json`

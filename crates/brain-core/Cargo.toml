@@ -5,6 +5,7 @@ version.workspace = true
 
 [features]
 default = []
+openai-oauth = ["brain-providers/openai-oauth"]
 mistralrs = ["brain-providers/mistralrs"]
 llamacpp = ["brain-providers/llamacpp"]
 

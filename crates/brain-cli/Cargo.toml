@@ -8,7 +8,8 @@ name = "brain"
 path = "src/main.rs"
 
 [features]
-default = []
+default = ["openai-oauth"]
+openai-oauth = ["brain-core/openai-oauth"]
 mistralrs = ["brain-core/mistralrs"]
 llamacpp = ["brain-core/llamacpp"]
 
@@ -16,9 +17,12 @@ llamacpp = ["brain-core/llamacpp"]
 brain-core = { workspace = true }
 brain-config = { workspace = true }
 brain-server = { workspace = true }
+brain-stores = { workspace = true }
 anyhow = { workspace = true }
 clap = { workspace = true }
-tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+futures = { workspace = true }
+reqwest = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "io-util"] }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 ulid = { workspace = true }

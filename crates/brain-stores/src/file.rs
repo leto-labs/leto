@@ -16,31 +16,29 @@ impl FileStore {
         tokio::fs::create_dir_all(root.join("projects"))
             .await
             .map_err(|e| BrainError::Storage(format!("failed to create projects dir: {e}")))?;
+        tokio::fs::create_dir_all(root.join("sessions"))
+            .await
+            .map_err(|e| BrainError::Storage(format!("failed to create sessions dir: {e}")))?;
+        tokio::fs::create_dir_all(root.join("credentials"))
+            .await
+            .map_err(|e| BrainError::Storage(format!("failed to create credentials dir: {e}")))?;
         Ok(Self { root })
     }
 
-    fn project_dir(&self, id: ProjectId) -> PathBuf {
-        self.root.join("projects").join(id.to_string())
-    }
-
     fn project_file(&self, id: ProjectId) -> PathBuf {
-        self.project_dir(id).join("project.json")
+        self.root.join("projects").join(format!("{id}.json"))
     }
 
-    fn sessions_dir(&self, project_id: ProjectId) -> PathBuf {
-        self.project_dir(project_id).join("sessions")
+    fn session_dir(&self, session_id: Ulid) -> PathBuf {
+        self.root.join("sessions").join(session_id.to_string())
     }
 
-    fn session_dir(&self, project_id: ProjectId, session_id: Ulid) -> PathBuf {
-        self.sessions_dir(project_id).join(session_id.to_string())
+    fn session_file(&self, session_id: Ulid) -> PathBuf {
+        self.session_dir(session_id).join("session.json")
     }
 
-    fn session_file(&self, project_id: ProjectId, session_id: Ulid) -> PathBuf {
-        self.session_dir(project_id, session_id).join("session.json")
-    }
-
-    fn messages_file(&self, project_id: ProjectId, session_id: Ulid) -> PathBuf {
-        self.session_dir(project_id, session_id).join("messages.jsonl")
+    fn messages_file(&self, session_id: Ulid) -> PathBuf {
+        self.session_dir(session_id).join("messages.jsonl")
     }
 
     fn credentials_dir(&self) -> PathBuf {
@@ -76,13 +74,6 @@ async fn write_json<T: serde::Serialize>(path: &Path, value: &T) -> Result<(), B
 impl ProjectStore for FileStore {
     fn project_create(&self, project: Project) -> BoxFuture<'_, Result<Project, BrainError>> {
         Box::pin(async move {
-            let dir = self.project_dir(project.id);
-            tokio::fs::create_dir_all(&dir)
-                .await
-                .map_err(|e| BrainError::Storage(format!("create project dir: {e}")))?;
-            tokio::fs::create_dir_all(self.sessions_dir(project.id))
-                .await
-                .map_err(|e| BrainError::Storage(format!("create sessions dir: {e}")))?;
             write_json(&self.project_file(project.id), &project).await?;
             Ok(project)
         })
@@ -111,12 +102,13 @@ impl ProjectStore for FileStore {
                 .await
                 .map_err(|e| BrainError::Storage(format!("read dir entry: {e}")))?
             {
-                let project_file = entry.path().join("project.json");
-                if project_file.exists() {
-                    match read_json::<Project>(&project_file).await {
-                        Ok(p) => projects.push(p),
-                        Err(_) => continue,
-                    }
+                let path = entry.path();
+                if path.extension().and_then(|e| e.to_str()) != Some("json") {
+                    continue;
+                }
+                match read_json::<Project>(&path).await {
+                    Ok(p) => projects.push(p),
+                    Err(_) => continue,
                 }
             }
             projects.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
@@ -141,13 +133,12 @@ impl ProjectStore for FileStore {
 
     fn project_delete(&self, id: ProjectId) -> BoxFuture<'_, Result<(), BrainError>> {
         Box::pin(async move {
-            let dir = self.project_dir(id);
-            if dir.exists() {
-                tokio::fs::remove_dir_all(&dir)
-                    .await
-                    .map_err(|e| BrainError::Storage(format!("delete project: {e}")))?;
+            let path = self.project_file(id);
+            match tokio::fs::remove_file(&path).await {
+                Ok(()) => Ok(()),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                Err(e) => Err(BrainError::Storage(format!("delete project: {e}"))),
             }
-            Ok(())
         })
     }
 }
@@ -156,12 +147,12 @@ impl SessionStore for FileStore {
     fn session_create(&self, project_id: ProjectId) -> BoxFuture<'_, Result<Session, BrainError>> {
         Box::pin(async move {
             let session = Session::new(project_id);
-            let dir = self.session_dir(project_id, session.id);
+            let dir = self.session_dir(session.id);
             tokio::fs::create_dir_all(&dir)
                 .await
                 .map_err(|e| BrainError::Storage(format!("create session dir: {e}")))?;
-            write_json(&self.session_file(project_id, session.id), &session).await?;
-            tokio::fs::write(self.messages_file(project_id, session.id), "")
+            write_json(&self.session_file(session.id), &session).await?;
+            tokio::fs::write(self.messages_file(session.id), "")
                 .await
                 .map_err(|e| BrainError::Storage(format!("create messages file: {e}")))?;
             Ok(session)
@@ -170,33 +161,17 @@ impl SessionStore for FileStore {
 
     fn session_get(&self, id: Ulid) -> BoxFuture<'_, Result<Session, BrainError>> {
         Box::pin(async move {
-            // Walk project directories to find the session
-            let projects_dir = self.root.join("projects");
-            let mut entries = tokio::fs::read_dir(&projects_dir)
-                .await
-                .map_err(|e| BrainError::Storage(format!("read projects dir: {e}")))?;
-
-            while let Some(entry) = entries
-                .next_entry()
-                .await
-                .map_err(|e| BrainError::Storage(format!("read dir entry: {e}")))?
-            {
-                let session_file = entry
-                    .path()
-                    .join("sessions")
-                    .join(id.to_string())
-                    .join("session.json");
-                if session_file.exists() {
-                    return read_json(&session_file).await;
-                }
+            let path = self.session_file(id);
+            if !path.exists() {
+                return Err(BrainError::Storage(format!("session not found: {id}")));
             }
-            Err(BrainError::Storage(format!("session not found: {id}")))
+            read_json(&path).await
         })
     }
 
     fn session_list(&self, project_id: ProjectId) -> BoxFuture<'_, Result<Vec<Session>, BrainError>> {
         Box::pin(async move {
-            let sessions_dir = self.sessions_dir(project_id);
+            let sessions_dir = self.root.join("sessions");
             if !sessions_dir.exists() {
                 return Ok(Vec::new());
             }
@@ -212,11 +187,12 @@ impl SessionStore for FileStore {
                 .map_err(|e| BrainError::Storage(format!("read dir entry: {e}")))?
             {
                 let session_file = entry.path().join("session.json");
-                if session_file.exists() {
-                    match read_json::<Session>(&session_file).await {
-                        Ok(s) => sessions.push(s),
-                        Err(_) => continue,
-                    }
+                if !session_file.exists() {
+                    continue;
+                }
+                match read_json::<Session>(&session_file).await {
+                    Ok(s) if s.project_id == project_id => sessions.push(s),
+                    _ => continue,
                 }
             }
             sessions.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
@@ -226,9 +202,7 @@ impl SessionStore for FileStore {
 
     fn session_update(&self, id: Ulid, update: SessionUpdate) -> BoxFuture<'_, Result<(), BrainError>> {
         Box::pin(async move {
-            // Find session first to get project_id
-            let session = self.session_get(id).await?;
-            let path = self.session_file(session.project_id, id);
+            let path = self.session_file(id);
             let mut session: Session = read_json(&path).await?;
             if let Some(title) = update.title {
                 session.title = Some(title);
@@ -240,9 +214,7 @@ impl SessionStore for FileStore {
 
     fn session_delete(&self, id: Ulid) -> BoxFuture<'_, Result<(), BrainError>> {
         Box::pin(async move {
-            // Find session first to get project_id
-            let session = self.session_get(id).await?;
-            let dir = self.session_dir(session.project_id, id);
+            let dir = self.session_dir(id);
             if dir.exists() {
                 tokio::fs::remove_dir_all(&dir)
                     .await
@@ -257,8 +229,7 @@ impl MessageStore for FileStore {
     fn message_append(&self, session_id: Ulid, msgs: &[Message]) -> BoxFuture<'_, Result<(), BrainError>> {
         let msgs = msgs.to_vec();
         Box::pin(async move {
-            let session = SessionStore::session_get(self, session_id).await?;
-            let path = self.messages_file(session.project_id, session_id);
+            let path = self.messages_file(session_id);
 
             let mut content = String::new();
             for msg in &msgs {
@@ -282,8 +253,7 @@ impl MessageStore for FileStore {
                 .await
                 .map_err(|e| BrainError::Storage(format!("flush messages: {e}")))?;
 
-            // Touch session updated_at
-            let session_path = self.session_file(session.project_id, session_id);
+            let session_path = self.session_file(session_id);
             if let Ok(mut s) = read_json::<Session>(&session_path).await {
                 s.updated_at = Utc::now();
                 let _ = write_json(&session_path, &s).await;
@@ -295,8 +265,7 @@ impl MessageStore for FileStore {
 
     fn message_list(&self, session_id: Ulid) -> BoxFuture<'_, Result<Vec<Message>, BrainError>> {
         Box::pin(async move {
-            let session = SessionStore::session_get(self, session_id).await?;
-            let path = self.messages_file(session.project_id, session_id);
+            let path = self.messages_file(session_id);
 
             if !path.exists() {
                 return Ok(Vec::new());
@@ -596,6 +565,27 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn session_list_filters_by_project() {
+        let (store, _dir) = temp_store().await;
+        let p1 = Project::with_defaults("proj1");
+        let p2 = Project::with_defaults("proj2");
+        let pid1 = p1.id;
+        let pid2 = p2.id;
+        store.project_create(p1).await.unwrap();
+        store.project_create(p2).await.unwrap();
+
+        store.session_create(pid1).await.unwrap();
+        store.session_create(pid1).await.unwrap();
+        store.session_create(pid2).await.unwrap();
+
+        let list1 = store.session_list(pid1).await.unwrap();
+        assert_eq!(list1.len(), 2);
+
+        let list2 = store.session_list(pid2).await.unwrap();
+        assert_eq!(list2.len(), 1);
+    }
+
+    #[tokio::test]
     async fn session_list_nonexistent_project() {
         let (store, _dir) = temp_store().await;
         let list = store.session_list(Ulid::new()).await.unwrap();
@@ -697,7 +687,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn credential_list_empty_when_no_dir() {
+    async fn credential_list_empty_when_no_creds() {
         let (store, _dir) = temp_store().await;
         let list = store.credential_list().await.unwrap();
         assert!(list.is_empty());

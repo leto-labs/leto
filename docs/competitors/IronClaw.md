@@ -85,6 +85,28 @@ The key warning for `brain` is that a repo can look rich at the architecture-doc
 - Prefer smaller crate boundaries over one large binary crate.
 - Build a stronger iterative loop than single-pass tool handling.
 
+## Data Model
+
+### Sessions
+
+`Session { id: String (UUID v4), turn_count: u32, max_turns: u32 }`. In-memory only; no persistence. Conversation is `Vec<Message>` passed to `process_message()`.
+
+### Messages
+
+`Message { role: MessageRole, content: String, tool_calls: Vec<ToolCall>, tool_results: Vec<ToolResult>, timestamp, id: String (UUID v4), content_blocks: Vec<ContentBlock> }`. `MessageRole`: System, User, Assistant, Tool. `ContentBlock` enum supports multimodal: Text, Image, Audio, Video, File. In-memory only.
+
+### Memory
+
+`MemoryEntry { key, content, context (session/user/global), timestamp, category (System/User/Instruction/Observation/Conversation) }`. `EncryptedSqliteStore` with AES-256-GCM per entry. Key derived from `ironclaw-memory-{path}-{USER}`. History config (`HistoryConfig`) exists with SQLite/file backend options, max_conversations, max_messages, compress_old -- but wiring into the engine is not fully evident.
+
+### Credentials
+
+No dedicated vault. API keys come from `ProviderConfig.api_key` in config or env vars. `SessionAuthenticator` produces HMAC-SHA256 signed `SessionToken` for HTTP auth (provider, model, session_id, issued_at, expires_at) but this is session-level, not credential storage.
+
+### Storage
+
+XDG dirs via `directories` crate. Memory DB at `~/.ironclaw/memory.db`. No project or workspace concept.
+
 ## Key Evidence
 
 - `repocache/JoasASantos/ironclaw/README.md`

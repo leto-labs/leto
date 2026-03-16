@@ -91,6 +91,28 @@ The important nuance is that `OpenClaw`'s visible tool surface is broader than t
 - Preserve trait-based engine seams instead of central registries as the main abstraction.
 - Avoid making the core engine depend on a long-running gateway daemon.
 
+## Data Model
+
+### Sessions
+
+`SessionEntry` with ~50 fields: sessionId, agentId, updatedAt, model/provider overrides, token counts (input/output/total, cache read/write), compactionCount, label, displayName, channel, groupId, subject, space, origin, queueMode (steer/followup/collect/queue/interrupt), sandbox/exec settings, ACP metadata. Session index stored as `sessions.json` at `~/.openclaw/agents/<agentId>/sessions/sessions.json`.
+
+### Messages
+
+Uses pi-coding-agent's `SessionManager` and `AgentMessage` types (same as pi-mono). Transcripts are JSONL files at `~/.openclaw/agents/<agentId>/sessions/<sessionId>.jsonl`. Message structure matches pi-mono: UserMessage, AssistantMessage (with ToolCall content blocks), ToolResultMessage.
+
+### Agents (instead of Projects)
+
+`AgentConfig { id, default, name, workspace, agentDir, model, skills, memorySearch, humanDelay, heartbeat, identity, groupChat, subagents, sandbox, params, tools, runtime }`. Agent is the organizational unit. Session keys are `agent:<agentId>:<mainKey>` or `agent:<agentId>:<channel>:group:<groupId>`.
+
+### Credentials
+
+Auth profiles: `AuthProfileConfig { provider, mode (api_key/oauth/token), email }` with ordering and cooldowns per provider. Secrets via `SecretRef { source (env/file/exec), provider, id }` and `SecretProviderConfig`. API keys from env vars or `.env` files (cwd first, then `~/.openclaw/.env`).
+
+### Storage
+
+Global root: `~/.openclaw/`. Per-agent sessions: `~/.openclaw/agents/<agentId>/sessions/`. Config: `~/.openclaw/openclaw.json` (JSON5). Workspace at `~/clawd/` or `AgentConfig.workspace`.
+
 ## Key Evidence
 
 - `repocache/openclaw/openclaw/README.md`

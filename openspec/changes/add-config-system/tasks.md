@@ -21,7 +21,7 @@
 - [x] Implement TOML config parsing with `toml` crate
 - [x] Implement config discovery: walk from cwd upward looking for `.agents/config.toml`
 - [x] Implement env var interpolation in config values (`$ENV_VAR` syntax)
-- [x] Implement layered config resolution (defaults → file → env → overrides)
+- [x] Implement layered config resolution (defaults → global `~/.brain/config.toml` → project `.agents/config.toml`)
 - [ ] Add config validation (unknown keys, type errors, missing required fields)
 - [x] Implement AGENTS.md runtime discovery (root-level as system prompt)
 - [x] Implement nested AGENTS.md discovery (per-directory context injection)

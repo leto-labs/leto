@@ -84,6 +84,28 @@ This makes `ZeroClaw` the closest direct comparison to `brain`'s current tool st
 - Make sandbox integration more obviously central than optional runtime choice.
 - Preserve a more explicit separation between engine core and product shells.
 
+## Data Model
+
+### Sessions / Conversations
+
+No dedicated session struct. The agent keeps an in-memory `Vec<ConversationMessage>` and uses `workspace_dir` as the scope. `MemoryEntry.session_id` scopes long-term memories to a session, but conversations themselves are not persisted.
+
+### Messages
+
+`ChatMessage { role: String, content: String }` for simple messages. `ConversationMessage` enum for multi-turn history: `Chat(ChatMessage)`, `AssistantToolCalls { text, tool_calls: Vec<ToolCall>, reasoning_content }`, `ToolResults(Vec<ToolResultMessage>)`. `ToolCall { id, name, arguments: String }`. All in-memory only.
+
+### Memory
+
+`MemoryEntry { id, key, content, category (Core/Daily/Conversation/Custom), timestamp, session_id, score }`. Stored in SQLite (`brain.db` at `workspace_dir/memory/brain.db`). Schema includes `memories` table with FTS5 full-text search and optional embedding BLOBs. `MEMORY_SNAPSHOT.md` for cold boot hydration. Memory is long-term facts/preferences, distinct from ephemeral conversation history.
+
+### Credentials
+
+`AuthProfile { id, provider, profile_name, kind (OAuth/Token), account_id, workspace_id, token_set, token, metadata, timestamps }`. `AuthProfilesData` holds `active_profiles` (provider -> profile_id map) and `profiles` (all profiles). Stored in `auth-profiles.json`, optionally encrypted with `SecretStore` (ChaCha20-Poly1305, key in `~/.zeroclaw/.secret_key`).
+
+### Storage
+
+Global config in `~/.zeroclaw/config.toml`. Workspace data in `workspace_dir/` (determined by `ZEROCLAW_WORKSPACE` env, `active_workspace.toml`, or config). No project entity beyond the workspace path.
+
 ## Key Evidence
 
 - `repocache/zeroclaw-labs/zeroclaw/README.md`

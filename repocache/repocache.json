@@ -134,6 +134,14 @@
     "enabled": true
   },
   {
+    "name": "codex",
+    "url": "https://github.com/openai/codex",
+    "tag": "main",
+    "searchPath": "codex-rs",
+    "notes": "OpenAI Codex CLI (65K+ stars). Dual-stack: codex-cli (TypeScript/Node) is the original CLI, codex-rs (Rust) is the rewrite. Lightweight coding agent running in terminal. Study for Rust agent architecture, provider wiring, tool system, sandboxing, session persistence, config layout, and storage patterns.",
+    "enabled": true
+  },
+  {
     "name": "models.dev",
     "url": "https://github.com/anomalyco/models.dev",
     "tag": "dev",
