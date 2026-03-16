@@ -1,0 +1,52 @@
+model = "gpt-5.4"
+model_reasoning_effort = "high"
+model_verbosity = "high"
+service_tier = "fast"
+approval_policy = "never"
+sandbox_mode = "danger-full-access"
+
+[sandbox_workspace_write]
+network_access = true
+
+[features]
+fast_mode = true
+multi_agent = true
+runtime_metrics = true
+prevent_idle_sleep = true
+shell_snapshot = true
+unified_exec = true
+
+[mcp_servers.pencil]
+command = "/tmp/.mount_PencilBXMtro/resources/app.asar.unpacked/out/mcp-server-linux-x64"
+args = ["--app", "desktop"]
+enabled = true
+required = false
+startup_timeout_sec = 30
+tool_timeout_sec = 180
+
+[profiles.safe]
+approval_policy = "on-request"
+sandbox_mode = "workspace-write"
+service_tier = "fast"
+
+[profiles.safe.sandbox_workspace_write]
+network_access = true
+
+[profiles.unlocked]
+approval_policy = "never"
+sandbox_mode = "danger-full-access"
+service_tier = "fast"
+
+[profiles.deep]
+approval_policy = "never"
+sandbox_mode = "danger-full-access"
+model_reasoning_effort = "high"
+model_verbosity = "high"
+service_tier = "fast"
+
+[profiles.pencil]
+approval_policy = "never"
+sandbox_mode = "danger-full-access"
+model_reasoning_effort = "high"
+model_verbosity = "high"
+service_tier = "fast"

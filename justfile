@@ -1,0 +1,51 @@
+# Default recipe: list available commands
+default:
+    @just --list
+
+# Run all workspace tests
+test:
+    cargo test --workspace
+
+# Run a specific crate's tests
+test-crate crate:
+    cargo test -p {{crate}}
+
+# Run tests with coverage (HTML report in target/llvm-cov/html/)
+coverage:
+    cargo llvm-cov --workspace --html
+    @echo "Report: target/llvm-cov/html/index.html"
+
+# Run tests with coverage (text summary)
+coverage-summary:
+    cargo llvm-cov --workspace
+
+# Run tests with coverage (LCOV output for CI)
+coverage-lcov:
+    cargo llvm-cov --workspace --lcov --output-path target/llvm-cov/lcov.info
+
+# Check formatting
+fmt-check:
+    cargo fmt --check
+
+# Format all code
+fmt:
+    cargo fmt
+
+# Run clippy lints
+clippy:
+    cargo clippy --workspace -- -D warnings
+
+# Run all checks (fmt + clippy + tests)
+check: fmt-check clippy test
+
+# Build the workspace
+build:
+    cargo build --workspace
+
+# Build in release mode
+build-release:
+    cargo build --workspace --release
+
+# Clean build artifacts
+clean:
+    cargo clean

@@ -1,0 +1,11 @@
+{
+  "setup-worktree-unix": [
+    "cargo fetch",
+    "[ -f \"$ROOT_WORKTREE_PATH/.env\" ] && cp \"$ROOT_WORKTREE_PATH/.env\" .env || true",
+    "for org_dir in \"$ROOT_WORKTREE_PATH/repocache\"/*/; do [ -d \"$org_dir\" ] && ln -sfn \"$org_dir\" \"repocache/$(basename \"$org_dir\")\"; done"
+  ],
+  "setup-worktree": [
+    "cargo fetch"
+  ]
+}
+
