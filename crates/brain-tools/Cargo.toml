@@ -1,0 +1,24 @@
+[package]
+name = "brain-tools"
+edition.workspace = true
+version.workspace = true
+
+[features]
+default = ["native"]
+native = ["dep:tokio", "dep:glob", "dep:regex", "dep:walkdir"]
+
+[dependencies]
+brain-types = { workspace = true }
+futures = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+
+# Native driver deps (feature-gated)
+tokio = { workspace = true, features = ["fs", "process"], optional = true }
+glob = { version = "0.3", optional = true }
+regex = { version = "1", optional = true }
+walkdir = { version = "2", optional = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+tempfile = "3"
