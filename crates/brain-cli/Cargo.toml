@@ -1,0 +1,28 @@
+[package]
+name = "brain-cli"
+edition.workspace = true
+version.workspace = true
+
+[[bin]]
+name = "brain"
+path = "src/main.rs"
+
+[features]
+default = []
+mistralrs = ["brain-core/mistralrs"]
+llamacpp = ["brain-core/llamacpp"]
+
+[dependencies]
+brain-core = { workspace = true }
+brain-config = { workspace = true }
+brain-server = { workspace = true }
+anyhow = { workspace = true }
+clap = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+ulid = { workspace = true }
+chrono = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
