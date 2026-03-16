@@ -1,0 +1,25 @@
+[package]
+name = "brain-server"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+brain-types = { workspace = true }
+brain-core = { workspace = true }
+tokio = { workspace = true, features = ["sync", "rt"] }
+tokio-stream = { workspace = true, features = ["sync"] }
+tokio-util = { workspace = true }
+futures = { workspace = true }
+chrono = { workspace = true }
+ulid = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+axum = "0.8"
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time"] }
+brain-providers = { workspace = true }
+brain-stores = { workspace = true }
+brain-loops = { workspace = true }
+reqwest = { workspace = true }
