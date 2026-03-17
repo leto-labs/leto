@@ -28,7 +28,7 @@
 - [x] Support session resumption (brain sessions resume <id>)
 
 ### CLI subcommands
-- [x] Default command: interactive chat (brain)
+- [x] Default command: interactive chat entrypoint (brain)
 - [x] brain credentials login openai-oauth — OAuth browser flow (feature-gated)
 - [x] brain credentials login openai-oauth --device — OAuth device flow for headless
 - [x] brain credentials add <provider> <api-key> — store API key
@@ -38,11 +38,13 @@
 - [x] brain sessions resume <id> — resume an existing session
 - [ ] brain acp — start ACP JSON-RPC server on stdin/stdout (feature-gated on acp)
 - [ ] brain serve --port <port> — start HTTP REST + SSE server (feature-gated on http)
+- [ ] brain attach <url> — attach the interactive frontend to a remote server
 
 ### BrainServer integration
 - [x] Bootstrap BrainServer at startup
 - [x] Use `server.client()` (Arc<dyn BrainApi>) for all CLI operations
 - [x] Find-or-create project based on cwd
+- [ ] Coordinate default `brain` interactive mode with the TUI implementation tracked in `add-tui-transport`
 
 ### Remove examples
 - [x] Remove examples/cli-echo/ directory
@@ -55,3 +57,6 @@
 - [x] Test: config-driven provider selection
 - [ ] Test: session list/resume with FileStore
 - [x] Test: graceful fallback when no providers available
+- [ ] Test: `serve` mode starts the HTTP/SSE server cleanly
+- [ ] Test: `attach` mode routes through the remote `BrainApi` client path
+- [ ] Coordinate deep interactive frontend validation with `add-tui-transport`

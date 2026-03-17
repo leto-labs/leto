@@ -1,363 +1,290 @@
 # Design: add-tui-transport
 
-## UX Reference Analysis
+## Summary
 
-Based on deep analysis of OpenCode and pi-mono TUIs — the two most polished
-AI coding agent terminal interfaces.
+The MVP TUI is a thin `BrainApi` client with a strong state model. It should
+feel responsive and readable before it feels feature-rich.
 
----
+The design is driven by Codex and OpenCode:
 
-## Message Rendering
+- the transcript is the primary surface
+- partial assistant output is visible immediately
+- tool activity stays inline with the conversation
+- the footer changes meaning based on state
+- user cancellation preserves context rather than collapsing into a generic error
 
-### Assistant Messages (the hard part)
+## Architecture
 
-**Streaming markdown is the core challenge.** The model streams tokens one at
-a time. At any moment, the partial text might be mid-word, mid-code-block, or
-mid-bold. The renderer must handle all these states gracefully.
+The TUI is not a `Transport` implementation.
 
-**OpenCode approach**: passes `streaming={true}` to both `<markdown>` and
-`<code>` components. Partial markdown is rendered as-is; no special buffering.
-When a code fence opens but hasn't closed, it's rendered as an open code block.
+- Local mode: `brain` boots `BrainServer` and uses `server.client()`
+- Server mode: `brain serve` exposes the existing HTTP/SSE API
+- Remote mode: `brain attach <url>` uses the same `BrainApi` contract over HTTP/SSE
 
-**pi-mono approach**: same — incremental updates to the streaming component,
-markdown rendered as it arrives.
+This change does not introduce a new protocol. It reuses the existing
+REST + SSE server model.
 
-**Our approach**: render partial markdown on every token. Accept that mid-fence
-states look slightly rough. This is what users expect from ChatGPT, Claude, etc.
+## Layout
 
-### Message Types
+The MVP layout has four persistent regions:
 
-| Type | Visual Treatment |
-|------|-----------------|
-| **User** | Colored left border, distinct background, show attached files as badges |
-| **Assistant** | Markdown rendered, code blocks syntax-highlighted, thinking/reasoning blocks in muted style |
-| **Tool call** | Inline or block depending on tool type (see below) |
-| **Error** | Error-colored border, error message text |
-| **System** | Muted text, not always visible |
+1. `Header`
+2. `Transcript`
+3. `Composer`
+4. `Footer / Status Row`
 
-### Thinking/Reasoning Blocks
+The transcript remains stable across most state transitions. The composer and
+footer do most of the visible state switching.
 
-Models increasingly emit "thinking" content. Both OpenCode and pi-mono render
-it in a muted/italic style, toggleable via a keybinding. We should support this.
+### Header
 
----
+Keep the header light:
 
-## Tool Call UX
+- session title or fallback name
+- active model
+- local vs attached mode
 
-### Two display modes (following OpenCode)
+The header is ambient context, not a control surface.
 
-**Inline tools** (single line, minimal): for read-only or simple tools.
-Show tool name + key args + status icon (spinner → checkmark/error).
+### Transcript
 
-```
-  ⠋ Reading src/main.rs
-  ✓ Read src/main.rs (45 lines)
-  ✓ Grep "auth" in src/ → 12 matches in 4 files
-  ✓ Glob **/*.rs → 23 files
-```
+The transcript is the main interaction surface.
 
-**Block tools** (bordered block, expandable): for tools with significant output.
-Show tool name + args, then collapsible result.
+- append-only from the user's perspective
+- scrollable
+- auto-scrolls only while the user is already at the bottom
+- when scrolled away from bottom, new content does not force-jump
+- a small “new content below” indicator is enough
 
-```
-  ┌ Shell ─────────────────────────────────────
-  │ $ cargo test --workspace
-  │ ────────────────────────────────────────────
-  │   running 42 tests
-  │   test foo ... ok
-  │   ... (click to expand)
-  └─────────────────────────────────────────────
-```
+### Composer
 
-### Tool categorization
+The composer is multiline and always visible.
 
-| Category | Tools | Display |
-|----------|-------|---------|
-| Inline | file_read, glob_search, grep, list_dir, web_fetch | Single line |
-| Block | shell, file_write, file_edit, apply_patch | Bordered block |
-| Block (diff) | file_edit, apply_patch | Show diff view |
+- `Enter` submits
+- modified enter inserts newline
+- composer supports input history
+- while a turn is active, the user can keep typing
+- submitting while busy queues the next message instead of rejecting it
 
-### Tool approval flow
+### Footer / Status Row
 
-When tool approval is enabled (from `enrich-event-model`):
+The footer is intentionally stateful. It should render short, high-value hints
+in a fixed location.
 
-1. `ToolCallPending` event arrives
-2. Tool block appears with pending state and "Allow / Reject" prompt
-3. User presses A (allow), R (reject), or Enter (allow)
-4. Tool executes or is rejected
-5. Block updates with result
+Typical footer roles:
 
-OpenCode renders this inline (not modal) above the prompt. pi-mono has no
-approval flow. We follow OpenCode — inline, non-modal.
+- idle hint surface
+- draft / submit hint surface
+- running spinner + active work summary
+- queued-message indicator
+- cancel / interrupt hint
+- retry / reconnect / error summary
 
-### Tool progress
+This follows the best Codex/OpenCode pattern: the footer becomes the compact,
+stable “what can I do now?” surface.
 
-- Spinner animation while tool is running (Knight Rider style from OpenCode,
-  or simple braille spinner)
-- Tool name + args visible during execution
-- Duration shown after completion
+## UI State Model
 
----
+The MVP state model should be explicit in the implementation and in tests.
 
-## Interruption / Cancellation
+### Idle
 
-This is critical UX. Users need to be able to interrupt the AI at any point.
+- no active turn
+- composer focused and editable
+- footer shows help / session / model hints
 
-### OpenCode's model
+### Drafting
 
-1. **Escape once**: sets interrupt flag, shows "esc again to interrupt" in footer
-2. **Escape twice (within 5s)**: sends abort to server, kills the turn
-3. **Ctrl+C when input empty**: exit app
-4. **Ctrl+C when input has text**: clear input
+- no active turn
+- composer contains text
+- footer shifts to submit/edit hints
 
-### pi-mono's model
+### Running
 
-1. **Escape**: abort immediately
-2. **Ctrl+C once**: clear input
-3. **Ctrl+C twice (within 500ms)**: exit app
+- assistant output is streaming
+- transcript updates incrementally
+- footer shows spinner + summary + cancel hint
 
-### Our model (combining both)
+### Running With Queued Input
 
-1. **Escape during turn**: cancel the turn via `client.cancel_turn()`
-2. **Escape when idle**: no-op (or show help hint)
-3. **Ctrl+C when input has text**: clear input
-4. **Ctrl+C when input empty**: exit app
-5. **Ctrl+C during turn**: cancel the turn (same as Escape)
+- a turn is active
+- user continues typing
+- submitted follow-up messages are queued locally
+- footer or composer area shows pending queue state clearly
 
-### What happens to partial content
+### Tool Running
 
-- Partial assistant message stays visible
-- Tool calls in progress show error/cancelled state
-- Footer shows "interrupted" indicator on the message
-- The turn's messages are still persisted (partial content + cancellation)
+- transcript shows inline tool activity
+- the active assistant turn remains visible around it
 
----
+### Cancelling / Interrupted
 
-## Subagents / Child Sessions
+- cancellation request is in-flight or complete
+- partial assistant and tool content remains visible
+- transcript marks the turn interrupted
+- footer clears busy state and returns to idle/draft hints
 
-OpenCode has first-class subagent support:
+### Retry / Error
 
-- Child sessions are separate sessions with `parentID`
-- Task tool shows inline summary + link to child session
-- Navigation: `<leader>down` to child, `up` to parent, `left`/`right` to cycle
-- Header in child view shows "Subagent session" with Parent/Prev/Next nav
+- retry and provider failure states do not replace transcript history
+- the footer can summarize transient issues
+- hard failures are shown in context without collapsing the session UI
 
-### Our approach
+### Loading / Attaching / Reconnecting
 
-For MVP, we don't need subagents. But the message rendering and session
-model should be designed to support them later:
+- used for startup, attach, session hydration, and dropped connections
+- distinct from idle so the user knows the client is not ready yet
 
-- Messages can reference child sessions
-- The session model supports parentID
-- Navigation can be added without restructuring the UI
+## Rendering Decisions
 
----
+### Assistant text
 
-## Session Management
+Readable-first markdown only:
 
-### Session list (overlay)
+- paragraphs
+- lists
+- inline code
+- fenced code blocks rendered as styled text blocks
 
-Both OpenCode and pi-mono use an overlay/dialog for session list:
+No syntax highlighting or diff rendering in MVP.
 
-- Fuzzy search
-- Grouped by date (Today, Yesterday, This Week, etc.)
-- Shows title, date, message count
-- Delete with double-confirm
-- Rename
-- Keybindings: Enter to open, Ctrl+D to delete, Ctrl+R to rename
+The renderer updates on every token or chunk. Partial markdown is accepted as a
+normal state.
+
+### Tool rendering
+
+Tool activity stays inline in the transcript.
+
+- light tools: compact single-line status
+- verbose or long-running tools: bordered block with summarized output
+
+There is no separate tool panel in MVP.
+
+### Cancellation rendering
+
+Cancellation is a first-class UX state, not an error skin.
+
+- streamed assistant text stays visible
+- started tools remain visible with interrupted/cancelled styling
+- the turn ends with `Interrupted`, not a generic `Error`
+
+## Input Scenarios
+
+### Waiting for input
+
+- composer focused
+- footer shows operational hints
+
+### Thinking / streaming
+
+- footer shows spinner and interrupt hint
+- composer remains available for drafting and queueing
+
+### Executing tools
+
+- transcript shows tool progress inline
+- footer remains focused on turn-level state, not per-tool detail
 
 ### Session switching
 
-- Selecting a session loads its history and scrolls to bottom
-- Current session title shown in header
-- New session via `/new` or keybinding
+- session list opens as an overlay
+- switching reloads transcript/history and resets per-session state
 
----
+## Runtime Contract Changes
 
-## Input UX
+The TUI should derive as much as possible client-side, but one event-level
+change is worth making now:
 
-### Submit vs newline
+- `Interrupted` becomes a terminal turn outcome emitted on user cancellation
 
-Both tools use the same convention:
-- **Enter**: submit message
-- **Shift+Enter / Alt+Enter / Ctrl+Enter**: insert newline
+This gives the TUI a clean way to differentiate:
 
-### Slash commands
+- success: `TurnDone`
+- user cancel: `Interrupted`
+- failure: `Error`
 
-Triggered by `/` at start of input:
-- Fuzzy-matched autocomplete dropdown
-- Commands: `/help`, `/new`, `/sessions`, `/model`, `/quit`, `/compact`
-- Arguments after command name
+That distinction matters for transcript styling, footer messaging, and tests.
 
-### Autocomplete
+## Testing Strategy
 
-- `@` for file/path completion (with fuzzy search)
-- `/` for commands
-- Tab to complete, Escape to dismiss
+The TUI should be designed for deep automated validation from the start.
 
-### Input history
+### State-level tests
 
-- Up/Down arrows recall previous messages
-- Only when cursor is at start/end of input
+Keep the main interaction model in testable logic rather than burying behavior
+entirely inside widget code.
 
-### Input stash (OpenCode)
+Required state-transition coverage:
 
-Save current draft, type something else, restore later. Nice for context
-switching mid-thought. OpenCode has stash/pop/list.
+- `idle` -> `drafting`
+- `drafting` -> `running`
+- `running` -> `running_with_queued_input`
+- `running` -> `tool_running`
+- `running` -> `interrupted`
+- `loading` -> `idle`
+- `error` recovery back to usable input state
 
-### Textarea resize
+These tests should verify footer mode, composer behavior, queue state, and
+terminal turn outcome handling.
 
-- Grows with content up to a max height (6 lines in OpenCode)
-- Scrolls internally beyond max height
+### Rendering and snapshot tests
 
----
+Use a headless terminal backend to render the major UI surfaces and capture
+stable snapshots.
 
-## Scrolling
+Required snapshot-style coverage:
 
-### Auto-scroll behavior
+- idle screen
+- drafting screen
+- running stream with partial assistant text
+- running with queued input
+- inline tool activity
+- verbose/block tool activity
+- interrupted turn with partial content preserved
+- scrolled-up transcript with “new content below”
+- narrow terminal layout
 
-- When user is at the bottom: auto-scroll as new content arrives
-- When user has scrolled up: freeze scroll position, show indicator
-- Scroll-to-bottom on Enter (submitting message)
+These are UX regression tests, not just visual niceties.
 
-### Navigation keybindings (OpenCode)
+### Deterministic integration tests
 
-| Key | Action |
-|-----|--------|
-| Page Up / Page Down | Page scroll |
-| Ctrl+G / Home | First message |
-| Ctrl+Alt+G / End | Last message |
-| Message navigation | Jump to next/prev message boundary |
+The implementation should support scripted end-to-end tests without a real LLM.
 
-### Scroll acceleration
+Required deterministic integration coverage:
 
-Configurable speed multiplier for scroll wheel / page scroll.
+- local mode via `BrainServer::client()`
+- remote mode against HTTP/SSE server transport
+- session creation and switching
+- history hydration on attach
+- ordered event handling
+- cancellation preserving partial output
 
----
+### Opt-in live-provider validation
 
-## Diff Display
+The repo already uses `.env` + `dotenvy` for provider smoke tests. The TUI
+should follow the same pattern for an opt-in live validation lane.
 
-When the agent modifies files, show the diff:
+Required live coverage:
 
-- **Unified diff** (default, narrow terminals)
-- **Split diff** (wide terminals, >120 cols) — OpenCode auto-switches
-- Syntax highlighted
-- Line numbers
-- File path header
-- Collapsible (large diffs collapsed by default)
+- one real streaming assistant response
+- one interrupted live response
+- at least one attach or remote-flow validation if practical
 
-For `file_edit`: show before/after diff of the change.
-For `apply_patch`: show per-file diffs with created/deleted/modified labels.
+These tests should be opt-in and skipped automatically when `OPENAI_API_KEY`
+is unavailable. They should not make normal offline development noisy or
+fragile.
 
----
+## Deferred Work
 
-## Error Handling
+These are intentionally out of scope for MVP:
 
-### Error types and display
-
-| Error | Display |
-|-------|---------|
-| API/network error | Error message in assistant message block, error-colored border |
-| Rate limit | "Retrying in Xs, attempt #N" with countdown (OpenCode) |
-| Token limit exceeded | Warning in header (context % indicator) |
-| Tool error | Error in tool block, error-colored background |
-| Auth error | Prompt to login / re-authenticate |
-
-### Toast notifications
-
-For transient errors (network hiccups, MCP server disconnect):
-brief notification that auto-dismisses. OpenCode uses toasts.
-
----
-
-## Sidebar
-
-OpenCode's sidebar (42 cols, toggleable):
-
-| Section | Content |
-|---------|---------|
-| Context | Token count, % used, cost estimate |
-| MCP | Connected servers, status |
-| Diff | Modified files with +/- line counts |
-| Todo | Non-completed items from agent |
-| CWD | Current working directory |
-
-Toggle via keybinding. Auto-show when terminal is wide enough (>120 cols).
-Hidden in child sessions.
-
-### Our approach
-
-Phase 3. The sidebar is useful but not essential for MVP. The header/footer
-can carry the most critical info (model, tokens, session) initially.
-
----
-
-## Keybinding System
-
-### Leader key (OpenCode)
-
-Ctrl+X as leader, then a letter within 2s timeout. Blurs input focus while
-waiting for the second key. Avoids conflicts with standard editor bindings.
-
-### Discoverability
-
-- Help overlay (all keybindings listed)
-- Command palette (Ctrl+P) shows keybindings per command
-- Footer hints for contextual actions
-- Inline hints in tool output ("press X to expand")
-
-### Configuration
-
-Keybindings should be overridable via config (both OpenCode and pi-mono
-support this). Low priority but the architecture should support it.
-
----
-
-## Theme System
-
-OpenCode has 30+ themes. pi-mono has a simpler MarkdownTheme.
-
-### Minimum viable theme
-
-Define colors for:
-- User message (border, background)
-- Assistant message (text, code background)
-- Tool call (pending, success, error backgrounds)
-- Header / footer (background, text)
-- Input area (border, background)
-- Diff (added, removed, context)
-- Error / warning / info / success
-- Muted / secondary text
-
-### Phase 3 concern
-
-Full theme system (switchable, custom themes) is Phase 3. For MVP, one
-good dark theme is sufficient. But the color system should be centralized
-(not hardcoded in widgets) so themes can be added later.
-
----
-
-## Status Indicators
-
-### Footer content (combining OpenCode + pi-mono)
-
-```
- ~/projects/brain  main  openai/gpt-4o  ↑1.2k ↓3.4k  $0.02  │ /help
-```
-
-Left: cwd, git branch, model name
-Right: token stats (in/out), cost, help hint
-
-### During turn
-
-```
- ⠋ Generating...  esc to interrupt  │ openai/gpt-4o
-```
-
-Spinner + "esc to interrupt" replaces normal footer during active turn.
-
-### Retry state
-
-```
- ⚠ Rate limited, retrying in 5s (attempt 2/3)  │ openai/gpt-4o
-```
+- planning/review modes
+- subagent UI
+- approval prompts
+- diff rendering
+- syntax-highlighted markdown
+- sidebars and palettes
+- theme system
+- command leader UX
+- mouse and clipboard features
+- auth-secure remote operation

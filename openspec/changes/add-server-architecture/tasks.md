@@ -32,6 +32,7 @@
 - [x] `send_message_stream(session_id, content)` — returns `EventStream`, also publishes to bus
 - [x] `cancel_turn(session_id)` — triggers `CancellationToken` for active turn
 - [x] `send_message` looks up session → project → `AgentConfig` dynamically
+- [ ] Align cancel terminal-event semantics with `Interrupted` instead of cancellation-as-`Error`
 
 ### Provider info
 - [x] Add `ProviderInfo` and `ProviderModelInfo` structs to `brain-types`
@@ -68,8 +69,9 @@
 - [x] `serve(server, addr)` convenience function + `build_router`
 
 ### brain-cli integration (deferred to add-brain-cli)
-- [ ] `brain` (default): start server + HTTP endpoint + TUI
+- [ ] `brain` (default): host the interactive frontend over local in-process `BrainApi`
 - [ ] `brain serve`: start server + HTTP endpoint only (headless)
+- [ ] `brain attach <url>`: connect the interactive frontend to a remote server
 - [ ] `--port` flag for HTTP port configuration
 
 ### Tests
@@ -99,3 +101,4 @@
 - [x] Integration: HTTP credential CRUD (list, get 404, put, get, list, delete, get 404)
 - [x] Integration: invalid ULID returns 400 (session and project)
 - [x] Integration: SSE stream receives events from send_message
+- [ ] Integration: cancelled turn surfaces `Interrupted` terminal semantics

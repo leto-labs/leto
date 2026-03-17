@@ -81,9 +81,12 @@ EventBus broadcast receiver. Heartbeat every 10 seconds.
 
 ### brain-cli integration
 
-- `brain` (default) — starts server in-process + TUI. Also starts the HTTP
-  endpoint so IDE extensions can connect to the same running instance.
-- `brain serve` — starts server with HTTP endpoint only (headless, no TUI).
+The exact `brain-cli` mode surface is tracked in `add-brain-cli` and
+`add-tui-transport`. This change provides the server boundary those modes use:
+
+- local in-process clients via `server.client()`
+- headless HTTP + SSE server via `brain serve`
+- remote clients such as `brain attach <url>` over the same API surface
 
 ### ACP compatibility (optional, future)
 
@@ -101,7 +104,7 @@ client that translates ACP JSON-RPC to REST calls. Separate concern.
 
 The `Transport` trait becomes secondary. `Brain.run(&transport)` stays for
 simple scripting and tests. Interactive clients use `BrainApi`. The TUI is
-a BrainApi client, not a Transport.
+a `BrainApi` client, not a `Transport`.
 
 ## Change Dependencies
 

@@ -20,6 +20,11 @@ The system SHALL provide a `brain-cli` binary crate that replaces both `cli-echo
 - **WHEN** no credentials are stored, no OAuth tokens exist, and no local features enabled
 - **THEN** it SHALL fall back to MockProvider with a clear message
 
+#### Scenario: Interactive frontend host
+- **WHEN** interactive `brain` usage is launched
+- **THEN** `brain-cli` SHALL act as the host binary for the frontend defined by `add-tui-transport`
+- **AND** it SHALL use `BrainServer` / `BrainApi` as the engine boundary
+
 ### Requirement: Credential-Driven Provider Discovery
 The `brain-cli` SHALL NOT read API keys from environment variables. Instead, providers are discovered from stored credentials (`CredentialStore`) and project config. The `build_provider()` function resolves credentials from a `CredentialPool` that wraps the store.
 
@@ -71,17 +76,19 @@ The binary SHALL use `FileStore` rooted at `brain_home()` (`~/.brain/` by defaul
 ### Requirement: CLI Subcommands
 The binary SHALL use `clap` for argument parsing and support the following subcommands:
 
-- (default) — start a new interactive chat session for the current project
+- (default) — start the interactive frontend for the current project
 - `credentials add <provider> <api-key>` — store an API key credential
 - `credentials login <provider>` — run OAuth browser flow (or `--device` for device code flow)
 - `credentials list` — list all stored credentials
 - `credentials remove <provider> <id>` — remove a stored credential
 - `sessions list` — list past sessions with ID, title, and date
 - `sessions resume <id>` — resume an existing session by ID
+- `serve` — start HTTP REST + SSE server
+- `attach <url>` — connect the interactive frontend to a remote server
 
 #### Scenario: Interactive chat
 - **WHEN** `brain` is run with no subcommand
-- **THEN** it SHALL start an interactive chat session (new session by default)
+- **THEN** it SHALL start the interactive frontend (new local session by default)
 
 #### Scenario: Login flow
 - **WHEN** `brain credentials login openai-oauth` is run
@@ -95,8 +102,17 @@ The binary SHALL use `clap` for argument parsing and support the following subco
 - **WHEN** `brain sessions resume <ULID>` is run
 - **THEN** it SHALL load the session history and start an interactive chat continuing that session
 
+#### Scenario: Serve mode
+- **WHEN** `brain serve` is run
+- **THEN** it SHALL start the HTTP REST + SSE server without requiring the interactive frontend
+
+#### Scenario: Attach mode
+- **WHEN** `brain attach <url>` is run
+- **THEN** it SHALL connect the interactive frontend to the remote `BrainApi` endpoint at that URL
+
 ### Requirement: Feature Gates
 The binary SHALL support the following feature gates:
+- `tui` (default) — TUI interactive frontend
 - `openai-oauth` (default) — OpenAI OAuth/subscription provider + credentials login commands
 - `mistralrs` — mistral.rs local inference
 - `llamacpp` — llama.cpp local inference
@@ -106,8 +122,8 @@ The binary SHALL support the following feature gates:
 - **THEN** only MockProvider SHALL be available
 
 #### Scenario: Full build
-- **WHEN** compiled with `--features openai-oauth,mistralrs,llamacpp`
-- **THEN** all provider types SHALL be available
+- **WHEN** compiled with `--features tui,openai-oauth,mistralrs,llamacpp`
+- **THEN** all provider types and the TUI frontend SHALL be available
 
 ### Requirement: Remove Example Binaries
 The `cli-echo` and `cli-local` directories under `examples/` SHALL be removed from the workspace. Their functionality is fully subsumed by `brain-cli`. The workspace `Cargo.toml` SHALL no longer list them as members.

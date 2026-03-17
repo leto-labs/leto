@@ -22,8 +22,8 @@ These served their purpose as PoC demos for the SDK, but they have problems:
    needs to choose which binary to run. With `ProviderRouter`, there's no
    reason these can't coexist.
 
-4. **Blocking TUI work**: the future TUI transport needs a real binary to live
-   in, not a throwaway example.
+4. **Blocking TUI work**: the TUI needs a real binary to live in, not a
+   throwaway example.
 
 5. **examples/ signals "not real"**: keeping them as examples suggests they're
    not the intended way to use brain. A `brain-cli` crate signals a real,
@@ -49,22 +49,25 @@ that replaces both examples:
 3. **Session persistence**: uses `FileStore` by default (not `InMemoryStore`),
    so conversations survive restarts. Store directory configurable via config.
 
-4. **Subcommands** (via `clap`):
-   - `brain` (default) — interactive chat session
-   - `brain login openai` — run OpenAI OAuth browser/device flow
-   - `brain logout openai` — clear stored OAuth tokens
+4. **Runtime modes** (via `clap`):
+   - `brain` (default) — launch the interactive frontend
+   - `brain serve` — run the HTTP + SSE server headlessly
+   - `brain attach <url>` — attach the interactive frontend to a remote server
    - `brain sessions list` — list past sessions
    - `brain sessions resume <id>` — resume a past session
+   - `brain credentials ...` — manage API key and OAuth credentials
    - Future: `brain config init` — scaffold `.agents/config.toml`
 
-5. **Feature gates** for optional providers:
+5. **Interactive frontend hosting**: `brain-cli` is the host binary for the
+   TUI-first interactive experience tracked in `add-tui-transport`. It boots
+   `BrainServer`, uses `server.client()` for local mode, and exposes the same
+   server surface used by `brain attach`.
+
+6. **Feature gates** for optional providers:
    - `openai` (default) — OpenAI-compatible API providers
    - `openai-oauth` — OpenAI OAuth/subscription provider
    - `mistralrs` — local mistral.rs inference
    - `llamacpp` — local llama.cpp inference
-
-6. **Transport**: starts with `CliTransport`, but structured so swapping to a
-   TUI transport later is a one-line change.
 
 ### Remove: `cli-echo` and `cli-local`
 
@@ -90,7 +93,7 @@ examples). The migration is:
 - **Requires**: `add-config-system` (uses `Brain::discover()` for config-driven initialization)
 - **Requires**: `add-server-architecture` (starts BrainServer, exposes HTTP endpoint)
 - **Requires**: `add-oauth-provider` (login/logout subcommands, feature-gated)
-- **Required by**: `add-tui-transport` (TUI lives in or alongside brain-cli)
+- **Coordinates with**: `add-tui-transport` (owns detailed TUI UX and testing behavior)
 
 ## Impact
 

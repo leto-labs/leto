@@ -107,7 +107,7 @@ The system SHALL provide a `BrainServer` struct that wraps a `Brain` and an `Eve
 #### Scenario: Cancel turn
 - **WHEN** `cancel_turn(session_id)` is called during an active turn
 - **THEN** the CancellationToken SHALL be triggered
-- **AND** the turn SHALL emit an Error event with Cancelled code
+- **AND** the turn SHALL emit `Interrupted` as its terminal event
 
 #### Scenario: No concurrent turns per session
 - **WHEN** `send_message()` is called for a session that already has an active turn

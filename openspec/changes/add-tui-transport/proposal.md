@@ -2,182 +2,107 @@
 
 ## Why
 
-brain's only transport is `CliTransport` — a line-based stdin/stdout reader.
-It works for testing but the experience is nothing like modern AI coding
-agents (OpenCode, Codex, Claude Code). Users expect:
+`brain` already has the runtime boundary needed for a modern terminal client:
+`BrainServer`, `BrainApi`, in-process clients via `server.client()`, and
+HTTP/SSE for remote consumers. What it lacks is a terminal experience that
+feels like a real coding agent rather than a line-based debug shell.
 
-- Streaming token output with proper formatting
-- Markdown rendering with syntax-highlighted code blocks
-- Visual tool call status (spinner → name → result)
-- Scrollable message history
-- Multi-line input with editing
-- Session info, model info, token counts
-- Keyboard shortcuts for common actions
-- The ability to interrupt/cancel a running turn
+The research on Codex and OpenCode points to a clear MVP shape:
 
-To build a TUI that competes with these products, we need a proper `TuiTransport`
-backed by a real terminal UI framework.
+- a transcript-first full-screen chat UI
+- streaming assistant output that stays readable while incomplete
+- inline tool activity inside the conversation flow
+- a multiline composer with clear state transitions
+- a footer/status row that changes meaning based on runtime state
+- interruption that preserves partial output instead of treating cancel as a failure
 
-## Library Selection
+The current `add-tui-transport` change is too broad. It includes planning,
+subagents, approval UX, diff rendering, rich markdown polish, sidebars, leader
+keys, themes, and other features that are useful later but distract from the
+core product question: does chatting with the agent feel good?
 
-### Core: ratatui + crossterm
+## What Changes
 
-**ratatui** (19K+ stars) is the dominant Rust TUI library. Immediate-mode
-rendering, rich widget ecosystem, cross-platform via crossterm backend.
-No real alternative in Rust — it's the clear choice.
+This change narrows the MVP to a state-driven TUI client over `BrainApi`.
 
-**crossterm** is ratatui's default terminal backend. Cross-platform
-(Linux, macOS, Windows), handles raw mode, alternate screen, mouse events,
-and keyboard input.
+### MVP scope
 
-Added to `repocache/repocache.json` for source-first reference.
+- `brain` launches a full-screen TUI in local in-process mode
+- `brain serve` runs the existing server surface for trusted local/dev use
+- `brain attach <url>` launches the same TUI against a remote server
+- the UI is built around four regions:
+  - header
+  - transcript
+  - multiline composer
+  - footer/status row
+- assistant text streams directly into the transcript
+- tool activity renders inline in the transcript
+- users can cancel active turns without losing partial output
+- users can switch sessions inside the TUI
+- users can compose and queue the next message while a turn is still running
 
-### Text input: tui-textarea
+### Explicit non-goals for MVP
 
-**tui-textarea** (489 stars) provides a multiline text editor widget for
-ratatui with Emacs keybindings, undo/redo, search, selection, and yank.
-Exactly what we need for the prompt input area.
+- planning or review modes
+- subagents or child-session navigation
+- tool approval / permission UX
+- diff rendering
+- rich syntax-highlighted markdown
+- sidebar, command palette, leader key system, themes, mouse support
+- secure remote deployment, auth, or policy enforcement
 
-Added to `repocache/repocache.json` for source-first reference.
+## Supporting runtime changes
 
-### Markdown rendering: tui-markdown
+The TUI itself remains the center of gravity, but the UX needs one small
+runtime contract improvement:
 
-**tui-markdown** converts markdown to ratatui `Text` widgets using
-`pulldown-cmark`. Supports syntax-highlighted code blocks via `syntect`.
-This handles rendering assistant responses with proper formatting.
+- user cancellation should produce an `Interrupted` terminal turn outcome, not a
+  generic `Error`
 
-### Syntax highlighting: syntect
+This keeps the chat UI honest: cancelled work is not the same as a provider
+failure, and the transcript/footer should be able to reflect that cleanly.
 
-**syntect** is the standard Rust syntax highlighting library (used by bat,
-delta, etc.). `tui-markdown` uses it under the hood for code blocks. We
-may also use it directly for highlighting diffs and tool outputs.
+## UX direction
 
-### Full dependency list
+The MVP should borrow structure from Codex and OpenCode without copying their
+full feature sets:
 
-| Crate | Purpose | Notes |
-|-------|---------|-------|
-| `ratatui` | TUI framework | Core rendering, layout, widgets |
-| `crossterm` | Terminal backend | Raw mode, events, alternate screen |
-| `tui-textarea` | Multi-line input | Prompt editing with keybindings |
-| `tui-markdown` | Markdown rendering | Assistant message formatting |
-| `syntect` | Syntax highlighting | Code blocks in markdown |
+- stable transcript, not a pane-heavy layout
+- footer as a small state-specific controller, not a static status bar
+- composer remains useful in idle, drafting, and running states
+- inline tool activity, no dedicated tool pane
+- streaming and cancellation stay visible in place
 
-## Reference: OpenCode's TUI Layout
+## Testing expectations
 
-OpenCode has the most polished coding-agent TUI. Their layout (via their
-custom OpenTUI + SolidJS framework):
+This change SHALL treat TUI testing as part of the product definition, not as
+follow-up polish.
 
-```
-┌────────────────────────────────────────────────────┬──────────┐
-│ Header: session title | model | token count | cost │ Sidebar  │
-├────────────────────────────────────────────────────┤ (toggle) │
-│                                                    │          │
-│  Message scroll area                               │ Context  │
-│    ┌ User message ─────────────────────────────┐   │ MCP      │
-│    │ What files handle auth?                   │   │ Diff     │
-│    └───────────────────────────────────────────┘   │ Todos    │
-│    ┌ Assistant message ────────────────────────┐   │          │
-│    │ Streaming tokens with markdown...         │   │          │
-│    │ ```rust                                   │   │          │
-│    │ fn main() { ... }                         │   │          │
-│    │ ```                                       │   │          │
-│    │ ┌ Tool: grep ─────────────────────────┐   │   │          │
-│    │ │ ▶ searching for "auth"...           │   │   │          │
-│    │ │ Found 12 matches in 4 files         │   │   │          │
-│    │ └────────────────────────────────────-┘   │   │          │
-│    └───────────────────────────────────────────┘   │          │
-│                                                    │          │
-├────────────────────────────────────────────────────┤          │
-│ ┌ Input ───────────────────────────────────────┐   │          │
-│ │ > _                                          │   │          │
-│ └──────────────────────────────────────────────┘   │          │
-├────────────────────────────────────────────────────┴──────────┤
-│ Footer: cwd | provider | session id | /help                   │
-└───────────────────────────────────────────────────────────────┘
-```
+The MVP should only be considered ready when it has:
 
-Key UX patterns:
-- Leader key (`Ctrl+X`) + letter for actions
-- Slash commands (`/sessions`, `/model`, `/help`, `/new`)
-- Vim-like scrolling (j/k, Ctrl+D/U, G/gg)
-- Sidebar toggle for context info
-- Theme system with many built-in themes
+- deterministic state-transition tests for the TUI controller/state model
+- deterministic rendering or snapshot tests for transcript, footer, composer,
+  tool, and narrow-width states
+- deterministic integration tests for local in-process and remote HTTP/SSE flows
+- an opt-in live-provider validation suite that runs when `OPENAI_API_KEY` is
+  available via the existing `.env` / `dotenvy` pattern already used in provider
+  smoke tests
 
-## What
-
-### TuiApp
-
-A TUI application (in `brain-tui` crate or `brain-cli` directly) that acts
-as a thin client of `BrainApi` (from `add-server-architecture`), rendering
-to the terminal using ratatui:
-
-1. **Layout**: header + scrollable message area + input + footer
-2. **Message rendering**: markdown with syntax-highlighted code blocks
-3. **Streaming tokens**: real-time token display as events arrive
-4. **Tool call display**: name + spinner → collapsible result
-5. **Input**: multi-line editor with tui-textarea
-6. **Scrolling**: vim-style keybindings for message history
-7. **Status**: model, session, token count, cwd in header/footer
-8. **Slash commands**: `/help`, `/sessions`, `/new`, `/model`, `/quit`
-9. **Cancel**: Ctrl+C or Escape cancels current turn
-10. **Resize**: responsive layout adapts to terminal size
-
-### BrainApi client integration
-
-The TUI is a client of `BrainApi` (from `add-server-architecture`), NOT a
-`Transport` implementation. It:
-
-- Calls `client.send_message(session_id, content)` when the user submits input
-- Subscribes to `client.subscribe()` for engine events
-- Calls `client.cancel_turn(session_id)` on Ctrl+C
-- Calls `client.list_sessions()`, `client.create_session()`, etc. for session management
-
-The TUI never touches Brain directly. It only knows `BrainApi`.
-
-### Event loop architecture
-
-The TUI multiplexes two event sources:
-1. Terminal events (keyboard, mouse, resize) — from crossterm
-2. Engine events (tokens, tool calls, etc.) — from `BrainApi::subscribe()`
-
-Both flow into a single `tokio::select!` loop that updates TUI state and
-re-renders. The TUI is purely reactive — it renders state, never drives
-the engine.
-
-### Phased delivery
-
-**Phase 1: Functional MVP**
-- Basic layout: message area + input + status bar
-- Streaming token display
-- Tool call display (name + result, no collapse)
-- Single session, no sidebar
-- Ctrl+C to cancel
-
-**Phase 2: Full featured**
-- Markdown rendering with syntax highlighting
-- Collapsible tool call results
-- Slash commands
-- Session switching
-- Scrollable history with vim keybindings
-
-**Phase 3: Polish**
-- Sidebar with context info
-- Theme system
-- Leader key shortcuts
-- Mouse support
-- Clipboard integration
+This is necessary to avoid an implementation that satisfies the event contract
+but still feels broken or unstable in real use.
 
 ## Change Dependencies
 
-- **Requires**: `add-server-architecture` (TUI is a BrainApi client)
-- **Requires**: `enrich-event-model` (TUI renders all enriched event variants)
-- **Requires**: `add-brain-cli` (TUI lives in or alongside brain-cli)
+- **Requires**: `add-server-architecture`
+- **Requires**: `add-brain-cli`
+- **Coordinates with**: `enrich-event-model` and `harden-agent-loop`, but MVP
+  does not depend on planning, approval, compaction, or other non-core flows
 
 ## Impact
 
-- **New crate or module**: `brain-tui` or inline in `brain-cli`
-- **New spec**: `tui-transport` (name kept for continuity, though TUI is a
-  BrainApi client, not a Transport impl)
-- **Modifies**: `brain-cli` spec (TUI as default frontend)
-- **Dependencies**: ratatui, crossterm, tui-textarea, tui-markdown, syntect
-- **Repocache**: `ratatui` and `tui-textarea` added for source-first reference
+- **Modifies**: `brain-cli` spec to make the TUI the default interactive UX
+- **Modifies**: `brain-server` spec to clarify interactive turn terminal-event behavior
+- **Modifies**: `brain-loops` spec to distinguish interruption from generic error
+- **Adds runtime deps**: `ratatui`, `crossterm`, `tui-textarea`
+- **Adds validation work**: state, snapshot, integration, and opt-in live TUI tests
+- **Defers**: markdown polish and richer terminal affordances to later changes
