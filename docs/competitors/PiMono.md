@@ -1,191 +1,131 @@
 # pi-mono
 
-## One-Line Take
+## Overview
 
-`pi-mono` is the closest TypeScript analogue to `brain`: a layered stack from provider SDK to agent loop to coding-agent product.
+`pi-mono` is the closest TypeScript runtime analogue to `brain`: a layered stack from provider package to agent loop to coding-agent product shell.
 
-## Snapshot
+| Item | Value |
+| --- | --- |
+| Vertical | TypeScript agent toolkit family with reusable runtime packages, coding-agent CLI, TUI, RPC mode, and web integrations |
+| Best comparison inside `brain` | Package layering around provider APIs, session management, compaction, and multi-surface transport modes |
+| Main lesson | `pi-mono` shows how to keep a meaningful runtime core even when a full coding-agent product sits on top of it |
 
-- Vertical: agent toolkit family with reusable runtime packages and multiple end-user shells.
-- Best comparison inside `brain`: package layering around provider APIs, loop orchestration, product shells, and transport modes.
-- Main lesson: `pi-mono` shows how far a layered runtime can go before product assumptions start to dominate the core.
+## Architecture
 
-## Tool Call Method
+The repo has clean package layering. `packages/ai` owns provider and transport-facing abstractions, `packages/agent` owns the generic loop and message model, and `packages/coding-agent` adds sessions, compaction, prompt construction, slash commands, prompt templates, skills, and CLI/TUI modes. That makes it more composable than the product-heavy monoliths in the set, even if its seams are package contracts rather than top-level traits.
 
-`pi-mono` separates tool schema description from tool execution. The lower layers expose serializable tool definitions and streaming tool-call deltas, while `pi-agent-core` adds automatic execution, argument validation, and sequential or parallel tool handling. Higher layers such as `pi-coding-agent` then provide concrete coding tools like file operations, shell, and search.
+The important pattern for `brain` is the progression from reusable loop core to coding-agent shell without collapsing both into one module.
 
-This is one of the clearest examples of tool orchestration being layered instead of dumped into a single app package. It is still more package- and hook-driven than trait-driven, but the structure is close in spirit to `brain`.
+## Agent Loop
 
-## Provider / Model / Mode Method
+`packages/agent/src/agent-loop.ts` implements an explicit iterative loop. `runLoop(...)` has an outer loop for queued follow-up messages and an inner loop for tool-call execution plus steering interruptions. It converts `AgentMessage[]` to provider-facing `Message[]` only at the LLM boundary via `convertToLlm`, then re-enters the inner loop whenever tool results or steering messages require another model turn.
 
-The provider layer is strong. `pi-ai` separates model metadata, provider wiring, and streaming APIs, while `pi-coding-agent` adds a model registry for overrides, custom models, and OAuth-aware provider registration.
+Streaming is model/provider specific, but the loop is event-oriented. The loop delegates actual streaming to the configured provider stream function and surfaces tool execution, steering, and follow-up state through the agent session/event model. Unlike OpenCode or Codex, pi-mono does not turn every low-level token delta into a persisted structured session part; the core loop stays lighter.
 
-This is a practical pattern for `brain-providers`: keep the provider layer reusable and typed, then let higher layers own model selection policy. The main difference is that `pi-mono` expresses this through package contracts rather than a narrow trait vocabulary.
+Tool dispatch is configurable and can be parallel. `agent.ts` defaults `toolExecution` to `"parallel"`, and `agent-loop.ts` has separate paths for parallel and sequential execution while preserving ordered result insertion back into the message stream. Steering can interrupt after tool execution, and follow-up messages are only delivered once there are no more tool calls or steering messages pending.
 
-## Agent Loop Method
+Compaction lives one layer up in the coding-agent package. `coding-agent/src/core/compaction/compaction.ts` provides pure functions such as `shouldCompact(...)`, `serializeConversation(...)`, and `compact(...)`, while the session manager handles persistence and reload after compaction. The compaction logic chooses cut points, preserves recent context, extracts file operations, and can generate multiple summary components in parallel before merging them.
 
-This is the closest direct competitor area. `pi-agent-core` exposes an explicit loop with turns, streaming assistant output, tool execution, steering interrupts, and follow-up queues. `pi-coding-agent` then wraps that loop with session management, compaction, retry, and extension hooks.
+Retry and recovery are split across layers. In the generic agent layer, retry delay and maximum retry wait are configurable. In the OpenAI Codex Responses adapter, `openai-codex-responses.ts` retries transient network and rate-limit failures and surfaces friendlier error text for final failures. This is more modular than OpenCode's all-in-one runtime, but also more distributed.
 
-The layering is useful because it preserves a meaningful "runtime core" even while allowing a full product shell above it. `brain` can learn from this without adopting all of the coding-agent-specific assumptions.
+Subagents are not a first-class persisted child-session system in `packages/agent`, but the coding agent supports branching and session forking. Session trees, `/fork`, branch summaries, and parent-session references are all evidence that the product shell treats branching as a first-class concept even if it is not modeled as Codex-style spawned agent threads.
 
-## Permissions / Sandbox Method
+Planning artifacts are present, but not as one named plan mode. Branch summaries, compaction summaries, prompt templates, and slash-command-driven workflows make pi-mono good at producing structured intermediate artifacts, yet the current source snapshot does not show a dedicated read-only planning runtime mode comparable to Codex or OpenCode.
 
-Permissions are mostly enforced through hooks and extensions rather than a single engine-wide runtime boundary. The coding agent can implement confirmation gates for risky actions, while package-specific components such as `pi-mom` add stronger sandbox options for their own deployment model.
+Loop limits are explicit but softer than ZeroClaw's single constant. The generic loop stops when there are no more tool calls, steering messages, or follow-up messages, while higher-level session logic and compaction settings control context growth. Branching and compaction prevent long sessions from becoming one unbounded flat transcript.
 
-That makes the system flexible, but also somewhat inconsistent across packages. `brain` can differentiate by making permission and execution boundaries clearer and more uniform at the engine level.
+Key types and functions:
 
-## Platform Support
+- `runLoop(...)` in `repocache/badlogic/pi-mono/packages/agent/src/agent-loop.ts`
+- `Agent` state/config in `repocache/badlogic/pi-mono/packages/agent/src/agent.ts`
+- `shouldCompact(...)`, `serializeConversation(...)`, and `compact(...)` in `repocache/badlogic/pi-mono/packages/coding-agent/src/core/compaction/compaction.ts`
+- OpenAI Codex Responses provider in `repocache/badlogic/pi-mono/packages/ai/src/providers/openai-codex-responses.ts`
 
-`pi-mono` supports a broad set of product surfaces:
+## System Prompt & Prompt Building
 
-- CLI and terminal workflows
-- RPC mode over stdin/stdout JSONL
-- SDK usage
-- web UI packages
-- Slack bot deployment
-- browser-capable provider tooling in lower layers
+The coding-agent shell builds its system prompt in code, not as one static file. `coding-agent/src/core/system-prompt.ts` exposes `buildSystemPrompt(...)`, which either wraps a custom system prompt or builds a default prompt that includes tool descriptions, guideline bullets, documentation pointers, project context files, skills, current date, and current working directory.
 
-This breadth makes it a valuable benchmark for transport thinking, especially if `brain` wants to support multiple frontends without bloating its orchestration core.
+Dynamic prompt assembly is strong and explicit. `agent-session.ts` rebuilds the base system prompt whenever the active tool set changes, pulling in tool-specific prompt snippets and guidelines from extensions, context files from the resource loader, and preloaded skills. `resource-loader.ts` collects system prompt overrides, append-only prompt fragments, ancestor/project context files, and skills from global plus project-local locations.
 
-## Technical Architecture
+`AGENTS.md`-style project context injection is present through the resource loader rather than a hardcoded AGENTS-only path. Context files are appended under `# Project Context`, and skills are injected in a compact `<available_skills>` block. The prompt is also intentionally documentation-aware for the `pi` ecosystem, pointing the model at local docs when users ask about pi-specific functionality.
 
-The repo has clear package layering:
+There is a generalized prompt-template system for user commands. `prompt-templates.ts` loads markdown prompt files from global, project, and explicit paths, parses frontmatter, supports argument substitution like `$1`, `$@`, and `$ARGUMENTS`, and exposes those templates as slash commands in the interactive shell.
 
-- provider and model layer
-- agent runtime layer
-- coding-agent product layer
-- UI and deployment shells
+Context-window management is handled mainly through compaction settings rather than ad hoc truncation. `CompactionSettings` reserve a token budget and preserve recent tokens, while `serializeConversation(...)` and cut-point logic decide what gets summarized. The current message history is converted to LLM messages only once per turn, keeping serialization logic centralized.
 
-This is more composable than the product-heavy monoliths in this comparison set, but still more opinionated than `brain`'s explicit five-trait design. Persistence, compaction, and transport are concrete implementations before they are abstract engine concepts.
+Key types and functions:
+
+- `buildSystemPrompt(...)` in `repocache/badlogic/pi-mono/packages/coding-agent/src/core/system-prompt.ts`
+- `_rebuildSystemPrompt(...)` in `repocache/badlogic/pi-mono/packages/coding-agent/src/core/agent-session.ts`
+- `ResourceLoader` in `repocache/badlogic/pi-mono/packages/coding-agent/src/core/resource-loader.ts`
+- `loadPromptTemplates(...)` in `repocache/badlogic/pi-mono/packages/coding-agent/src/core/prompt-templates.ts`
+- `formatSkillsForPrompt(...)` in `repocache/badlogic/pi-mono/packages/coding-agent/src/core/skills.ts`
+
+## Provider & Model
+
+The provider layer is one of pi-mono's strongest areas. `packages/ai` standardizes model/provider interaction, while the coding agent adds a model registry, provider overrides, and OAuth-aware auth handling. The OpenAI Codex Responses adapter is a good example of how the product shell still reuses the lower-level provider contract cleanly.
+
+This is a strong reference for `brain-providers`: keep providers reusable, then let the product shell own model-selection policy and auth ergonomics.
+
+The mode story is clearer at the product shell level than at the model layer. pi-mono has interactive, print, and RPC execution modes; thinking-level controls; session branching; and slash-command workflows that effectively change how the user collaborates with the agent. It is a useful example of a runtime where “mode” mostly lives in transports and session UX rather than in one monolithic agent profile enum.
+
+## Tool System
+
+Tools are layered rather than monolithic. The generic agent package works with serializable tool schemas and tool execution strategies, while `packages/coding-agent` provides the concrete coding tools: read, write, edit, grep, find, bash, and extension-defined tools. Search-heavy primitives still shell out to tools like `rg` and `fd`, while file mutations stay local and native to Node.
+
+The system also supports extension-provided tool snippets and prompt guidelines, which feed back into system prompt construction.
+
+## Storage & Sessions
+
+pi-mono persists sessions as JSONL under `~/.pi/agent/sessions/<encoded-cwd>/`, with a session header followed by entry records. Session entries form a tree via parent IDs, which supports forking, branch summaries, thinking-level changes, labels, and compaction entries. Credentials live in `auth.json`, keyed by provider, and the project-local `.pi/` directory holds config and additional resources.
+
+The data model is close to `brain` in spirit: messages remain structurally simple, but the session file contains richer event metadata than a pure flat transcript.
 
 ## Server/Client Architecture
 
-### Process Model
+The default modes are single-process. `pi` runs the TUI in-process, and `pi --mode print` is a one-shot text mode. The only real client/server boundary is `pi --mode rpc`, which exposes the agent over stdin/stdout JSONL and is used by IDE or external clients that spawn the agent as a subprocess.
 
-pi-mono is a **single-process** design with three modes. There is no HTTP server. The only client/server boundary is an RPC mode over stdin/stdout JSONL.
+There is no HTTP/SSE/WebSocket server. That makes pi-mono a useful transport reference for subprocess RPC rather than for long-running daemon architecture.
 
-| Command | Server Location | Transport |
-|---------|-----------------|-----------|
-| `pi` (interactive TUI) | Same process | In-process (`AgentSession` direct calls) |
-| `pi --mode print` | Same process | Single-shot, exit |
-| `pi --mode rpc` | Same process | stdin/stdout JSONL |
+## Security & Permissions
 
-### Default Flow (Interactive TUI)
+Permissions are mostly app-layer and hook-based. The coding agent can ask before risky actions, and related packages such as `pi-mom` document stronger sandbox options, but there is no one engine-wide sandbox boundary comparable to Codex or even ZeroClaw's runtime adapters.
 
-1. `main.ts` → `createAgentSession()` → `AgentSession`.
-2. Creates `InteractiveMode(session, ...)` which holds both `AgentSession` and `TUI` (from `@mariozechner/pi-tui`).
-3. TUI subscribes to `session.subscribe()` for events and calls `session.prompt()`, `session.steer()` for actions.
-4. No RPC, HTTP, or WebSocket between TUI and agent -- only direct method calls in the same process.
+This is a place where `brain` can differentiate by making execution policy uniform across transports.
 
-### RPC Mode (stdin/stdout JSONL)
+## CLI & TUI
 
-`pi --mode rpc` starts the agent as an RPC server over stdio:
+pi-mono has a strong terminal surface. The default `pi` command launches the TUI, `pi --mode rpc` exposes the JSONL RPC mode, prompt templates and skills surface as slash commands, and the interactive shell supports commands like `/model`, `/compact`, `/fork`, `/export`, `/share`, `/tree`, and `/settings`. Its TUI also stands out for direct editing affordances and session-tree UX. For the full command and keybinding comparison, see `openspec/changes/add-tui-transport/competitor-analysis.md`.
 
-- **Protocol**: LF-delimited JSONL (`\n` only) over stdin (commands) and stdout (responses + events).
-- **Commands**: JSON objects like `{"type": "prompt", "message": "Hello!"}`.
-- **Responses**: `{"type": "response", "command": "...", "success": true|false, ...}`.
-- **Events**: Agent events streamed on stdout as JSON lines.
+If `brain` wants explicit planning UX, pi-mono is the contrast case: it offers the building blocks for plan-like artifacts and branching, but not one dominant “Plan mode” concept.
 
-`RpcClient` (in `rpc-client.ts`) spawns `pi --mode rpc` as a child process and communicates over piped stdin/stdout:
+## Mapping to brain Traits
 
-```
-spawn("node", [cliPath, "--mode", "rpc", ...args], { stdio: ["pipe", "pipe", "pipe"] })
-```
+- `Provider`: first-class through `packages/ai`.
+- `Tool`: first-class through agent/coding-agent tool contracts.
+- `Store`: first-class in practice through concrete session managers and files.
+- `AgentLoop`: first-class via `packages/agent`.
+- `Transport`: first-class via interactive, print, and RPC modes.
 
-This is used by IDE extensions and external integrations. The agent process exits when stdin closes.
+## Key Takeaways
 
-### No HTTP Server
-
-There is no HTTP, WebSocket, or SSE server anywhere in pi-mono. The web UI (`pi-web-ui`) uses the `Agent` from `pi-agent-core` directly in the browser, making API calls to LLM providers from the client side.
-
-### Server Lifecycle
-
-No persistence of the process. Interactive and print modes exit when the user quits. RPC mode exits when stdin closes. Sessions are persisted to disk (`~/.pi/agent/sessions/`) but no process survives.
-
-### Client/Server Boundary
-
-The only boundary is RPC mode's JSONL protocol over stdin/stdout. There is no trait or interface for this boundary -- `runRpcMode` reads commands and dispatches to `AgentSession` methods directly.
-
-## Mapping To `brain` Core Traits
-
-- `Provider`: first-class boundary through `pi-ai` and the model registry layer.
-- `Tool`: first-class boundary through `AgentTool` and concrete built-in tool packages.
-- `Store`: first-class in practice through concrete session-manager and store components rather than a minimal generic trait.
-- `AgentLoop`: first-class boundary through `pi-agent-core`.
-- `Transport`: first-class boundary through provider transport choices, proxy/RPC layers, and multiple runtime modes.
-
-This is the cleanest TypeScript comparison for `brain` because all five concerns exist clearly, even if some are package contracts rather than narrow engine traits.
-
-## Concrete Tool Implementation Notes
-
-- `FileRead`: native Node filesystem implementation.
-- `FileWrite`: native Node filesystem implementation.
-- `FileEdit`: native Node read/replace/write flow with local diff and fuzzy-match helpers.
-- `Glob` / `Find`: implemented as `find`, primarily by shelling out to `fd`; local glob logic mainly supports ignore discovery.
-- `Grep`: implemented by shelling out to `rg`, then reconstructing context and truncation behavior in Node.
-- `Shell` / `Bash`: implemented locally by spawning the configured shell.
-
-`pi-mono` is especially useful because it mixes both styles `brain` may care about: native in-process file tools and shell-out search tools.
-
-## What To Steal
-
-- Layered progression from provider package to loop package to product shell.
-- Explicit loop orchestration with streaming and tool continuation.
-- RPC mode and multi-shell thinking that does not require one UI to dominate the runtime.
-
-## What To Differentiate
-
-- Keep the engine traits more explicit and central than package contracts and hooks.
-- Make permission and sandbox behavior more consistent across surfaces.
-- Avoid letting coding-agent assumptions become the default engine shape.
-
-## Data Model
-
-### Sessions
-
-`SessionHeader { type: "session", version, id, timestamp, cwd, parentSession }`. Sessions stored as JSONL files at `~/.pi/agent/sessions/<encoded-cwd>/<timestamp>_<uuid>.jsonl`. First line is header; rest are `SessionEntry` records. `SessionInfo` (for listing): path, id, cwd, name, parentSessionPath, created, modified, messageCount, firstMessage.
-
-### Messages
-
-Union type: `UserMessage { role: "user", content, timestamp }`, `AssistantMessage { role: "assistant", content: (TextContent | ThinkingContent | ToolCall)[], api, provider, model, usage, stopReason, timestamp }`, `ToolResultMessage { role: "toolResult", toolCallId, toolName, content, details, isError, timestamp }`. Tool calls are content blocks inside AssistantMessage, not separate messages. Coding-agent adds custom roles: `BashExecutionMessage`, `CompactionSummaryMessage`, `BranchSummaryMessage`, `CustomMessage`.
-
-### Session Entries
-
-JSONL entries are a tree structure via parentId: `SessionMessageEntry`, `ThinkingLevelChangeEntry`, `ModelChangeEntry`, `CompactionEntry` (summary, firstKeptEntryId, tokensBefore), `BranchSummaryEntry`, `LabelEntry`, `SessionInfoEntry`, `CustomEntry`, `CustomMessageEntry`.
-
-### Credentials
-
-`AuthCredential = ApiKeyCredential { type: "api_key", key } | OAuthCredential { type: "oauth", ...OAuthCredentials }`. Stored in `~/.pi/agent/auth.json` (chmod 0600) as flat dict keyed by provider. Resolution: runtime override -> auth.json -> env vars -> fallback resolver.
-
-### Compaction
-
-`CompactionSettings { enabled, reserveTokens: 16384, keepRecentTokens: 20000 }`. Flow: `prepareCompaction()` -> `findCutPoint()` -> `generateSummary()` -> `compact()` -> append `CompactionEntry` to JSONL.
-
-### Storage
-
-Sessions at `~/.pi/agent/sessions/<encoded-cwd>/`. Credentials at `~/.pi/agent/auth.json`. Config in `.pi/` project-local. No dedicated project entity; sessions keyed by encoded cwd.
+- `Steal:` the layered progression from provider package to loop package to product shell.
+- `Steal:` prompt-template loading, skill injection, compaction as a pure module, and RPC mode.
+- `Differentiate:` make the engine seams explicit traits instead of package conventions.
+- `Differentiate:` make permissions and sandbox behavior more uniform across surfaces.
+- `Differentiate:` keep the runtime generic even when shipping a coding-agent shell on top.
 
 ## Key Evidence
 
-- `repocache/badlogic/pi-mono/packages/coding-agent/src/main.ts`
-- `repocache/badlogic/pi-mono/packages/coding-agent/src/modes/interactive/interactive-mode.ts`
-- `repocache/badlogic/pi-mono/packages/coding-agent/src/modes/rpc/rpc-mode.ts`
-- `repocache/badlogic/pi-mono/packages/coding-agent/src/modes/rpc/rpc-client.ts`
-- `repocache/badlogic/pi-mono/packages/coding-agent/docs/rpc.md`
-- `repocache/badlogic/pi-mono/package.json`
-- `repocache/badlogic/pi-mono/packages/ai/README.md`
-- `repocache/badlogic/pi-mono/packages/ai/src/types.ts`
-- `repocache/badlogic/pi-mono/packages/ai/src/stream.ts`
-- `repocache/badlogic/pi-mono/packages/agent/README.md`
 - `repocache/badlogic/pi-mono/packages/agent/src/agent-loop.ts`
-- `repocache/badlogic/pi-mono/packages/agent/src/types.ts`
-- `repocache/badlogic/pi-mono/packages/coding-agent/README.md`
-- `repocache/badlogic/pi-mono/packages/coding-agent/src/core/model-registry.ts`
-- `repocache/badlogic/pi-mono/packages/coding-agent/src/core/tools/read.ts`
-- `repocache/badlogic/pi-mono/packages/coding-agent/src/core/tools/write.ts`
-- `repocache/badlogic/pi-mono/packages/coding-agent/src/core/tools/edit.ts`
-- `repocache/badlogic/pi-mono/packages/coding-agent/src/core/tools/find.ts`
-- `repocache/badlogic/pi-mono/packages/coding-agent/src/core/tools/grep.ts`
-- `repocache/badlogic/pi-mono/packages/coding-agent/src/core/tools/bash.ts`
+- `repocache/badlogic/pi-mono/packages/agent/src/agent.ts`
+- `repocache/badlogic/pi-mono/packages/coding-agent/src/core/system-prompt.ts`
+- `repocache/badlogic/pi-mono/packages/coding-agent/src/core/agent-session.ts`
+- `repocache/badlogic/pi-mono/packages/coding-agent/src/core/resource-loader.ts`
+- `repocache/badlogic/pi-mono/packages/coding-agent/src/core/prompt-templates.ts`
+- `repocache/badlogic/pi-mono/packages/coding-agent/src/core/compaction/compaction.ts`
+- `repocache/badlogic/pi-mono/packages/coding-agent/src/core/skills.ts`
+- `repocache/badlogic/pi-mono/packages/ai/src/providers/openai-codex-responses.ts`
 - `repocache/badlogic/pi-mono/packages/coding-agent/docs/rpc.md`
-- `repocache/badlogic/pi-mono/packages/mom/docs/sandbox.md`
+- `repocache/badlogic/pi-mono/packages/coding-agent/docs/tui.md`
+- `repocache/badlogic/pi-mono/packages/coding-agent/docs/keybindings.md`

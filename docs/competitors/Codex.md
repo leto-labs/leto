@@ -1,254 +1,137 @@
 # Codex
 
-## One-Line Take
+## Overview
 
-`Codex` is a full-stack Rust AI coding agent with strong sandboxing, MCP integration, and broad platform coverage, but a tightly integrated core.
+`Codex` is the strongest Rust product benchmark in this set: excellent sandboxing, polished tooling, and durable session infrastructure, but with most of the runtime concentrated in `codex-core`.
 
-## Snapshot
+| Item | Value |
+| --- | --- |
+| Vertical | Full Rust AI coding product spanning CLI/TUI, app server, MCP server, remote clients, and IDE integration |
+| Best comparison inside `brain` | Tool routing, sandboxing, session persistence, multi-agent support, and app-server transport boundaries |
+| Main lesson | `Codex` validates many of `brain`'s design instincts, but it solves them inside one concrete product runtime rather than a small trait kernel |
 
-- Vertical: end-user AI coding product spanning CLI, TUI, desktop app server, MCP server, and IDE integration (VSCode).
-- Best comparison inside `brain`: product pressure across all five traits — `Provider`, `Tool`, `Store`, `AgentLoop`, and `Transport`.
-- Main lesson: a 70+ crate Rust workspace can deliver a polished product experience, but the central `codex-core` runtime concentrates too many responsibilities to serve as a reusable engine.
+## Architecture
 
-## Tool Call Method
+The workspace is broad, but `codex-rs/core` is the center of gravity. `codex.rs` owns session initialization, turn orchestration, prompt building, compaction triggers, event emission, and history persistence. `tools/` contains the strongest clean seam in the repo via `ToolHandler`, `ToolRegistry`, and `ToolRouter`. `context_manager/` and `state/session.rs` own history normalization and token accounting. `compact.rs` and `compact_remote.rs` handle summarization, while `agent/control.rs` adds subagent spawning and thread forking. The app-server, TUI, connectors, and sandbox crates all wrap or feed back into this same core runtime.
 
-`Codex` defines tools as JSON Schema specs and implements them via a `ToolHandler` trait:
+This is more modular than a monolith, but it is still product-first architecture. Provider, store, loop, and transport are concrete implementations that happen to be well-factored, not interchangeable top-level traits.
 
-```rust
-#[async_trait]
-pub trait ToolHandler: Send + Sync {
-    type Output: ToolOutput + 'static;
-    fn kind(&self) -> ToolKind;  // Function | Mcp
-    async fn is_mutating(&self, invocation: &ToolInvocation) -> bool;
-    async fn handle(&self, invocation: ToolInvocation) -> Result<Self::Output, FunctionCallError>;
-}
-```
+## Agent Loop
 
-A `ToolRegistryBuilder` builds specs and registers handlers via `build_specs_with_discoverable_tools()`. A separate `ToolRouter` maps model response items (FunctionCall, ToolSearchCall, LocalShellCall, CustomToolCall, Mcp) to dispatched `ToolCall` values. Tool payloads are variant-typed: `ToolPayload::Function`, `ToolPayload::Mcp`, `ToolPayload::LocalShell`, `ToolPayload::ToolSearch`, `ToolPayload::Custom`.
+The loop is iterative and turn-driven. `CodexThread` exposes `submit(...)`, `steer_input(...)`, and `next_event(...)`, but the real work happens in `codex.rs`: build the prompt, send a sampling request, stream `ResponseEvent`s, dispatch tools, append tool results to history, and continue until there is no follow-up work left. This is not single-pass; tool calls and pending user steering can extend a turn.
 
-Results are turned into `ResponseInputItem` and fed back into the session. Mutating tools wait on a `tool_call_gate` before running, and `after_tool_use` hooks can abort on failure.
+Streaming is first-class. `run_sampling_request(...)` constructs a `Prompt`, creates a `ToolCallRuntime`, and then consumes `ResponseEvent` values such as `OutputItemAdded`, `OutputItemDone`, `OutputTextDelta`, `ReasoningSummaryDelta`, `RateLimits`, and `Completed`. The event stream updates UI/front-end consumers through emitted protocol events while simultaneously recording the same items into rollout/history state.
 
-Built-in tools include: `exec_command`, `write_stdin`, `shell`, `read_file`, `grep_files`, `list_dir`, `apply_patch`, MCP resource tools, `update_plan`, `view_image`, `request_user_input`, `request_permissions`, `tool_search`, `tool_suggest`, `artifacts`, `js_repl`, and multi-agent tools (`spawn_agent`, `send_input`, `resume_agent`, `wait_agent`, `close_agent`).
+Tool dispatch is routed, typed, and partially parallelized. `build_prompt(...)` advertises `parallel_tool_calls` when the selected model supports them. `ToolRouter` maps model-visible specs to handlers, and `handle_output_item_done(...)` creates tool futures that are queued into `in_flight`. Mutating tools are gated by `tool_call_gate`, and tool outputs are fed back into the next prompt through the session history as `ResponseInputItem`/`ResponseItem` values.
 
-## Provider / Model / Mode Method
+Codex also has an explicit planning path inside the loop. The streaming code in `codex.rs` maintains `plan_mode_state` and handles assistant item emission differently while plan mode is active, which is stronger than a simple “don’t run tools” instruction. Planning is treated as a dedicated collaboration mode that changes how turn output is shaped before the user approves further action.
 
-Provider support is registry-driven via `ModelProviderInfo` with built-in entries for `openai`, `ollama`, and `lmstudio`. The config file can extend or override these with `base_url`, `env_key`, `wire_api`, retry, and timeout settings. All providers use the Responses API wire format (`wire_api = "responses"`).
+Compaction is deeply integrated with loop control. `codex.rs` checks total token usage against each model's `auto_compact_token_limit`, can run pre-sampling compaction when switching to a smaller context window, and triggers either inline or remote summarization. `compact.rs` builds a summarization prompt from `templates/compact/prompt.md`, retries streaming if the compaction request disconnects, trims older history if the summary prompt itself overflows, and replaces history with a compacted transcript plus reinjected initial context.
 
-Model selection flows through a `ModelsManager` that resolves from config, CLI flags, and session state. `ModelInfo` carries per-model metadata including `shell_type`, `apply_patch_tool_type`, and `web_search_tool_type`.
+Retry and error recovery are robust. Sampling retries respect `turn_context.provider.stream_max_retries()`. When the retry budget is exhausted, the runtime can switch fallback transport from WebSocket to HTTPS before giving up. Retry notifications are surfaced to the UI as stream errors, `ResponseEvent::RateLimits` snapshots update session state, and context-window overflow is escalated explicitly as `CodexErr::ContextWindowExceeded`.
 
-There is no explicit `Provider` trait; `ModelClient` is a concrete type that wraps HTTP/WebSocket calls to the Responses API. The `codex-connectors`, `lmstudio`, and `ollama` crates provide adapter layers.
+Subagents are first-class, not bolted on. `agent/control.rs` provides `spawn_agent(...)` and `spawn_agent_with_options(...)`, can fork rollout history into a child session, and records the child thread as `SessionSource::SubAgent(...)`. The main tool surface also exposes `spawn_agent`, `send_input`, `resume_agent`, `wait`, and `close_agent`.
 
-Modes exist as config profiles and approval/sandbox policies. Agent roles (via `spawn_agent`) can override model and reasoning effort.
+The runtime has multiple turn/loop guards. Tool execution is bounded by the model and prompt design rather than one simple `max_iterations` field, but compaction thresholds, transport retry budgets, plan-mode state, and history token limits all act as loop controls. Child runs inherit session source and can fork history rather than recursively mutating the same thread forever.
 
-## Agent Loop Method
+Key types and functions:
 
-The loop is driven by `CodexThread` which wraps the `Codex` runtime. `submit()`, `steer_input()`, and `next_event()` drive turn progression. The `Session` struct holds conversation state, `ModelClient`, `ToolRouter`, MCP connections, and hooks.
+- `CodexThread::{submit, steer_input, next_event}` in `repocache/openai/codex/codex-rs/core/src/codex_thread.rs`
+- `run_sampling_request(...)` and `build_prompt(...)` in `repocache/openai/codex/codex-rs/core/src/codex.rs`
+- `ContextManager` in `repocache/openai/codex/codex-rs/core/src/context_manager/history.rs`
+- `run_inline_auto_compact_task(...)` in `repocache/openai/codex/codex-rs/core/src/compact.rs`
+- `spawn_agent_with_options(...)` in `repocache/openai/codex/codex-rs/core/src/agent/control.rs`
+- `ToolRouter` in `repocache/openai/codex/codex-rs/core/src/tools/router.rs`
 
-Turn flow: new turn → stream model output → handle `ResponseItem` variants (text, function calls, tool_search, local_shell, custom, MCP) → dispatch tools → append results → repeat.
+## System Prompt & Prompt Building
 
-Streaming uses the Responses API over WebSocket or SSE via `ResponseStream` / `ResponseEvent`. Retries are configurable at both HTTP level (`request_max_retries`) and stream level (`stream_max_retries`, `stream_idle_timeout`).
+The static base prompt is hardcoded as markdown assets. `core/gpt_5_1_prompt.md` is the canonical built-in system/developer prompt, and it already bakes in important harness expectations such as AGENTS.md handling, update-plan behavior, patch usage, and validation style. Compaction uses its own static prompt assets from `templates/compact/prompt.md` and `templates/compact/summary_prefix.md`.
 
-Compaction is supported through a dedicated `compact` module with `run_inline_auto_compact_task` and remote compaction via `CompactClient`. Session persistence uses JSONL rollout files, with SQLite (`state_5.sqlite`) for thread metadata and backfill.
+Dynamic prompt assembly happens in `codex.rs`. Session initialization loads `user_instructions` via `get_user_instructions(&config)`, merges base instructions from config or conversation history, resolves dynamic tools, and stores the result in the turn context. `build_prompt(...)` then serializes the current history plus tool specs into a `Prompt { input, tools, parallel_tool_calls, base_instructions, personality, output_schema }`.
 
-## Permissions / Sandbox Method
+`AGENTS.md` injection is explicit and source-backed. `instructions/user_instructions.rs` wraps AGENTS content using the prefix `# AGENTS.md instructions for ...` and serializes it into a structured response item fragment. Skills are handled similarly through `SkillInstructions`. Codex also supports user prompt templates via `custom_prompts.rs`, which discovers markdown files under `$CODEX_HOME/prompts`, parses frontmatter, and surfaces them as slash-command-style custom prompts.
 
-Codex has the strongest sandboxing of any framework in this set. `SandboxPolicy` defines four levels: `ReadOnly`, `WorkspaceWrite`, `DangerFullAccess`, and `ExternalSandbox`.
+Context-window management is one of Codex's strongest areas. `ContextManager` normalizes history, tracks model-visible bytes, estimates token usage, and prepares the exact history slice sent to the model. `state/session.rs` stores that manager, updates token info after each response, and supports replacement with compacted history. When the prompt exceeds the model window, Codex can compact, drop older items during compaction itself, or error explicitly if the turn cannot be made to fit.
 
-Platform-specific implementations:
-- **macOS**: Seatbelt profiles with `create_seatbelt_command_args_for_policies_with_extensions`.
-- **Linux**: Dedicated `codex-linux-sandbox` binary using Landlock LSM and seccomp, with bubblewrap fallback.
-- **Windows**: Restricted token sandbox via `codex-windows-sandbox`.
+Message history formatting is concrete and structured. History is not sent as a flat chat transcript string; it is stored as `ResponseItem`/`RolloutItem` data and normalized by `ContextManager` before building the next `Prompt`. That gives Codex strong invariants around tool-call/result ordering, multimodal items, compaction items, and persisted replay state.
 
-Execution permissions are modeled as `SandboxPermissions` (`UseDefault`, `WithAdditionalPermissions`, `RequireEscalated`). The `request_permissions` tool allows runtime permission escalation through the approval flow. `AskForApproval` and `GuardianApprovalRequest` gate mutating tool calls.
+Key types and functions:
 
-## Platform Support
+- `gpt_5_1_prompt.md` in `repocache/openai/codex/codex-rs/core/gpt_5_1_prompt.md`
+- `build_prompt(...)` in `repocache/openai/codex/codex-rs/core/src/codex.rs`
+- `UserInstructions` in `repocache/openai/codex/codex-rs/core/src/instructions/user_instructions.rs`
+- `discover_prompts_in(...)` in `repocache/openai/codex/codex-rs/core/src/custom_prompts.rs`
+- `ContextManager` in `repocache/openai/codex/codex-rs/core/src/context_manager/history.rs`
+- `Session` state in `repocache/openai/codex/codex-rs/core/src/state/session.rs`
 
-- CLI: `codex` (interactive), `codex exec` (non-interactive batch mode).
-- TUI: `codex-tui`, `codex-tui-app-server` (app-server-backed terminal UI).
-- App server: `codex app-server` (stdio or WebSocket protocol for IDE integration).
-- MCP server: `codex mcp-server` mode.
-- IDE: VSCode integration via the app server protocol.
-- Remote: `--remote ws://...` for remote TUI connections.
+## Provider & Model
 
-## Technical Architecture
+Provider support is registry-driven rather than trait-driven. `ModelProviderInfo` carries built-in and configured providers such as OpenAI, Ollama, and LM Studio, while `ModelClient` is the concrete runtime that speaks the Responses API. Model metadata includes tool-support flags like `shell_type`, `apply_patch_tool_type`, and `web_search_tool_type`, and the models manager refreshes server model data when it receives new `ModelsEtag` events.
 
-The repo is a 70+ crate Rust workspace. `codex-core` is the dominant runtime, pulling in tools, sandboxing, connectors, MCP, and session management. Dedicated crates exist for `apply-patch` (tree-sitter), `file-search` (nucleo/ignore), `linux-sandbox` (Landlock/seccomp), and `windows-sandbox`.
+Modes are spread across config, sandbox policy, approval mode, and plan/review flows. Codex does not expose one unified `Mode` trait, but it does let profiles and tools shape the runtime in similarly powerful ways.
 
-The binary is `codex` from `cli/src/main.rs`, with additional binaries for `codex-exec`, `codex-app-server`, `codex-mcp-server`, and `codex-linux-sandbox`.
+The mode system is broad enough to matter as its own design pattern. There is an explicit `/plan` command in the TUI, a `review` command path, model/reasoning-effort selection, fast mode, collaboration modes, remote mode, and config profiles. In practice, Codex treats “mode” as a bundle of UI state, provider/model policy, and loop behavior rather than one enum.
 
-The architecture is more modular than a monolith but less trait-driven than `brain` aims to be. Tools and MCP are pluggable via the `ToolHandler` trait, but provider, loop, and store are concrete implementations embedded in `core`.
+## Tool System
+
+Tools are the cleanest subsystem seam in the repo. `ToolHandler` defines the handler contract, `ToolRegistryBuilder` registers concrete built-ins and MCP tools, and `ToolRouter` mediates between model-visible specs and execution. Payloads are strongly typed, and Codex distinguishes function tools, MCP tools, local shell calls, tool search, and custom-tool flows.
+
+The built-in tool surface is broad: file read/list/search, shell/PTTY execution, `apply_patch`, MCP resource access, image viewing, plan updates, permissions requests, and subagent control. Mutating tools integrate tightly with approvals and sandboxing via the `tool_call_gate`.
+
+## Storage & Sessions
+
+Codex persists threads as both JSONL rollouts and SQLite metadata. JSONL is the source-of-truth event log under `~/.codex/sessions/rollout-*.jsonl`, while `state_5.sqlite` mirrors thread metadata, dynamic tools, memories, and agent jobs for listing and search. Archived sessions move to `archived_sessions/`.
+
+The message/session model is event-rich rather than chat-flat. `RolloutItem` includes session metadata, response items, compaction records, turn-context metadata, and event messages. Threads store `cwd` and git metadata directly instead of introducing a separate project entity. Credentials can be stored in `auth.json`, OS keyring, or age-encrypted secrets.
 
 ## Server/Client Architecture
 
-### Process Model
+Codex uses a hybrid in-process and out-of-process app-server model. The default TUI still talks to an app-server boundary, but `InProcessAppServerClient` implements that boundary with channels inside the same process. `codex app-server` exposes the same protocol over stdio or WebSocket, and `codex --remote ws://...` swaps in a remote client without changing the TUI architecture.
 
-Codex uses a **hybrid in-process / out-of-process** model. The default `codex` command runs everything in one process, with the TUI talking to an embedded app server via in-memory channels. For IDE integration, a separate `codex app-server` process communicates over stdio or WebSocket.
+This is an important design validation for `brain`: the UI is always a client of an API boundary, even when the "server" lives in the same process.
 
-| Command | Server Location | Transport |
-|---------|-----------------|-----------|
-| `codex` (interactive TUI) | Same process | In-memory channels (no process boundary) |
-| `codex exec` (batch mode) | Same process | In-memory channels |
-| `codex app-server` | Separate process | stdio or WebSocket (`--listen ws://...`) |
-| `codex --remote ws://...` | External | WebSocket to `codex app-server` |
+## Security & Permissions
 
-### Default Flow (`codex`)
+Codex has the strongest built-in sandboxing in the comparison set. `SandboxPolicy` encodes read-only, workspace-write, danger-full-access, and external-sandbox modes, with platform-specific implementations for macOS Seatbelt, Linux Landlock/seccomp, and Windows restricted tokens. Approval is layered on top through explicit permission tools and gating for mutating operations.
 
-1. `cli/main.rs` → `run_interactive_tui()` → checks `should_use_app_server_tui()` feature flag.
-2. Creates `InProcessAppServerClient` which runs `MessageProcessor` on Tokio tasks.
-3. stdio transports are replaced by bounded in-memory `mpsc` channels.
-4. TUI connects to app server via these channels using the same JSON-RPC protocol as the out-of-process version.
-5. `App::run(tui, app_server, ...)` starts the terminal UI.
+This is the best benchmark in the set for serious local execution controls.
 
-The TUI is **always a client** of the app server -- it never talks to `Codex`/`CodexThread` directly.
+## CLI & TUI
 
-### App Server (Out-of-Process)
+The CLI/TUI surface is broad and unusually mature. `codex` launches the default interactive UI, `codex exec` handles non-interactive runs, `codex app-server` serves IDE and remote clients, and the TUI exposes slash commands like `/model`, `/compact`, `/review`, `/fork`, `/permissions`, `/init`, `/ps`, and `/stop`. The app-server also enables remote TUI attach over WebSocket. For the full command and keybinding comparison, see `openspec/changes/add-tui-transport/competitor-analysis.md`.
 
-`codex app-server` runs `MessageProcessor` as a standalone server:
+For planning specifically, Codex is the clearest explicit benchmark in the set. `/plan` switches the TUI into Plan mode, and the app tracks planning state deeply enough to affect event emission and reasoning-scope prompts instead of treating planning as just another prompt convention.
 
-- **stdio mode** (default): JSON-RPC over stdin/stdout, used by VSCode extension.
-- **WebSocket mode** (`--listen ws://IP:PORT`): for remote TUI connections.
-- Hidden helper subcommands: `stdio-to-uds` (Unix domain socket relay), `responses-api-proxy` (HTTP proxy).
+## Mapping to brain Traits
 
-### Remote TUI
+- `Provider`: implicit, implemented as provider registries plus concrete `ModelClient`.
+- `Tool`: first-class via `ToolHandler`, `ToolRegistry`, and `ToolRouter`.
+- `Store`: implicit concrete storage via JSONL plus SQLite, not a store trait.
+- `AgentLoop`: implicit inside `codex.rs` and `Session`.
+- `Transport`: implicit via app-server, TUI, exec, MCP server, and remote WebSocket clients.
 
-`codex --remote ws://...` starts a TUI that connects to a running `codex app-server` instance over WebSocket instead of using in-memory channels. Same UI, different transport.
+## Key Takeaways
 
-### Server Lifecycle
-
-No persistent daemon for normal CLI use. The process exits when the user quits. The app server only persists while the `codex app-server` process is alive.
-
-### Binary Layout
-
-| Binary | Purpose |
-|--------|---------|
-| `codex` | Main CLI: subcommands, interactive TUI |
-| `codex-exec` | Non-interactive batch mode |
-| `codex-app-server` | Standalone server (stdio/WebSocket) for IDE |
-| `codex-tui` | Standalone TUI binary |
-| `codex-tui-app-server` | TUI that talks to app server |
-| `codex-mcp-server` | MCP server mode |
-| `codex-linux-sandbox` | Linux sandbox binary |
-
-### Client/Server Boundary
-
-The boundary is the app server's JSON-RPC protocol (requests + notifications). `InProcessAppServerClient` implements the same protocol over channels that `RemoteAppServerClient` implements over WebSocket. The TUI code is transport-agnostic -- it works identically with either client type.
-
-## Mapping To `brain` Core Traits
-
-- `Provider`: no explicit trait; `ModelProviderInfo` + concrete `ModelClient` + HTTP/WebSocket adapters in `codex-api`/`codex-connectors`.
-- `Tool`: `ToolHandler` trait, `ToolRegistry`, `ToolRouter`; closest match to `brain`'s `Tool` trait.
-- `Store`: `state_db` (SQLite), `rollout` (JSONL); no `Store` trait abstraction.
-- `AgentLoop`: implicit in `Codex`/`Session`; turn handling, streaming, tool dispatch; not a standalone interface.
-- `Transport`: `app-server` (stdio/WebSocket), `tui`, `exec`; no `Transport` trait abstraction.
-
-## Concrete Tool Implementation Notes
-
-- `read_file`: native `tokio::fs::File` with `BufReader`, slice and indentation modes. No shell-out.
-- `grep_files`: shell-out to `rg` (ripgrep) with `--files-with-matches`, `--sortr=modified`.
-- `list_dir`: native `tokio::fs::read_dir`, recursive with depth limit.
-- `apply_patch`: dedicated `codex-apply-patch` crate using tree-sitter for bash and `similar` for diffs.
-- `shell` / `shell_command`: spawns user shell (bash/powershell) via `ShellCommandHandler`; sandboxed.
-- `exec_command` / `write_stdin`: `UnifiedExecHandler` with PTY via `codex-utils-pty`; `UnifiedExecProcessManager`; sandboxed.
-
-No separate glob tool; `grep_files` covers file search and `list_dir` covers directory listing.
-
-## Storage Layout
-
-### Global (`~/.codex/` or `$CODEX_HOME`)
-
-```
-~/.codex/
-├── config.toml              # user config (TOML)
-├── auth.json                # CLI auth (API key / OAuth token)
-├── .credentials.json        # MCP OAuth (file mode)
-├── secrets/
-│   └── local.age            # age-encrypted secrets
-├── sessions/
-│   └── rollout-*.jsonl      # active session rollouts (JSONL)
-├── archived_sessions/
-│   └── rollout-*.jsonl      # archived sessions
-├── memories/
-│   ├── rollout_summaries/
-│   ├── raw_memories.md
-│   ├── MEMORY.md
-│   ├── memory_summary.md
-│   └── skills/
-├── log/                     # log files
-├── state_5.sqlite           # thread metadata, backfill, agent jobs
-├── logs_1.sqlite            # tracing logs (10 MiB/partition, 10-day retention)
-└── history.jsonl            # optional history
-```
-
-### Project-local (`.codex/`)
-
-```
-.codex/
-├── config.toml              # project config (trust, sandbox)
-├── skills/                  # project skills
-└── rules/                   # project rules
-```
-
-Config precedence: `/etc/codex/config.toml` → `~/.codex/config.toml` → `.codex/config.toml` → CLI flags.
-
-Auth supports multiple modes: `file` (default), `keyring` (OS keychain), `auto`, `ephemeral` (in-memory).
-
-## Data Model
-
-### Sessions / Threads
-
-Codex uses "thread" for persisted conversations and "session" for in-memory runtime state. `ThreadMetadata` (SQLite `threads` table): id (UUID v7), rollout_path, created_at, updated_at, source, agent_nickname, agent_role, model_provider, cwd, cli_version, title, sandbox_policy, approval_mode, tokens_used, first_user_message, archived_at, git_sha, git_branch, git_origin_url. No explicit project entity -- threads store `cwd` and git info directly.
-
-### Messages / Events
-
-JSONL rollout files (`sessions/rollout-*.jsonl`). Each line is a `RolloutItem` enum: `SessionMeta` (header with id, cwd, source, agent info, git info), `ResponseItem` (the actual messages), `Compacted`, `TurnContext`, `EventMsg`. `ResponseItem` variants include: Message (role, content), Reasoning, FunctionCall, FunctionCallOutput, LocalShellCall, CustomToolCall, ToolSearchCall, WebSearchCall, ImageGenerationCall, GhostSnapshot, Compaction.
-
-### Credentials
-
-`AuthDotJson` at `$CODEX_HOME/auth.json`: auth_mode, openai_api_key, tokens (TokenData with id_token, access_token, refresh_token, account_id), last_refresh. Single-provider model (OpenAI only). Alternative storage modes: OS keyring, age-encrypted secrets (`secrets/local.age`), ephemeral (in-memory).
-
-### State DB
-
-SQLite (`state_5.sqlite`): tables for threads, logs, thread_dynamic_tools, memories, backfill_state, agent_jobs. Thread metadata is extracted from JSONL rollout headers and mirrored into SQLite for listing and search.
-
-## What To Steal
-
-- `ToolHandler` trait pattern with typed payloads and `is_mutating` gate.
-- Platform-specific sandboxing (Seatbelt, Landlock/seccomp, Windows restricted tokens).
-- MCP server and resource integration as first-class tool types.
-- Session persistence via JSONL rollouts with SQLite metadata.
-- Compaction (inline and remote) for long conversations.
-- Permission escalation flow via `request_permissions` tool.
-- Multi-agent spawning pattern (`spawn_agent`, `wait_agent`, `close_agent`).
-
-## What To Differentiate
-
-- Keep Provider, Store, AgentLoop, Transport as explicit swappable traits instead of concrete types embedded in one core runtime.
-- Prefer a smaller core with clearer crate boundaries instead of a 70+ crate workspace.
-- Use native grep/glob implementations where possible instead of shelling out to `rg`.
-- Avoid coupling engine core to TUI, app server, and IDE concerns.
-- Use a single `~/.brain/` dotfile root instead of XDG split (matching the majority pattern in the ecosystem).
+- `Steal:` typed tool routing, JSONL-plus-SQLite session persistence, serious sandboxing, compaction flow, and the app-server boundary.
+- `Steal:` multi-agent spawning with thread forking rather than ad hoc child prompts.
+- `Differentiate:` keep provider, store, loop, and transport as explicit engine traits instead of concrete `codex-core` subsystems.
+- `Differentiate:` keep the crate graph smaller and the central runtime less dominant.
+- `Differentiate:` use the Codex lessons without inheriting its product-level complexity.
 
 ## Key Evidence
 
-- `repocache/openai/codex/codex-rs/cli/src/main.rs`
-- `repocache/openai/codex/codex-rs/tui/src/lib.rs`
-- `repocache/openai/codex/codex-rs/tui-app-server/src/lib.rs`
-- `repocache/openai/codex/codex-rs/app-server/src/in_process.rs`
-- `repocache/openai/codex/codex-rs/Cargo.toml`
-- `repocache/openai/codex/codex-rs/cli/src/main.rs`
-- `repocache/openai/codex/codex-rs/core/src/lib.rs`
 - `repocache/openai/codex/codex-rs/core/src/codex.rs`
 - `repocache/openai/codex/codex-rs/core/src/codex_thread.rs`
-- `repocache/openai/codex/codex-rs/core/src/client.rs`
-- `repocache/openai/codex/codex-rs/core/src/model_provider_info.rs`
-- `repocache/openai/codex/codex-rs/core/src/tools/mod.rs`
-- `repocache/openai/codex/codex-rs/core/src/tools/registry.rs`
+- `repocache/openai/codex/codex-rs/core/src/compact.rs`
+- `repocache/openai/codex/codex-rs/core/src/compact_remote.rs`
+- `repocache/openai/codex/codex-rs/core/src/context_manager/history.rs`
+- `repocache/openai/codex/codex-rs/core/src/state/session.rs`
 - `repocache/openai/codex/codex-rs/core/src/tools/router.rs`
-- `repocache/openai/codex/codex-rs/core/src/tools/spec.rs`
-- `repocache/openai/codex/codex-rs/core/src/tools/handlers/read_file.rs`
-- `repocache/openai/codex/codex-rs/core/src/tools/handlers/grep_files.rs`
-- `repocache/openai/codex/codex-rs/core/src/tools/handlers/unified_exec.rs`
-- `repocache/openai/codex/codex-rs/core/src/sandboxing/mod.rs`
-- `repocache/openai/codex/codex-rs/core/src/mcp_connection_manager.rs`
-- `repocache/openai/codex/codex-rs/core/src/auth/storage.rs`
-- `repocache/openai/codex/codex-rs/utils/home-dir/src/lib.rs`
+- `repocache/openai/codex/codex-rs/core/src/tools/registry.rs`
+- `repocache/openai/codex/codex-rs/core/src/agent/control.rs`
+- `repocache/openai/codex/codex-rs/core/src/custom_prompts.rs`
+- `repocache/openai/codex/codex-rs/core/src/instructions/user_instructions.rs`
+- `repocache/openai/codex/codex-rs/core/gpt_5_1_prompt.md`
+- `repocache/openai/codex/codex-rs/app-server/src/in_process.rs`
+- `repocache/openai/codex/codex-rs/tui/src/lib.rs`
+- `repocache/openai/codex/codex-rs/tui_app_server/src/lib.rs`

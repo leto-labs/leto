@@ -1,91 +1,70 @@
 # async-openai
 
-## One-Line Take
+## Overview
 
 `async-openai` is best treated as an upstream OpenAI protocol and streaming reference for `brain-providers`, not as a direct peer to `brain`'s full engine architecture.
 
-## Snapshot
+| Item | Value |
+| --- | --- |
+| Vertical | Rust SDK for OpenAI and OpenAI-compatible APIs |
+| Best comparison inside `brain` | Typed request/response coverage, SSE streaming semantics, hosted-tool schemas, and realtime protocol support |
+| Main lesson | Extremely useful for `brain-providers/openai`, but not a meaningful benchmark for `brain`'s full five-trait engine shape |
 
-- Vertical: Rust SDK for OpenAI and OpenAI-compatible APIs.
-- Best comparison inside `brain`: typed request and response coverage, streaming semantics, realtime protocol support, and hosted tool schemas.
-- Main lesson: this repo is extremely useful for `brain-providers/openai`, but not for `brain`'s full five-trait engine shape.
+## Architecture
 
-## Tool Call Method
+This repo is a protocol SDK workspace, not an agent runtime. The main crate provides client/config abstractions, typed request/response structs, feature-gated API groups, and examples for Responses, Realtime, Conversations, file search, MCP-related types, and hosted tools.
 
-`async-openai` models tools explicitly at the API level. It contains typed representations for function calling, hosted tools, MCP-related schemas, shell-related schemas, file search, apply-patch, code interpreter, and related OpenAI protocol surfaces.
+It is one layer below `brain`'s full engine concerns and is best understood as raw material for provider implementation.
 
-The key limitation is that these are protocol types and client helpers, not a local coding-tool runtime. The crate describes and transports tool interactions; it does not implement local file/search/shell tools the way `brain-tools` does.
+## Agent Loop
 
-## Provider / Model Method
+Not a core concern for this project. `async-openai` exposes primitives and examples, but it does not implement a reusable local agent loop. Higher-level orchestration is left to callers or remote OpenAI product flows.
 
-This is the repo's main purpose. `async-openai` provides explicit config and client abstractions for OpenAI and OpenAI-compatible endpoints, including Azure variants. Models are configured through typed request builders and client/config objects rather than through a broad provider-runtime trait system.
+## System Prompt & Prompt Building
 
-That makes it narrower than `brain`'s provider architecture, but highly valuable as a wire-format reference.
+Not a core concern for this project. The crate transports prompts and conversation items, but it does not define a local prompt-builder system, AGENTS injection pipeline, or context-management policy for an agent runtime.
 
-## Agent Loop Method
+## Provider & Model
 
-There is no reusable local agent loop as a core concept. The crate exposes primitives and examples, while orchestration is left to callers or to higher-level OpenAI product flows such as conversations and responses.
+This is the repo's main purpose. `async-openai` provides explicit config and client abstractions for OpenAI and OpenAI-compatible endpoints, including Azure variants. Models are configured through typed request builders and config objects rather than through a broad multi-provider runtime trait system.
 
-This means it is not a meaningful `AgentLoop` competitor to `brain`; it is an upstream API building block.
+## Tool System
 
-## Permissions / Sandbox Method
+`async-openai` models tools explicitly at the protocol level. It includes typed representations for function calling, hosted tools, MCP-related schemas, shell/container surfaces, file search, apply-patch-style tools, and related OpenAI wire formats.
 
-The crate serializes approval-related and environment-related protocol fields, but it does not enforce a local sandbox or permissions layer of its own. Approval and execution semantics are largely delegated to the OpenAI APIs and hosted tools being modeled.
+The key limitation is that these are schemas and client helpers, not a local coding-tool runtime.
 
-So it is a good protocol reference, not a good local security-runtime reference.
+## Storage & Sessions
 
-## Platform Support
+N/A as a local engine concern. The repo models hosted APIs such as conversations and files, but it does not ship a local session/message store abstraction comparable to `brain`.
 
-`async-openai` is a Rust SDK with some WASM support, although not every feature is available in WASM environments. It is not trying to be a product with a broad OS/runtime surface the way the coding-agent and orchestration platforms are.
+## Server/Client Architecture
 
-## Technical Architecture
+N/A as an app/runtime architecture. The crate speaks HTTP, SSE, and realtime protocols, but does not define an end-user CLI/TUI or daemon boundary.
 
-The repo is a protocol SDK workspace with:
+## Security & Permissions
 
-- a main client crate
-- config abstractions
-- typed request and response structs
-- feature-gated API groups
-- examples for responses, realtime, conversations, file search, and hosted tools
+The crate serializes approval-related and execution-related protocol fields, but it does not enforce a local sandbox or permission model. Approval semantics are delegated to the hosted APIs being modeled.
 
-This is one layer below `brain`'s full engine concerns and is best understood as raw material for `brain-providers`.
+## CLI & TUI
 
-## Mapping To `brain` Core Traits
+N/A. `async-openai` is a library SDK rather than a terminal product.
+
+## Mapping to brain Traits
 
 - `Provider`: first-class.
 - `Tool`: first-class, but only at the protocol/schema level.
-- `Store`: implicit through hosted APIs such as conversations, files, and vector stores, not as a local reusable store abstraction.
-- `AgentLoop`: missing as a central abstraction.
-- `Transport`: missing as an app/runtime abstraction, even though the crate supports HTTP, SSE, and realtime protocols.
+- `Store`: implicit through hosted APIs, not a local store abstraction.
+- `AgentLoop`: missing as a central concern.
+- `Transport`: missing as an app/runtime abstraction.
 
-This is why `async-openai` belongs in the docs as a provider reference rather than a full competitor.
+## Key Takeaways
 
-## Concrete Tool Implementation Notes
-
-- `FileRead`: not centralized as a local tool; file-related behavior is mostly upload/download and hosted retrieval.
-- `FileWrite`: delegated to hosted APIs or remote tool semantics.
-- `FileEdit`: delegated to hosted APIs such as apply-patch-like tools.
-- `Glob` / `Find`: no generic local built-in.
-- `Grep` / content search: delegated to hosted file-search APIs, not local grep.
-- `Shell` / `Bash`: modeled in protocol types, but not implemented as a local shell executor.
-
-So the repo is excellent for tool schemas and event types, but not for concrete local tool-runtime implementation.
-
-## What To Steal
-
-- Typed coverage of OpenAI protocol surfaces.
-- SSE and realtime streaming semantics.
-- Hosted-tool schema modeling and MCP-related wire types.
-
-## What To Differentiate
-
-- Keep `brain` strong on local engine concerns such as tool execution, durable store, and loop orchestration.
-- Avoid collapsing provider support into one provider-specific SDK shape.
-- Build a richer local runtime model above the protocol layer.
+- `Steal:` typed OpenAI protocol coverage, SSE/realtime semantics, and hosted-tool schema modeling.
+- `Differentiate:` keep `brain` strong on local engine concerns such as tool execution, durable store, and loop orchestration above the protocol layer.
 
 ## Key Evidence
 
-- `repocache/64bit/async-openai/async-openai/README.md`
 - `repocache/64bit/async-openai/async-openai/src/config.rs`
 - `repocache/64bit/async-openai/async-openai/src/client.rs`
 - `repocache/64bit/async-openai/async-openai/src/responses/conversations.rs`

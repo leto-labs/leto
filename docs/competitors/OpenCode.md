@@ -1,201 +1,138 @@
 # OpenCode
 
-## One-Line Take
+## Overview
 
-`OpenCode` is a product-complete AI coding platform with a large integrated runtime, not a minimal reusable engine.
+`OpenCode` is a product-complete coding agent runtime with polished session UX, but its core loop is tightly fused to product concerns rather than exposed as a small reusable engine.
 
-## Snapshot
+| Item | Value |
+| --- | --- |
+| Vertical | Full AI coding product spanning CLI/TUI, desktop, VS Code, HTTP server, SDK, and web surfaces |
+| Best comparison inside `brain` | Session orchestration, agent profiles, streaming UX, and approval-heavy tool execution |
+| Main lesson | Rich coding-agent UX comes from an integrated runtime, but that same integration makes the core less cleanly swappable |
 
-- Vertical: end-user coding agent product spanning CLI, desktop, IDE, HTTP server, SDK, and web surfaces.
-- Best comparison inside `brain`: product pressure on top of `AgentLoop`, `Transport`, and permission orchestration.
-- Main lesson: rich product behavior comes from a deeply integrated runtime, but that same integration makes the core less cleanly composable.
+## Architecture
 
-## Tool Call Method
+`OpenCode` is a Bun/TypeScript monorepo, but the important architectural fact is that much of the runtime lives under `packages/opencode/src`. The `session/` package owns orchestration, message serialization, compaction, summaries, and streaming. `agent/agent.ts` defines built-in agent profiles such as `build`, `plan`, `general`, `explore`, `compaction`, `title`, and `summary`. `provider/` adapts model APIs, `tool/` centralizes the built-in and registry-backed tool surface, and `cli/cmd/tui/*.ts` plus `server/server.ts` provide the client/server shell around the same session runtime.
 
-`OpenCode` builds tools from a central runtime registry. The model-facing tool surface can include built-in tools, config-defined JS/TS tools, plugin tools, and MCP tools. The set is adaptive: some models get `apply_patch`, others get `edit` and `write`, and some search tools are gated behind provider-specific capabilities.
+The repo is best described as a modular monolith. Provider wiring, permissions, snapshots, retry logic, MCP, task delegation, and UI streaming are all wired through the same runtime path rather than separated into independent engine traits.
 
-Execution is heavily productized. Tool runs pass through plugin hooks, schema validation, result truncation, and context-management logic before their outputs are fed back into the session. This is much closer to a product shell around tool use than to `brain`'s smaller `Tool` trait boundary.
+## Agent Loop
 
-## Provider / Model / Mode Method
+The core loop is iterative, not single-pass. `session/prompt.ts` rehydrates the session history, checks for pending `subtask` or `compaction` work, detects context overflow, resolves tools, builds the system prompt, and then calls `SessionProcessor.process(...)`. After a tool-using turn, compaction event, or subtask summary, it re-enters the loop and re-queries the model instead of treating tool execution as the end of the turn.
 
-Provider support is catalog-driven and adapter-heavy. `OpenCode` merges provider metadata, auth state, config, and plugin state, then instantiates providers through its runtime and bundled adapters. The abstraction is flexible, but it is configuration-first rather than a small language-level interface like `brain`'s `Provider` trait.
+Streaming is handled inside `session/processor.ts` by consuming `LLM.stream(streamInput).fullStream`. The processor reacts to token-level and structured events such as `text-start`, `text-delta`, `reasoning-delta`, `tool-call`, `tool-result`, `tool-error`, `start-step`, and `finish-step`, updating persisted session parts as the stream advances. `session/llm.ts` uses AI SDK `streamText(...)` and applies provider-specific prompt/message transforms through `ProviderTransform.message(...)`.
 
-`OpenCode` also treats "mode" as "agent". Built-in agents such as `build`, `plan`, `general`, and `explore` can each override model, prompt, permissions, tools, and generation settings. That makes agent behavior a first-class product construct instead of a narrow loop primitive.
+Tool dispatch is model-driven and event-fed. `session/prompt.ts` resolves the active tool set from built-ins, agent policy, config tools, plugin tools, MCP, and structured-output injection. Execution itself is delegated through the streaming call, and `SessionProcessor` consumes the resulting `tool-call` and `tool-result` events to persist tool parts and decide whether the loop should `continue`, `stop`, or `compact`. Tool results feed back through `MessageV2.toModelMessages(...)` on the next loop iteration. The repo explicitly supports multi-tool turns for explore/subtask workflows, but the provider stream is still consumed as one serialized event stream.
 
-## Agent Loop Method
+Artifact generation is also mode-shaped. The built-in `title`, `summary`, and `compaction` agents generate session metadata and compressed history artifacts, while `plan` mode is explicitly read-only and geared toward producing plan documents rather than mutating the workspace.
 
-The loop is persistent and session-centric. It rehydrates history, creates a new assistant turn, streams model output, records structured session parts, executes tools, handles retries, and can trigger compaction or child-session delegation. It also includes doom-loop protection when the same tool call repeats too often.
+Compaction is a first-class loop concern. `session/prompt.ts` checks `SessionCompaction.isOverflow(...)` before and after turns. If overflow is detected, it creates or resumes a compaction task. `SessionProcessor` also flips to `"compact"` when a turn finishes over the token budget or when a context-overflow error is raised. `tool/truncation.ts` complements this by spilling oversized tool output to a file and telling the agent to use `Task`, `Grep`, or paged `Read` rather than stuffing the full output back into context.
 
-This is operationally mature and user-friendly, but it is tightly coupled to product concerns such as session snapshots, UI streaming, compaction workers, and child task sessions. `brain` can stay cleaner by keeping those concerns outside the smallest orchestration core.
+Retry and recovery are built into the processor layer. `session/llm.ts` passes `maxRetries` into `streamText`, while `session/processor.ts` maps provider failures through `MessageV2.fromError(...)`, uses `SessionRetry.retryable(...)` and `SessionRetry.delay(...)`, and updates session status to `retry` before sleeping and retrying. Doom-loop protection is explicit: `SessionProcessor` compares the last three tool parts and, if the same tool call repeats with the same input three times, asks for `doom_loop` permission through `PermissionNext.ask(...)`.
 
-## Permissions / Sandbox Method
+Subagents and child sessions are first-class. `session/prompt.ts` recognizes pending `subtask` parts, runs the delegated work, summarizes the result back into the parent session, and contains prompt guidance telling the model to launch up to three explore agents in parallel when appropriate. Agent profiles also include a `compaction` helper agent, plus `title` and `summary` agents for session metadata generation.
 
-The safety model is primarily policy-based: `allow`, `ask`, and `deny` rules can be scoped by tool or wildcard pattern and overridden per agent. File access can detect external directories and protect certain OS paths, but command execution is still host execution through spawned processes.
+Max-turn control exists as `agent.steps` in `agent/agent.ts`, enforced in `session/prompt.ts` with `const maxSteps = agent.steps ?? Infinity`. When the last step is reached, the loop injects `session/prompt/max-steps.txt` as an assistant reminder rather than allowing unlimited recursion.
 
-The key implication is that `OpenCode` has a strong approval system but not a strong built-in sandbox boundary. That is useful as a UX reference, but less compelling as a hard-isolation architecture.
+Key types and functions:
 
-## Platform Support
+- `SessionPrompt.loop(...)` in `repocache/anomalyco/opencode/packages/opencode/src/session/prompt.ts`
+- `SessionProcessor.create(...).process(...)` in `repocache/anomalyco/opencode/packages/opencode/src/session/processor.ts`
+- `LLM.stream(...)` in `repocache/anomalyco/opencode/packages/opencode/src/session/llm.ts`
+- `SessionCompaction.create/process/isOverflow(...)` in `repocache/anomalyco/opencode/packages/opencode/src/session/compaction.ts`
+- `Agent.get(...)` and built-in agent definitions in `repocache/anomalyco/opencode/packages/opencode/src/agent/agent.ts`
+- `Truncate.output(...)` in `repocache/anomalyco/opencode/packages/opencode/src/tool/truncation.ts`
 
-`OpenCode` has unusually broad first-party surface area:
+## System Prompt & Prompt Building
 
-- terminal UI
-- desktop applications
-- VS Code integration
-- HTTP/OpenAPI server
-- JS SDK
-- web client
+The static prompt is partly hardcoded and partly file-backed. `session/system.ts` picks model-family prompt fragments such as `prompt/codex_header.txt`, `prompt/anthropic.txt`, `prompt/beast.txt`, `prompt/gemini.txt`, and `prompt/trinity.txt`. `session/llm.ts` then either injects those fragments as system messages or, for Codex-style models, sends `SystemPrompt.instructions()` via the provider `instructions` channel instead of the normal provider system prompt path.
 
-This is one of the clearest cases where a higher-level product repo will naturally outperform a focused engine repo on user-facing breadth.
+Dynamic prompt assembly happens in `session/prompt.ts`. Each turn adds environment metadata from `SystemPrompt.environment(model)`, an available-skills block from `SystemPrompt.skills(agent)`, and any queued instruction overlay from `InstructionPrompt.system()`. Structured-output mode appends `STRUCTURED_OUTPUT_SYSTEM_PROMPT`, and plan/build agents inject additional turn-specific guidance from prompt text files such as `plan.txt`, `build-switch.txt`, and `max-steps.txt`.
 
-## Technical Architecture
+There is a prompt-template system, but it is closer to agent/profile prompt assets and command templates than to a generalized handlebars-style renderer. The repo relies on included `.txt` prompt fragments plus command-template expansion in `session/prompt.ts`. Project-specific `AGENTS.md` or rule-file injection is not evident as a first-class mechanism in the current source snapshot; the nearest analogue is the dynamic skills list and instruction overlays.
 
-The repo is a monorepo, but the important architectural fact is that a large amount of core behavior lives inside one dominant runtime package. Provider wiring, sessions, tools, permissions, MCP, server behavior, and project management all live close together.
+Context-window management is explicit but decentralized. `MessageV2.filterCompacted(...)` removes already-compacted history from the active transcript, `SessionCompaction.isOverflow(...)` checks token usage against model limits, and `tool/truncation.ts` prevents giant tool outputs from expanding the prompt. `session/llm.ts` also omits `maxOutputTokens` for Codex and GitHub Copilot providers while using `ProviderTransform.maxOutputTokens(...)` elsewhere.
 
-That makes `OpenCode` highly capable and extensible through plugins and config, but less aligned with `brain`'s goal of a cleanly swappable engine core. It is best described as a modular monolith rather than a small composable substrate.
+Message history formatting is handled by `MessageV2.toModelMessages(...)` plus provider-specific repair in `provider/transform.ts`. `session/llm.ts` wraps the final model with middleware that rewrites the prompt using `ProviderTransform.message(...)`, and it can inject a dummy `_noop` tool for LiteLLM/Anthropic-proxy compatibility when history contains old tool calls but the current turn has no active tools.
+
+Key types and functions:
+
+- `SystemPrompt.instructions/provider/environment/skills` in `repocache/anomalyco/opencode/packages/opencode/src/session/system.ts`
+- `SessionPrompt.resolvePromptParts(...)` and turn assembly in `repocache/anomalyco/opencode/packages/opencode/src/session/prompt.ts`
+- `LLM.stream(...)` prompt construction in `repocache/anomalyco/opencode/packages/opencode/src/session/llm.ts`
+- `ProviderTransform.message(...)` in `repocache/anomalyco/opencode/packages/opencode/src/provider/transform.ts`
+- Prompt assets under `repocache/anomalyco/opencode/packages/opencode/src/session/prompt/`
+- Agent prompt assets under `repocache/anomalyco/opencode/packages/opencode/src/agent/prompt/`
+
+## Provider & Model
+
+Provider support is catalog-driven and adapter-heavy. `provider/provider.ts` and its companion schema/transform modules merge provider metadata, auth state, config, and plugin state before creating the active model instance. This is flexible and product-ready, but it is configuration-first rather than a small language-level interface like `brain`'s `Provider` trait.
+
+`OpenCode` also treats mode as agent profile. `build`, `plan`, `general`, and `explore` can each override model choice, prompt behavior, permissions, tool set, and generation parameters. That is powerful UX, but it couples provider selection tightly to product personas.
+
+The mode system is more concrete than in most competitors. `agent/agent.ts` defines `build`, `plan`, `general`, `explore`, `compaction`, `title`, and `summary` as built-in agents. `plan` mode explicitly disallows edit tools and grants `plan_exit` plus plan-file write paths, while `build` mode can transition out of plan mode via `plan_enter`. This means planning is not just a UI toggle; it is a permission- and artifact-aware runtime profile.
+
+## Tool System
+
+`OpenCode` builds the model-facing tool surface from a central registry plus runtime filters. `session/prompt.ts` resolves built-in tools, config-defined tools, plugin tools, MCP tools, and optional structured-output helpers, then hands the resulting tool map to `session/llm.ts`. Built-ins adapt to provider/model capabilities; for example some families get `apply_patch` while others keep separate `edit` and `write`.
+
+Execution is wrapped in policy and post-processing. Tool results are persisted as structured message parts, can be truncated to spill files, and are fed back into the next loop turn. Approval is driven through `PermissionNext`, with agent-level allow/ask/deny rules and special checks such as `doom_loop`.
+
+## Storage & Sessions
+
+Persistence is SQLite-backed and richer than `brain`'s minimal data model. Global data lives under the XDG data/config roots, with `opencode.db` storing projects, workspaces, sessions, messages, parts, and account state. Project-local state can also exist in `.opencode/` and `opencode.json`.
+
+The session model is especially rich. `SessionTable` tracks project/workspace linkage, parent sessions for forks, summaries, diffs, permission state, compaction timestamps, and archive state. Messages are split into `MessageTable` and `PartTable`, which allows the UI to persist text, reasoning, tool calls, patches, snapshots, subtask records, and compaction records as separate structured items rather than one flat message blob.
 
 ## Server/Client Architecture
 
-### Process Model
+The default TUI is client/server even when everything stays in one process. `opencode` spawns a Worker thread that exposes the same server surface the remote client uses. `opencode serve` starts a headless HTTP server, and `opencode attach <url>` connects a remote TUI over HTTP plus SSE. `opencode run --attach <url>` uses the same remote boundary for non-interactive runs.
 
-OpenCode uses a **Worker thread** model. The default `opencode` command runs both the TUI and the server logic in one process, with the server running on a Worker thread. There is no persistent daemon.
+The API surface is Hono-based REST plus SSE, and the JS SDK is generated from the OpenAPI spec. The process model is less daemon-oriented than OpenClaw: the server usually dies with the CLI unless the user is explicitly running `serve`.
 
-| Command | Server Location | Process Model |
-|---------|-----------------|---------------|
-| `opencode` (default TUI) | Worker thread, same process | In-process by default; Worker starts HTTP with `--port` |
-| `opencode run` | Same process | No HTTP; direct `Server.Default().fetch()` |
-| `opencode serve` | Same process | Starts `Bun.serve()` on configured port and blocks |
-| `opencode attach <url>` | External (connect to running server) | TUI-only client over HTTP |
-| `opencode run --attach <url>` | External (connect to running server) | Headless client over HTTP |
+## Security & Permissions
 
-### Default Flow (`opencode`)
+`OpenCode` is approval-heavy rather than strongly sandboxed. The permission model is explicit and good for UX: rules are `allow`, `ask`, or `deny`, scoped by tool and pattern, and can vary by agent. The runtime also checks for protected directories and external workspace access.
 
-1. Main thread spawns a Worker (`worker.ts`).
-2. Worker starts an event stream via `Server.Default().fetch(request)` -- **no HTTP server**, just in-process calls.
-3. TUI connects to Worker via `createWorkerFetch(client)` -- RPC to Worker, which calls `Server.Default().fetch()`.
-4. If `--port` / `--hostname` / `--mdns` flags are set, Worker starts `Bun.serve()` and TUI connects over HTTP instead.
+The main limitation is that execution is still host execution through spawned processes. `OpenCode` is therefore a strong reference for permission UX and guardrails, but not for hard isolation boundaries.
 
-### Headless Server Mode
+## CLI & TUI
 
-`opencode serve` starts a standalone HTTP server using `Bun.serve()`:
+The CLI/TUI surface is one of `OpenCode`'s strongest differentiators. The default `opencode` command launches the TUI, `opencode serve` runs the headless server, `opencode attach <url>` connects to a remote server, `opencode run` supports non-interactive runs, and session commands support resume, fork, export, MCP, and account flows. The TUI includes a header/footer layout, session picker, sidebar, slash commands, inline tool rendering, and a leader-key-oriented keybinding system. For the full cross-competitor comparison, see `openspec/changes/add-tui-transport/competitor-analysis.md`.
 
-- Binds to configured port (tries 4096 first, then falls back to 0).
-- Same REST + SSE API as the embedded server.
-- Password protection via `OPENCODE_SERVER_PASSWORD` (HTTP Basic auth, username `opencode`).
-- Optional mDNS advertisement with `--mdns`.
+Mode switching is part of the UX rather than a buried config concept. The TUI and CLI expose agent selection, and the default visible primary modes are effectively the operational personas of the product: build when the model should act, plan when it should stay read-only and produce a plan artifact, and explore/general for research-oriented work.
 
-### Client Attachment
+## Mapping to brain Traits
 
-`opencode attach <url>` connects a TUI to a running server:
+- `Provider`: first-class in practice, but configuration-led.
+- `Tool`: first-class via the central registry and typed tool parts.
+- `Store`: first-class in implementation, but not as a small swappable trait.
+- `AgentLoop`: implicit runtime boundary, not a standalone engine trait.
+- `Transport`: implicit runtime boundary through Worker RPC, HTTP, SSE, and the SDK.
 
-- Client creates `OpencodeClient` via `createOpencodeClient({ baseUrl, headers })`.
-- SDK is generated from an OpenAPI 3.1 spec (`@opencode-ai/sdk/v2`).
-- Events are received via **SSE** (`GET /event`) with 10-second heartbeat.
-- REST calls for actions (`POST /session`, `POST /session/:id/message`, etc.).
-- Authentication is HTTP Basic from `--password` or `$OPENCODE_SERVER_PASSWORD`.
-- URL is always provided manually; no auto-discovery despite optional mDNS publish.
+## Key Takeaways
 
-`opencode run --attach <url>` is the same but with stdout output instead of TUI rendering.
-
-### Server Lifecycle
-
-The server does **not** persist after the CLI exits. Worker shutdown calls `Instance.disposeAll()` and `server.stop()`. No lock files, no PID detection, no socket-based reconnection.
-
-### API Surface
-
-The server exposes a Hono-based HTTP API:
-
-- `GET /event` -- SSE event stream (all bus events)
-- `POST /session` -- create session
-- `POST /session/:id/message` -- send message
-- `GET /session` -- list sessions
-- `GET /config`, `PATCH /config` -- config management
-- `GET /provider` -- list providers
-- Plus: MCP, permissions, file, and TUI endpoints
-
-### Client/Server Boundary
-
-The boundary is the HTTP API (REST + SSE), exposed as a typed SDK generated from OpenAPI. In-process mode bypasses HTTP entirely via `Server.Default().fetch()`. The TUI never talks to the agent runtime directly -- always through the server API, whether in-process or remote.
-
-## Mapping To `brain` Core Traits
-
-- `Provider`: first-class boundary via dedicated provider modules and runtime model resolution.
-- `Tool`: first-class boundary via a common tool contract and central registry.
-- `Store`: first-class in practice, but implemented as concrete storage modules instead of a small swappable trait.
-- `AgentLoop`: implicit runtime boundary; the loop is central, but it is not exposed as a clean standalone interface.
-- `Transport`: implicit runtime boundary; HTTP server, SDK, and TUI clients exist, but not behind one `Transport` abstraction.
-
-The short version is that `OpenCode` is strongest where `brain` cares about `Provider` and `Tool`, but it is more product-runtime oriented than trait-oriented for `Store`, `AgentLoop`, and `Transport`.
-
-## Concrete Tool Implementation Notes
-
-- `FileRead`: implemented locally with native Node/Bun file APIs. No shell-out.
-- `FileWrite`: implemented locally with native file writes. No shell-out.
-- `FileEdit`: implemented locally with native fs plus diff-oriented helper logic. `apply_patch` is a separate structured tool for some model families.
-- `Glob`: implemented as a ripgrep-backed file listing flow rather than a pure in-process glob implementation.
-- `Grep`: explicitly shells out to `rg` and post-processes results in TypeScript.
-- `Shell` / `Bash`: implemented by spawning the configured shell and layering permission analysis on top.
-
-This makes `OpenCode` a good example of a product that keeps file mutation local but treats search primitives as wrappers around battle-tested external CLI tools.
-
-## What To Steal
-
-- First-class session streaming and structured event persistence.
-- Strong agent-profile concept where prompts, permissions, tools, and model choice move together.
-- Good operational features around compaction, retry, and child-task delegation.
-
-## What To Differentiate
-
-- Keep provider, tool, store, loop, and transport boundaries explicit instead of burying them in one product runtime.
-- Prefer a harder execution boundary than approval rules alone.
-- Avoid coupling the engine core to desktop, TUI, SDK, and server concerns.
-
-## Data Model
-
-### Project
-
-`ProjectTable` (Drizzle SQLite): id, worktree, vcs, name, icon_url, icon_color, sandboxes (JSON array), commands (JSON), timestamps. `worktree` is the git worktree root. A separate `WorkspaceTable` links workspaces (branches) to projects.
-
-### Session
-
-`SessionTable` (SQLite): id, project_id, workspace_id, parent_id, slug, directory, title, version, share_url, summary_additions, summary_deletions, summary_files, summary_diffs (JSON), revert (JSON), permission (JSON ruleset), timestamps, time_compacting, time_archived. Supports fork (via parent_id), compaction, and archiving.
-
-### Message + Part
-
-Two-table design. `MessageTable`: id, session_id, timestamps, data (JSON blob). `PartTable`: id, message_id, session_id, timestamps, data (JSON blob). Part types include: text, reasoning, file, tool, snapshot, patch, agent, compaction, subtask, retry, step-start, step-finish. Tool calls are `ToolPart` with callID, tool name, and state (pending/running/completed/error).
-
-### Credentials
-
-`AccountTable` (SQLite): id, email, url, access_token, refresh_token, token_expiry, timestamps. `AccountStateTable` tracks the active account. Single active account model, not multi-credential-per-provider.
-
-### Storage
-
-Global data in `~/.local/share/opencode/` (XDG data dir), config in `~/.config/opencode/`. All persistence is SQLite (`opencode.db`). Project-local: `.opencode/` directory and `opencode.json`.
+- `Steal:` session-driven orchestration, explicit compaction handling, agent profiles that package tools plus model plus permissions, and strong streaming/tool UX.
+- `Steal:` remote `serve` plus `attach` as a product-grade transport pattern.
+- `Differentiate:` keep the engine seams explicit instead of burying them in one runtime package.
+- `Differentiate:` prefer a stronger execution boundary than approval rules alone.
+- `Differentiate:` avoid coupling the core engine to desktop, server, SDK, and TUI concerns.
 
 ## Key Evidence
 
-- `repocache/anomalyco/opencode/packages/opencode/src/cli/cmd/tui/thread.ts`
-- `repocache/anomalyco/opencode/packages/opencode/src/cli/cmd/tui/worker.ts`
-- `repocache/anomalyco/opencode/packages/opencode/src/cli/cmd/tui/attach.ts`
-- `repocache/anomalyco/opencode/packages/opencode/src/cli/cmd/tui/app.tsx`
-- `repocache/anomalyco/opencode/packages/opencode/src/cli/cmd/tui/context/sdk.tsx`
-- `repocache/anomalyco/opencode/packages/opencode/src/cli/cmd/serve.ts`
-- `repocache/anomalyco/opencode/packages/opencode/src/cli/cmd/run.ts`
-- `repocache/anomalyco/opencode/packages/opencode/src/server/server.ts`
-- `repocache/anomalyco/opencode/packages/sdk/js/src/v2/client.ts`
-- `repocache/anomalyco/opencode/README.md`
-- `repocache/anomalyco/opencode/packages/web/src/content/docs/agents.mdx`
-- `repocache/anomalyco/opencode/packages/web/src/content/docs/permissions.mdx`
-- `repocache/anomalyco/opencode/packages/web/src/content/docs/server.mdx`
 - `repocache/anomalyco/opencode/packages/opencode/src/agent/agent.ts`
 - `repocache/anomalyco/opencode/packages/opencode/src/session/prompt.ts`
 - `repocache/anomalyco/opencode/packages/opencode/src/session/processor.ts`
+- `repocache/anomalyco/opencode/packages/opencode/src/session/llm.ts`
+- `repocache/anomalyco/opencode/packages/opencode/src/session/system.ts`
+- `repocache/anomalyco/opencode/packages/opencode/src/session/compaction.ts`
 - `repocache/anomalyco/opencode/packages/opencode/src/provider/provider.ts`
+- `repocache/anomalyco/opencode/packages/opencode/src/provider/transform.ts`
 - `repocache/anomalyco/opencode/packages/opencode/src/tool/registry.ts`
-- `repocache/anomalyco/opencode/packages/opencode/src/tool/read.ts`
-- `repocache/anomalyco/opencode/packages/opencode/src/tool/write.ts`
-- `repocache/anomalyco/opencode/packages/opencode/src/tool/edit.ts`
-- `repocache/anomalyco/opencode/packages/opencode/src/tool/apply_patch.ts`
-- `repocache/anomalyco/opencode/packages/opencode/src/tool/glob.ts`
-- `repocache/anomalyco/opencode/packages/opencode/src/tool/grep.ts`
-- `repocache/anomalyco/opencode/packages/opencode/src/file/ripgrep.ts`
-- `repocache/anomalyco/opencode/packages/opencode/src/tool/bash.ts`
+- `repocache/anomalyco/opencode/packages/opencode/src/tool/truncation.ts`
+- `repocache/anomalyco/opencode/packages/opencode/src/cli/cmd/tui/thread.ts`
+- `repocache/anomalyco/opencode/packages/opencode/src/cli/cmd/tui/worker.ts`
+- `repocache/anomalyco/opencode/packages/opencode/src/cli/cmd/tui/attach.ts`
+- `repocache/anomalyco/opencode/packages/opencode/src/cli/cmd/serve.ts`
+- `repocache/anomalyco/opencode/packages/opencode/src/cli/cmd/run.ts`
+- `repocache/anomalyco/opencode/packages/opencode/src/server/server.ts`

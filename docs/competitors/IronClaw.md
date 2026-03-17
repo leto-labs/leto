@@ -1,176 +1,118 @@
 # IronClaw
 
-## One-Line Take
+## Overview
 
-`IronClaw` is most useful as a security-policy reference, but less convincing as a clean engine architecture benchmark.
+`IronClaw` is most useful as a security-policy reference. Its architecture vocabulary is broad, but the loop and transport seams are less convincingly wired than the stronger competitors.
 
-## Snapshot
+| Item | Value |
+| --- | --- |
+| Vertical | Security-first AI agent product with broad provider/channel ambitions |
+| Best comparison inside `brain` | Approval, RBAC, sandbox, DLP, and policy-layer vocabulary |
+| Main lesson | Strong policy design only matters if the execution path obviously runs through it |
 
-- Vertical: security-first AI agent product with broad platform ambitions.
-- Best comparison inside `brain`: permission policy, approval rules, and sandbox ambition.
-- Main lesson: strong security claims are only as useful as their wiring into the actual execution path.
+## Architecture
 
-## Tool Call Method
+`IronClaw` is a single-crate Rust application with modules for core engine/config, providers, gateway, channels, memory, RBAC, sandbox, and agents. The vocabulary is broad and ambitious, but many seams are thinner in practice than in naming. `core/engine.rs` is still the place where the main interactive flow lives, while `gateway/`, `channels/`, and parts of `agents/` feel more aspirational or partially wired.
 
-The intended tool model is provider-native function calling backed by JSON schemas from a registry. On paper, that is a solid direction. In the current source, though, the architectural tool layer appears stronger than the concrete runtime wiring. The engine builds a registry and works with tool schemas, but the repo evidence suggests the concrete tool implementation path is not as obviously connected as in stronger competitors.
+This makes IronClaw better as a policy/reference repo than as a clean engine blueprint.
 
-This makes `IronClaw` a cautionary comparison: defining the seam is not enough if the operational path is unclear.
+## Agent Loop
 
-## Provider / Model / Mode Method
+The primary loop in `core/engine.rs` is relatively simple and mostly single-pass per user turn. `run_interactive()` seeds the session with `self.config.agent.system_prompt`, reads stdin, calls the provider with the full conversation and tool schemas, executes any returned tool calls through `execute_tool_call(...)`, appends the results, prints the assistant response, increments `turn_count`, and autosaves memory. It does not obviously re-query the model multiple times inside the same turn after each tool execution the way Codex, OpenCode, ZeroClaw, or pi-mono do.
 
-The provider layer revolves around a single `Provider` trait and a large provider factory with presets like `fast`, `smart`, `cheap`, and `local`. That is conceptually close to `brain`'s interest in swappable providers.
+Streaming is only lightly abstracted. The `Provider` trait in `providers/mod.rs` exposes `stream_chat(...)`, but the default implementation falls back to `chat(...)`, and the main interactive flow is built around standard request/response rather than token-by-token orchestration. The separate gateway module exposes SSE and WebSocket routes, but the main CLI runtime does not appear to use that streaming path.
 
-The limitation is completeness. Some provider branches are clearly stubs, which weakens the repo as a direct provider-quality benchmark even if the abstraction direction is reasonable.
+Tool dispatch is provider-native in concept: the provider receives tool schemas and can return tool calls, which the engine then runs through the security pipeline. The actual execution path is strongly security-focused, with RBAC, guardian checks, anti-stealer checks, SSRF protections, approval, sandboxing, DLP, cost tracking, and audit logging all inside `execute_tool_call(...)`.
 
-## Agent Loop Method
+Compaction and summarization are more configured than operationally central. `core/config.rs` exposes compaction thresholds and history settings, and `memory/mod.rs` includes compaction-style APIs, but prompt-history compaction is not a clear, central part of the main interactive loop in the current source snapshot.
 
-The loop is relatively simple: send the conversation, receive tool calls, execute them through the security pipeline, append outputs, and end the turn. It does not look like a rich iterative loop that repeatedly re-queries the model inside the same turn after each tool execution.
+Retry and error recovery are comparatively thin at the loop level. Providers may implement their own request behavior, but the main engine path does not show the same explicit multi-stage stream retry, transport fallback, or compaction-triggered retry logic that appears in Codex or ZeroClaw.
 
-Compared with `brain`, this is less mature as an `AgentLoop` reference. It is closer to a conversation shell around provider interaction than to a strong standalone orchestration core.
+Subagents do exist conceptually through `agents/mod.rs`, which can orchestrate multiple named agents and aggregate results, but that looks more like a separate orchestration feature than a first-class child-session mechanism embedded into the main interactive loop.
 
-## Permissions / Sandbox Method
+Loop limits are explicit. `agent.max_turns` lives in config and is copied into the session as `max_turns`, with `turn_count` tracking progress. This is one of the clearer pieces of loop governance in the repo.
 
-This is the strongest part of the repo. `IronClaw` encodes:
+Planning artifacts are not a major first-class UX in the current snapshot. The repo can coordinate multiple agents and has memory compaction, but there is no clearly implemented read-only planning mode or plan-artifact workflow comparable to Codex or OpenCode.
 
-- RBAC
-- filesystem and network policy
-- approval gates
-- DLP and anti-stealer checks
-- SSRF protections
-- audit logging
-- sandbox backends for Docker and Bubblewrap
+Key types and functions:
 
-The caution is that the runtime path does not always make sandbox integration as concrete as the policy surface suggests. The design ambition is strong; the current wiring is less persuasive.
+- `Engine::run_interactive(...)` and `Engine::process_message(...)` in `repocache/JoasASantos/ironclaw/src/core/engine.rs`
+- `AgentConfig` in `repocache/JoasASantos/ironclaw/src/core/config.rs`
+- `Provider` trait in `repocache/JoasASantos/ironclaw/src/providers/mod.rs`
+- Multi-agent support in `repocache/JoasASantos/ironclaw/src/agents/mod.rs`
 
-## Platform Support
+## System Prompt & Prompt Building
 
-The repo looks mostly Unix-first from the current code and dependencies. The docs mention generic Rust setup and Docker/Ollama workflows, but the implementation evidence is much stronger for Linux-like environments than for a broad cross-platform story.
+The system prompt is mostly hardcoded through config rather than a composable builder. `core/config.rs` defines `agent.system_prompt` and `agent.max_turns`, and `core/engine.rs` seeds new interactive sessions with that configured system message before any user input.
 
-## Technical Architecture
+Dynamic prompt assembly is limited in the current source snapshot. Tool schemas are passed separately to the provider, and the engine appends conversation history as `Message` structs, but there is no strong evidence of AGENTS-style project-file injection, a prompt-section builder, or a custom prompt-template system comparable to ZeroClaw, OpenClaw, Codex, or pi-mono.
 
-`IronClaw` is a monolithic Rust application rather than a clearly separated set of crates. That keeps everything in one place, but it also means the boundaries between provider, loop, permissions, and transport are weaker than `brain`'s intended structure.
+Context-window management is likewise only partly evident. History/memory config exists, and memory persistence can compress or prune older data, but the main prompt-submission path does not show a clearly integrated token counter plus truncation/compaction pipeline for the live conversation.
 
-As a result, it is more useful for policy ideas than for package or trait architecture.
+Message history formatting is straightforward: the engine holds a `Vec<Message>` with roles, content, tool calls, tool results, and multimodal blocks, then passes that to the provider. That is simple and understandable, but much less sophisticated than the prompt/history shaping in the stronger competitors.
+
+Key types and functions:
+
+- `AgentConfig` in `repocache/JoasASantos/ironclaw/src/core/config.rs`
+- `Message` and session flow in `repocache/JoasASantos/ironclaw/src/core/engine.rs`
+- Provider request types in `repocache/JoasASantos/ironclaw/src/providers/mod.rs`
+
+## Provider & Model
+
+IronClaw does have a real `Provider` trait and a broad provider factory with preset aliases such as `fast`, `smart`, `cheap`, and `local`. Conceptually this is close to `brain`'s provider interests. The issue is not the abstraction direction; it is that some branches look incomplete enough to weaken the repo as an implementation-quality benchmark.
+
+Its strongest mode concept is therefore preset selection rather than collaborative planning. Provider presets, sandbox-level presets, and CLI run vs UI modes are the main “mode system” in the repo today.
+
+## Tool System
+
+The intended tool model is provider-native function calling with JSON-schema-advertised tools plus a high-friction security pipeline. That design direction is sound. The current repo snapshot is less convincing about the completeness of the concrete built-in tool suite than about the surrounding policy scaffolding.
+
+What is very clear is that any tool execution is meant to pass through layered policy checks before reaching the underlying runtime.
+
+## Storage & Sessions
+
+Sessions are lightweight and mostly in-memory. A session tracks `id`, `turn_count`, and `max_turns`, and conversations are stored as message vectors in process. Memory and cost tracking are durable, with SQLite-like backends and encrypted memory-store support, but transcript/session persistence is much thinner than in Codex or OpenCode.
+
+Credentials are also lighter-weight than ZeroClaw or Codex: provider API keys live mainly in config or env vars rather than in a rich multi-profile credential vault.
 
 ## Server/Client Architecture
 
-### Process Model
+The main runtime is single-process and stdin-driven. `ironclaw run` reads from stdin and prints to stdout. An Axum-based web UI can be started alongside it, but the current code suggests that the engine still reads only stdin, so the web UI is not a fully authoritative client.
 
-IronClaw is a **single-process monolith**. Everything runs in one `tokio::main` process. There is no separate server, no daemon, and no client attachment mechanism.
+The gateway module exposes REST, SSE, and WebSocket routes on paper, but it is not obviously wired into the main CLI path. The channel abstraction is similarly broader in API surface than in demonstrated runtime integration.
 
-| Command | Server Location | Transport |
-|---------|-----------------|-----------|
-| `ironclaw run` | Same process | stdin/stdout |
-| `ironclaw run --ui` / `ironclaw ui` | Same process | stdin + Web UI (Axum, port 9090) |
+## Security & Permissions
 
-### Default Flow
+Security is the strongest part of the repo. IronClaw models RBAC, filesystem and network policies, approval gates, anti-stealer logic, SSRF protections, DLP, audit logging, and sandbox backends for Docker/Bubblewrap/native execution. Even where the surrounding runtime is incomplete, the policy vocabulary is rich and worth studying.
 
-1. `main.rs` → `Commands::Run` → optionally starts `WebUi::new().start()`.
-2. Creates `Engine::new()`.
-3. `engine.run_interactive()` blocks on a stdin loop.
-4. Engine reads from stdin, calls provider, prints to stdout.
+## CLI & TUI
 
-### Web UI (Partial)
+IronClaw is CLI plus partial web UI, not a polished terminal-TUI product. The notable commands are onboarding, run/ui flows, doctor-style diagnostics, and model/config tooling. The comparison value is in its CLI and security surfaces, not in a keyboard-driven TUI. For the broader command comparison, see `openspec/changes/add-tui-transport/competitor-analysis.md`.
 
-An Axum-based Web UI server can be started alongside the CLI:
+## Mapping to brain Traits
 
-- Routes: `GET /` (HTML), `/ui/static/app.js`, `/ui/static/style.css`, `GET /ui/ws` (WebSocket).
-- Server → client: `broadcast::Sender<UiMessage>` pushes events to WebSocket clients.
-- Client → server: WebSocket JSON messages are re-broadcast as `user_input`, **but the engine does not consume them**. The engine only reads stdin.
-- Result: Web UI and CLI run together, but the engine is driven exclusively by stdin.
+- `Provider`: first-class at the type level.
+- `Tool`: first-class in concept, but thinner in concrete evidence.
+- `Store`: first-class through memory/storage modules.
+- `AgentLoop`: implicit and comparatively simple in the main engine.
+- `Transport`: first-class in naming, but only partially wired in practice.
 
-### API Gateway (Exists But Not Wired)
+## Key Takeaways
 
-A `GatewayServer` module exists with REST + SSE + WebSocket routes:
-
-- `POST /v1/chat`, `GET /v1/chat/stream` (SSE), `GET /v1/chat/ws` (WebSocket)
-- `GET /v1/models`, `/v1/tools`, `/v1/sessions`, `/v1/health`, `/v1/metrics`
-
-However, this gateway is **never started from `main.rs`**. Config exists but there is no CLI path to run it. Handler implementations are placeholders ("Engine integration pending").
-
-### Channel Abstraction (Exists But Not Wired)
-
-A `Channel` trait with 20+ stubs (Slack, Discord, WebUi, RestApi, etc.) and a `ChannelManager` with `mpsc` inbound stream exists. But `take_inbound_rx()` is never called from `main` or the engine, so the channel pipeline is unused.
-
-### Server Lifecycle
-
-Single process; exit terminates everything. No daemon, no PID file, no socket. Only memory DB (`memory.db`) and cost DB (`costs.db`) persist on disk.
-
-### Client/Server Boundary
-
-No realized client/server boundary. The `Engine` is used as an in-process library. The gateway, channel, and Web UI abstractions exist architecturally but are not connected to the engine's execution path.
-
-## Mapping To `brain` Core Traits
-
-- `Provider`: first-class boundary through an explicit trait and provider factory.
-- `Tool`: first-class on paper, but skeletal in the current snapshot.
-- `Store`: first-class via memory-store abstractions, though backend completeness varies.
-- `AgentLoop`: implicit boundary living inside the main engine and workflow orchestration.
-- `Transport`: first-class through channel abstractions, though some implementations appear thin or stub-like.
-
-This means `IronClaw` is strongest as an architecture vocabulary reference and weaker as proof that those boundaries are deeply realized.
-
-## Concrete Tool Implementation Notes
-
-- `FileRead`: declared in the broader tool architecture, but not clearly implemented as a concrete local tool in the current snapshot.
-- `FileWrite`: same as file read.
-- `FileEdit`: not evidenced as a concrete built-in tool.
-- `Glob` / `Find`: used internally for policy-style matching, not evidenced as an agent tool.
-- `Grep`: not evidenced as a concrete agent tool.
-- `Shell` / `Bash`: conceptually present in policy and security flow, but not clearly implemented as a concrete shell tool in the main tool stack.
-
-The key warning for `brain` is that a repo can look rich at the architecture-document level while still lacking a convincingly realized concrete tool layer.
-
-## What To Steal
-
-- Config invariants that prevent obviously unsafe combinations.
-- Security policy vocabulary that is richer than simple allow/deny prompts.
-- Defense-in-depth thinking around audit, DLP, and network controls.
-
-## What To Differentiate
-
-- Ensure the tool registry and sandbox boundary are obviously wired into the real runtime path.
-- Prefer smaller crate boundaries over one large binary crate.
-- Build a stronger iterative loop than single-pass tool handling.
-
-## Data Model
-
-### Sessions
-
-`Session { id: String (UUID v4), turn_count: u32, max_turns: u32 }`. In-memory only; no persistence. Conversation is `Vec<Message>` passed to `process_message()`.
-
-### Messages
-
-`Message { role: MessageRole, content: String, tool_calls: Vec<ToolCall>, tool_results: Vec<ToolResult>, timestamp, id: String (UUID v4), content_blocks: Vec<ContentBlock> }`. `MessageRole`: System, User, Assistant, Tool. `ContentBlock` enum supports multimodal: Text, Image, Audio, Video, File. In-memory only.
-
-### Memory
-
-`MemoryEntry { key, content, context (session/user/global), timestamp, category (System/User/Instruction/Observation/Conversation) }`. `EncryptedSqliteStore` with AES-256-GCM per entry. Key derived from `ironclaw-memory-{path}-{USER}`. History config (`HistoryConfig`) exists with SQLite/file backend options, max_conversations, max_messages, compress_old -- but wiring into the engine is not fully evident.
-
-### Credentials
-
-No dedicated vault. API keys come from `ProviderConfig.api_key` in config or env vars. `SessionAuthenticator` produces HMAC-SHA256 signed `SessionToken` for HTTP auth (provider, model, session_id, issued_at, expires_at) but this is session-level, not credential storage.
-
-### Storage
-
-XDG dirs via `directories` crate. Memory DB at `~/.ironclaw/memory.db`. No project or workspace concept.
+- `Steal:` rich policy vocabulary, config invariants, and defense-in-depth thinking.
+- `Steal:` the idea that approvals, DLP, and audit should sit near tool execution rather than as UI-only affordances.
+- `Differentiate:` ensure the loop actually re-queries and compacts cleanly instead of stopping at one pass.
+- `Differentiate:` keep the client/server surfaces obviously wired into the real engine path.
+- `Differentiate:` prefer smaller, testable subsystem boundaries over one broad monolith.
 
 ## Key Evidence
 
-- `repocache/JoasASantos/ironclaw/src/ui/mod.rs`
-- `repocache/JoasASantos/ironclaw/src/gateway/mod.rs`
-- `repocache/JoasASantos/ironclaw/src/channels/mod.rs`
 - `repocache/JoasASantos/ironclaw/src/core/engine.rs`
-- `repocache/JoasASantos/ironclaw/README.md`
-- `repocache/JoasASantos/ironclaw/Cargo.toml`
-- `repocache/JoasASantos/ironclaw/src/main.rs`
-- `repocache/JoasASantos/ironclaw/src/core/engine.rs`
-- `repocache/JoasASantos/ironclaw/src/core/tool.rs`
-- `repocache/JoasASantos/ironclaw/src/providers/mod.rs`
-- `repocache/JoasASantos/ironclaw/src/rbac/mod.rs`
-- `repocache/JoasASantos/ironclaw/src/memory/mod.rs`
-- `repocache/JoasASantos/ironclaw/src/channels/mod.rs`
-- `repocache/JoasASantos/ironclaw/src/gateway/mod.rs`
-- `repocache/JoasASantos/ironclaw/src/sandbox/mod.rs`
 - `repocache/JoasASantos/ironclaw/src/core/config.rs`
-- `repocache/JoasASantos/ironclaw/tests/security_tests.rs`
+- `repocache/JoasASantos/ironclaw/src/providers/mod.rs`
+- `repocache/JoasASantos/ironclaw/src/gateway/mod.rs`
+- `repocache/JoasASantos/ironclaw/src/memory/mod.rs`
+- `repocache/JoasASantos/ironclaw/src/agents/mod.rs`
+- `repocache/JoasASantos/ironclaw/src/rbac/mod.rs`
+- `repocache/JoasASantos/ironclaw/src/sandbox/mod.rs`
+- `repocache/JoasASantos/ironclaw/src/channels/mod.rs`

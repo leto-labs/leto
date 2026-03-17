@@ -1,180 +1,131 @@
 # ZeroClaw
 
-## One-Line Take
+## Overview
 
-`ZeroClaw` is the closest Rust comparison to `brain` in architectural spirit: real traits, a real iterative loop, and a broad runtime surface.
+`ZeroClaw` is the closest Rust architecture comparison to `brain`: it has real subsystem traits, a real iterative tool loop, and concrete memory/routing infrastructure, even though too much still lives in one root crate.
 
-## Snapshot
+| Item | Value |
+| --- | --- |
+| Vertical | Rust agent runtime platform with providers, tools, memory, channels, gateway, and dashboard surfaces |
+| Best comparison inside `brain` | Provider capability routing, iterative tool looping, and trait-driven runtime structure |
+| Main lesson | `ZeroClaw` validates the five-trait direction, while also showing how fast one crate can grow once routing, memory, and product shell concerns accumulate |
 
-- Vertical: agent runtime platform with models, tools, memory, channels, gateway, and dashboard surfaces.
-- Best comparison inside `brain`: trait design, provider capabilities, runtime routing, and iterative tool loop behavior.
-- Main lesson: `ZeroClaw` shows a plausible Rust path toward a broad runtime, but it still concentrates too much in one large root crate.
+## Architecture
 
-## Tool Call Method
+`ZeroClaw` keeps most of its implementation in one large `src/` tree, but the architecture vocabulary is strong: providers, tools, memory, runtime, channels, gateway, hooks, and approval each have distinct modules. `agent/loop_.rs` is the operational center for the interactive/runtime path, while `agent/prompt.rs` defines prompt sections, `providers/reliable.rs` wraps failover and retries, and `memory/` plus `runtime/` back the durable and execution-side subsystems.
 
-`ZeroClaw` has a real `Tool` trait and concrete tool implementations. It also supports two dispatch modes depending on provider capability: native structured tool calls when available, and prompt/XML-guided tool execution when not.
+Compared with `brain`, this is a trait-rich runtime that still has a product-shell gravity problem. It proves the design direction, but also proves how much discipline is needed to keep the central loop from becoming a catch-all.
 
-This is a strong design for `brain` to study because it separates the tool abstraction from the provider's specific tool-call affordances instead of assuming one protocol shape.
+## Agent Loop
 
-## Provider / Model / Mode Method
+The core loop is iterative. `run_tool_call_loop(...)` in `agent/loop_.rs` repeatedly calls the provider, parses native or fallback text-based tool calls, executes tools, appends tool results to history, and re-queries until either there are no more tool calls or `max_tool_iterations` is reached. This is a genuine re-query loop, not single-pass tool handling.
 
-The provider layer is rich. Providers declare capabilities such as native tool calling and vision, while higher-level routing can steer requests to different provider and model combinations. Aliases and fallbacks are also part of the core design.
+Streaming is partial and channel-oriented rather than full SSE event modeling. The main loop can stream progress and final response chunks through an optional `tokio::sync::mpsc::Sender<String>`, emitting short progress messages such as "Thinking..." and then streaming the final text in whitespace-bounded chunks. Provider-side streaming exists in `providers/reliable.rs`, but the core agent loop still uses `provider.chat(...)` for the main request path rather than making streaming the primary orchestration API.
 
-This is one of the clearest external validations of `brain`'s provider trait direction. The main difference is that `ZeroClaw` bundles more policy and routing inside the main runtime crate than `brain` likely wants to.
+Tool dispatch is adaptive. `run_tool_call_loop(...)` computes `tool_specs`, checks `provider.supports_native_tools()`, and either sends structured tool schemas or falls back to parsing tool calls out of text/XML-style output. When multiple tool calls are returned and interactive approval is not blocking, the loop can execute them concurrently. Ordered result tests in `agent/loop_.rs` confirm that multi-tool turns preserve deterministic result ordering even when execution is parallelized.
 
-## Agent Loop Method
+Compaction and trimming are handled directly in the agent module. `trim_history(...)` preserves the system prompt while dropping older non-system messages, and `auto_compact_history(...)` summarizes older turns into a bullet summary when the message threshold is exceeded. The compaction summarizer uses its own static instruction string and replaces the compacted span with a summary message, while `memory/snapshot.rs` separately manages durable memory cold-boot snapshots.
 
-`ZeroClaw` has a genuine iterative loop. It builds system context, loads memory, selects a model route, submits the conversation, parses tool calls, executes tools, feeds the results back, trims history, and continues up to a configured maximum iteration count.
+Retry and failure recovery are strongest in the provider wrapper. `providers/reliable.rs` implements a three-level strategy: retry the same provider/model pair with exponential backoff, rotate auth on retryable rate limits, then fall back across provider/model chains. It parses `Retry-After`, distinguishes non-retryable business rate limits from transient 429s, and supports streaming on the first provider that can do it. Inside the loop, cancellation is checked on every iteration and provider capability mismatches are surfaced explicitly.
 
-This is stronger than most repos in this set as an `AgentLoop` benchmark. It is particularly relevant for how `brain` may want to balance provider routing, memory integration, and tool continuation inside one orchestrator.
+Subagents exist, but they are not as first-class as Codex or OpenCode child threads. The `delegate` tool in `tools/delegate.rs` spins a subtask through `run_tool_call_loop(...)`, prepends delegation context to the prompt, and explicitly blocks infinite delegation depth. This is closer to delegated loop reuse than to a separate persisted child-session architecture.
 
-## Permissions / Sandbox Method
+Max-turn control is explicit. `run_tool_call_loop(...)` enforces `DEFAULT_MAX_TOOL_ITERATIONS = 10` when the configured value is zero, and the interactive path also trims history to `DEFAULT_MAX_HISTORY_MESSAGES` unless compaction is enabled. This makes ZeroClaw one of the clearer repos in the set for concrete loop guards.
 
-The security policy is concrete and code-backed. The runtime supports autonomy levels, command risk classification, approval gates, path confinement, resolved-path checks, allowed roots, and execution-rate limits. Runtime adapters can execute commands natively or through Docker.
+Key types and functions:
 
-The caveat is that safety strength depends on configuration. Docker-backed execution is meaningfully stronger than native runtime execution, and some sandbox-specific code appears separate from the main execution path.
+- `run_tool_call_loop(...)` in `repocache/zeroclaw-labs/zeroclaw/src/agent/loop_.rs`
+- `trim_history(...)` and `auto_compact_history(...)` in `repocache/zeroclaw-labs/zeroclaw/src/agent/loop_.rs`
+- `SystemPromptBuilder` in `repocache/zeroclaw-labs/zeroclaw/src/agent/prompt.rs`
+- `ReliableProvider` logic in `repocache/zeroclaw-labs/zeroclaw/src/providers/reliable.rs`
+- `DelegateTool` in `repocache/zeroclaw-labs/zeroclaw/src/tools/delegate.rs`
+- `export_snapshot(...)` and `hydrate_from_snapshot(...)` in `repocache/zeroclaw-labs/zeroclaw/src/memory/snapshot.rs`
 
-## Platform Support
+## System Prompt & Prompt Building
 
-`ZeroClaw` has explicit cross-platform intent in the repo:
+The system prompt is hardcoded through composable prompt sections rather than one giant text blob. `agent/prompt.rs` defines `PromptSection`, `PromptContext`, and `SystemPromptBuilder`, with a default section set of `IdentitySection`, `ToolsSection`, `SafetySection`, `SkillsSection`, `WorkspaceSection`, `DateTimeSection`, `RuntimeSection`, and `ChannelMediaSection`.
 
-- Linux
-- macOS
-- Windows
-- Termux / mobile-adjacent environments
+Dynamic prompt assembly is one of ZeroClaw's clearest strengths. `IdentitySection` injects workspace files including `AGENTS.md`, `SOUL.md`, `TOOLS.md`, `IDENTITY.md`, `USER.md`, `HEARTBEAT.md`, `BOOTSTRAP.md`, and `MEMORY.md`. `ToolsSection` renders every tool name, description, and JSON schema. `SkillsSection` injects skill instructions according to the configured prompt-injection mode, and the runtime/date/workspace sections append environment metadata.
 
-It also includes web/dashboard surfaces and additional workspace crates beyond the main runtime.
+This is also one of the most explicit repos in the set about bootstrap file limits. `BOOTSTRAP_MAX_CHARS` is `20_000` per file, and truncated files receive an explicit marker telling the model to use `read` for the full content. That is a direct context-window management strategy rather than an implicit convention.
 
-## Technical Architecture
+There is no generalized prompt-template engine analogous to Codex custom prompts or pi-mono prompt templates. The prompt system is code-composed sections plus identity/bootstrap files and skills injection. That is simpler, but less user-extensible.
 
-This repo is still more centralized than `brain` should be, but it is far more aligned with `brain` than the product-heavy TypeScript platforms. It exposes real traits for provider, tool, memory, channel, tunnel, and runtime behavior, even if many implementations still live in one large crate.
+Message history formatting is conventional chat history, with the system prompt assembled separately from `PromptContext` and older turns trimmed or compacted before the next call. Native-tool providers get structured tool schemas, while non-native providers rely on prompt-guided tool invocation rules.
 
-The main takeaway is that `ZeroClaw` validates the direction of a trait-driven Rust agent runtime, while also showing the risks of letting that runtime accumulate too many responsibilities in one place.
+Key types and functions:
+
+- `PromptContext` and `PromptSection` in `repocache/zeroclaw-labs/zeroclaw/src/agent/prompt.rs`
+- `SystemPromptBuilder::with_defaults/build` in `repocache/zeroclaw-labs/zeroclaw/src/agent/prompt.rs`
+- `inject_workspace_file(...)` in `repocache/zeroclaw-labs/zeroclaw/src/agent/prompt.rs`
+- `AgentBuilder::prompt_builder(...)` in `repocache/zeroclaw-labs/zeroclaw/src/agent/agent.rs`
+- Interactive loop prompt setup in `repocache/zeroclaw-labs/zeroclaw/src/agent/loop_.rs`
+
+## Provider & Model
+
+The provider layer is rich and close to `brain`'s interests. Providers advertise capabilities such as native tool calling and vision, and the runtime can route across model/provider chains. `providers/reliable.rs` shows the real operational story: fallback models, fallback providers, retry/backoff, auth rotation, and streaming detection.
+
+The tradeoff is centralization. Routing and reliability policy are core-runtime concerns rather than thin provider-trait wrappers.
+
+ZeroClaw does have meaningful mode-like concepts, but they are more infrastructural than user-facing. Scenario routing, autonomy levels, native-tool vs prompt-tool provider behavior, compact-context flags, and delegate-agent configuration collectively act as the mode system. There is no evidence of a polished first-class read-only “plan mode” comparable to Codex or OpenCode in the current snapshot.
+
+## Tool System
+
+`ZeroClaw` has a real `Tool` trait and a concrete local coding-tool suite. File read/write/edit and glob are native Rust implementations, while content search shells out to `rg` with fallback to `grep`. The runtime can present tool schemas natively or use prompt-driven fallback parsing when the provider lacks structured tool support.
+
+Approval and policy integrate directly with tool execution. The loop checks `ApprovalManager`, path and autonomy policy, and can refuse tools or require confirmation depending on the configured autonomy level.
+
+## Storage & Sessions
+
+Conversation history is mainly in-memory, but long-lived memory is durable. `brain.db` stores memories with FTS5 search and optional embeddings, while `MEMORY_SNAPSHOT.md` provides a cold-boot bootstrap artifact at workspace scope. Credentials live in `auth-profiles.json` and can be encrypted via `SecretStore`.
+
+There is no rich persisted session model comparable to Codex or OpenCode. The workspace path is the primary durable scope, and `session_id` appears mainly in memory entries rather than in a dedicated transcript store.
 
 ## Server/Client Architecture
 
-### Process Model
+The repo is a single-binary design with optional long-running modes. The interactive CLI runs everything in-process. `zeroclaw gateway start` launches an Axum HTTP/WebSocket/SSE gateway on top of the same runtime, and `zeroclaw daemon` adds background services such as channel adapters, heartbeat handling, and cron tasks.
 
-ZeroClaw is a **single-binary design**: CLI, gateway, and agent all compile into one binary. The interactive CLI runs the agent in-process with no server. The gateway is an optional HTTP/WebSocket layer on top of the same in-process runtime.
+The boundary is concrete rather than trait-first: gateway handlers share `AppState`, and each WebSocket connection creates an in-process agent rather than attaching to a separately isolated session engine.
 
-| Command | Server Location | Transport |
-|---------|-----------------|-----------|
-| `zeroclaw` (agent CLI) | Same process | In-process (stdin via `CliChannel` + `mpsc`) |
-| `zeroclaw gateway start` | Same process | Axum HTTP/WebSocket/SSE |
-| `zeroclaw daemon` | Same process | Gateway + channels + heartbeat + cron |
+## Security & Permissions
 
-### Default Flow (`zeroclaw`)
+`ZeroClaw` has a concrete, code-backed security story. Approval is handled by `ApprovalManager`, autonomy policies gate operations, path confinement and resolved-path checks are explicit, and runtime adapters can switch between native execution and stronger backends such as Docker. Public gateway binding is also blocked unless explicitly allowed.
 
-1. `main.rs` → `Commands::Agent` → `agent::run(config, message, provider, model, ...)`
-2. `CliChannel` reads stdin and sends to `tokio::sync::mpsc::Sender<ChannelMessage>`.
-3. Agent loop (`run_tool_call_loop`) processes messages in the same process.
-4. No IPC, no network, no server -- purely in-process.
+The main caveat is that the strength of the sandbox depends heavily on runtime choice and configuration.
 
-### Gateway Mode
+## CLI & TUI
 
-`zeroclaw gateway start` starts an Axum HTTP server:
+`ZeroClaw` is CLI plus gateway/dashboard rather than a terminal-TUI product. The main user-facing commands are the agent CLI, `gateway start`, daemon/service flows, auth/model commands, and diagnostics. The web dashboard and API/gateway matter more than ratatui-style terminal UX. For the full side-by-side CLI matrix, see `openspec/changes/add-tui-transport/competitor-analysis.md`.
 
-- REST API: status, config, tools, memory, admin
-- WebSocket: `GET /ws/chat` -- each connection creates an in-process `Agent` and calls `agent.turn(&content)` directly
-- SSE: `GET /api/events` via `tokio::sync::broadcast::channel`
-- Health: `GET /health`, `GET /metrics`
-- Admin: `POST /admin/shutdown`
-- Security: refuses public bind without tunnel or explicit `allow_public_bind` config
+Planning artifacts are therefore mostly emergent rather than explicit: summaries, compaction output, and delegated-agent results exist, but there is not a clearly branded planning mode with its own transcript semantics.
 
-### Daemon Mode
+## Mapping to brain Traits
 
-`zeroclaw daemon` is the gateway plus long-running services (channel adapters, heartbeat, cron tasks). Can be installed as a systemd/launchd service via `zeroclaw service install`.
+- `Provider`: first-class and one of the best external matches.
+- `Tool`: first-class with concrete built-ins and adaptive dispatch.
+- `Store`: first-class through memory and auth storage.
+- `AgentLoop`: strong, but still implicit inside one large runtime module.
+- `Transport`: first-class through channel and gateway abstractions.
 
-### Web Dashboard
+## Key Takeaways
 
-The gateway serves an embedded web dashboard (via `rust-embed`). Clients connect over the browser to the gateway HTTP port for a web UI.
-
-### Server Lifecycle
-
-- **CLI agent**: Process exits when user quits.
-- **Gateway/Daemon**: Long-running; exits on Ctrl+C or `POST /admin/shutdown`.
-- **Persistence**: SQLite (`brain.db`), config, memory survive process exit. No agent process persistence.
-
-### Client/Server Boundary
-
-No formal client/server trait. The boundary is `AppState` (shared config, provider, memory, tools, event channels) passed to Axum handlers. Each WebSocket connection creates its own in-process `Agent`. The `Channel` trait abstracts messaging platforms (Telegram, Discord, etc.) but is separate from the gateway layer.
-
-## Mapping To `brain` Core Traits
-
-- `Provider`: first-class boundary with explicit provider capabilities and routing hooks.
-- `Tool`: first-class boundary with real concrete built-ins.
-- `Store`: first-class boundary through memory traits and concrete backends.
-- `AgentLoop`: implicit boundary; the loop is strong and dedicated, but not exposed as a separate pluggable loop trait.
-- `Transport`: first-class boundary through channel abstractions.
-
-`ZeroClaw` is the strongest external validation that `brain`'s five-trait architecture is directionally right, even if its own runtime is still more centralized than ideal.
-
-## Concrete Tool Implementation Notes
-
-- `FileRead`: native Rust async filesystem implementation, with extra handling for formats like PDF.
-- `FileWrite`: native Rust async filesystem implementation.
-- `FileEdit`: native Rust read/replace/write flow.
-- `Glob`: native Rust implementation using the `glob` crate.
-- `Grep` / content search: shells out to `rg`, with fallback to `grep`, then post-processes output in Rust.
-- `Shell` / `Bash`: shells out through runtime adapters, using platform-specific command invocation.
-
-This makes `ZeroClaw` the closest direct comparison to `brain`'s current tool stack: native file tools, native globbing, and external CLI-backed content search.
-
-## What To Steal
-
-- Provider capability flags and routing.
-- Iterative loop design that cleanly re-feeds tool results.
-- Explicit runtime policy around path and command safety.
-
-## What To Differentiate
-
-- Keep the crate graph smaller and clearer instead of concentrating most behavior in one root crate.
-- Make sandbox integration more obviously central than optional runtime choice.
-- Preserve a more explicit separation between engine core and product shells.
-
-## Data Model
-
-### Sessions / Conversations
-
-No dedicated session struct. The agent keeps an in-memory `Vec<ConversationMessage>` and uses `workspace_dir` as the scope. `MemoryEntry.session_id` scopes long-term memories to a session, but conversations themselves are not persisted.
-
-### Messages
-
-`ChatMessage { role: String, content: String }` for simple messages. `ConversationMessage` enum for multi-turn history: `Chat(ChatMessage)`, `AssistantToolCalls { text, tool_calls: Vec<ToolCall>, reasoning_content }`, `ToolResults(Vec<ToolResultMessage>)`. `ToolCall { id, name, arguments: String }`. All in-memory only.
-
-### Memory
-
-`MemoryEntry { id, key, content, category (Core/Daily/Conversation/Custom), timestamp, session_id, score }`. Stored in SQLite (`brain.db` at `workspace_dir/memory/brain.db`). Schema includes `memories` table with FTS5 full-text search and optional embedding BLOBs. `MEMORY_SNAPSHOT.md` for cold boot hydration. Memory is long-term facts/preferences, distinct from ephemeral conversation history.
-
-### Credentials
-
-`AuthProfile { id, provider, profile_name, kind (OAuth/Token), account_id, workspace_id, token_set, token, metadata, timestamps }`. `AuthProfilesData` holds `active_profiles` (provider -> profile_id map) and `profiles` (all profiles). Stored in `auth-profiles.json`, optionally encrypted with `SecretStore` (ChaCha20-Poly1305, key in `~/.zeroclaw/.secret_key`).
-
-### Storage
-
-Global config in `~/.zeroclaw/config.toml`. Workspace data in `workspace_dir/` (determined by `ZEROCLAW_WORKSPACE` env, `active_workspace.toml`, or config). No project entity beyond the workspace path.
+- `Steal:` provider capability flags, iterative loop design, reliability/failover policy, and explicit prompt-section composition.
+- `Steal:` native file tools plus explicit bootstrap truncation rules.
+- `Differentiate:` keep the crate graph smaller and the core loop less overloaded.
+- `Differentiate:` make durable sessions cleaner and more explicit if `brain` wants transcript-first behavior.
+- `Differentiate:` make sandbox integration less dependent on optional runtime selection.
 
 ## Key Evidence
 
-- `repocache/zeroclaw-labs/zeroclaw/src/main.rs`
+- `repocache/zeroclaw-labs/zeroclaw/src/agent/loop_.rs`
+- `repocache/zeroclaw-labs/zeroclaw/src/agent/prompt.rs`
+- `repocache/zeroclaw-labs/zeroclaw/src/agent/agent.rs`
+- `repocache/zeroclaw-labs/zeroclaw/src/providers/reliable.rs`
+- `repocache/zeroclaw-labs/zeroclaw/src/tools/delegate.rs`
+- `repocache/zeroclaw-labs/zeroclaw/src/memory/snapshot.rs`
 - `repocache/zeroclaw-labs/zeroclaw/src/gateway/mod.rs`
 - `repocache/zeroclaw-labs/zeroclaw/src/gateway/ws.rs`
 - `repocache/zeroclaw-labs/zeroclaw/src/channels/cli.rs`
-- `repocache/zeroclaw-labs/zeroclaw/README.md`
-- `repocache/zeroclaw-labs/zeroclaw/Cargo.toml`
-- `repocache/zeroclaw-labs/zeroclaw/src/lib.rs`
-- `repocache/zeroclaw-labs/zeroclaw/src/agent/agent.rs`
-- `repocache/zeroclaw-labs/zeroclaw/src/agent/dispatcher.rs`
-- `repocache/zeroclaw-labs/zeroclaw/src/providers/traits.rs`
-- `repocache/zeroclaw-labs/zeroclaw/src/providers/mod.rs`
-- `repocache/zeroclaw-labs/zeroclaw/src/providers/router.rs`
-- `repocache/zeroclaw-labs/zeroclaw/src/tools/mod.rs`
-- `repocache/zeroclaw-labs/zeroclaw/src/tools/file_read.rs`
-- `repocache/zeroclaw-labs/zeroclaw/src/tools/file_write.rs`
-- `repocache/zeroclaw-labs/zeroclaw/src/tools/file_edit.rs`
-- `repocache/zeroclaw-labs/zeroclaw/src/tools/glob_search.rs`
-- `repocache/zeroclaw-labs/zeroclaw/src/tools/content_search.rs`
-- `repocache/zeroclaw-labs/zeroclaw/src/tools/shell.rs`
 - `repocache/zeroclaw-labs/zeroclaw/src/security/policy.rs`
 - `repocache/zeroclaw-labs/zeroclaw/src/runtime/native.rs`
 - `repocache/zeroclaw-labs/zeroclaw/src/runtime/docker.rs`
