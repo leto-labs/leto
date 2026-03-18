@@ -42,8 +42,12 @@ clone_or_update() {
     fi
     echo "  [$name] Updating $org_repo (tag: $tag)..."
     cd "$dest"
-    git fetch --depth 1 origin "$tag" 2>/dev/null || git fetch --depth 1 origin
-    git checkout FETCH_HEAD 2>/dev/null || git checkout "$tag" 2>/dev/null || true
+    if git fetch --depth 1 origin "refs/tags/$tag:refs/tags/$tag" 2>/dev/null; then
+      git checkout --detach "refs/tags/$tag"
+    else
+      git fetch --depth 1 origin "$tag" 2>/dev/null || git fetch --depth 1 origin
+      git checkout --detach FETCH_HEAD 2>/dev/null || git checkout "$tag" 2>/dev/null || true
+    fi
     cd "$SCRIPT_DIR"
   else
     echo "  [$name] Cloning $org_repo (tag: $tag)..."

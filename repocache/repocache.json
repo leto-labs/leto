@@ -8,6 +8,14 @@
     "enabled": true
   },
   {
+    "name": "cline",
+    "url": "https://github.com/cline/cline",
+    "tag": "v3.73.0",
+    "searchPath": "src",
+    "notes": "VS Code-first TypeScript coding agent; repo/product name is Cline, published package name is claude-dev. For brain-server integration, start with src/core/api/providers/openai.ts and src/core/api/index.ts for OpenAI-compatible backend wiring, webview-ui/src/components/settings/providers/OpenAICompatible.tsx for base URL + model config UI, docs/provider-config/openai-compatible.mdx for expected setup, and src/standalone plus src/hosts/external for non-VS Code host paths.",
+    "enabled": true
+  },
+  {
     "name": "openclaw",
     "url": "https://github.com/openclaw/openclaw",
     "tag": "main",
