@@ -67,16 +67,42 @@ and then validates startup and message exchange in the TUI:
 
 - [`repocache/tilework-tech/nori-cli/codex-rs/tui-pty-e2e/tests/live_custom_agent.rs`](../../repocache/tilework-tech/nori-cli/codex-rs/tui-pty-e2e/tests/live_custom_agent.rs)
 
-For `brain`, that means a plausible path exists to point Nori at:
+For `brain`, that means a plausible path exists to point Nori at direct
+`brain-acp` crate binaries rather than routing ACP through `brain-cli`.
+
+The old single-agent shape was:
 
 ```toml
 [agents.distribution.local]
 command = "cargo"
-args = ["run", "-q", "-p", "brain-cli", "--", "acp"]
+args = ["run", "-q", "-p", "brain-acp", "--bin", "brain-acp-mock"]
 ```
 
-This is an inference from the generic local distribution support and the live
-custom-agent test, not a documented upstream `brain` example.
+The current local setup on this machine now uses two ACP entries in
+`~/.nori/cli/config.toml` so both binary identities are visible in the picker:
+
+```toml
+agent = "brain-acp-mock"
+
+[[agents]]
+name = "Brain ACP"
+slug = "brain-acp"
+
+[agents.distribution.local]
+command = "cargo"
+args = ["run", "-q", "-p", "brain-acp", "--bin", "brain-acp"]
+
+[[agents]]
+name = "Brain ACP Mock"
+slug = "brain-acp-mock"
+
+[agents.distribution.local]
+command = "cargo"
+args = ["run", "-q", "-p", "brain-acp", "--bin", "brain-acp-mock"]
+```
+
+Today both binaries are still backed by the mock runtime. Later, only
+`brain-acp` should switch to the real ACP implementation.
 
 ## ACP Coverage
 
@@ -229,7 +255,7 @@ client still returns `method_not_found` for terminal methods. Keep using
 - `mock:terminal ...`
 - `mock:terminal-kill ...`
 
-One more iteration detail: because the local Nori agent is launched through
-`cargo run -q -p brain-cli -- acp`, source changes are only picked up when
-Nori starts a fresh conversation. After editing `brain-acp` or `brain-cli`,
-run `/new` before re-testing so Nori respawns the agent process.
+One more iteration detail: because the local Nori agents are launched through
+`cargo run`, source changes are only picked up when Nori starts a fresh
+conversation. After editing `brain-acp`, run `/new` before re-testing so Nori
+respawns the agent process.

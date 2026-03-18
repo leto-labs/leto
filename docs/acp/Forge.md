@@ -65,7 +65,8 @@ The current flag shape is things like:
 - `--agent claude`
 - `--agent "name=claude model=opus mode=bypassPermissions"`
 
-That is materially different from `acpx --agent "cargo run -q -p brain-cli -- acp"`.
+That is materially different from
+`acpx --agent "cargo run -q -p brain-acp --bin brain-acp-mock"`.
 
 ### 2. File read/write is currently disabled as a client capability
 

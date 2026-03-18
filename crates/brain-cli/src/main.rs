@@ -24,7 +24,7 @@ async fn main() -> Result<()> {
     if matches!(command, Some(Commands::Acp)) {
         brain_acp::run_stdio()
             .await
-            .context("failed to run mock ACP stdio server")?;
+            .context("failed to run ACP stdio compatibility alias")?;
         return Ok(());
     }
 

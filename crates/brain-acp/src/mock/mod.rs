@@ -7,4 +7,4 @@ mod test_support;
 mod tests;
 
 pub use agent::SEEDED_SESSION_ID;
-pub use runtime::run_stdio;
+pub use runtime::run_mock_stdio;

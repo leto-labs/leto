@@ -7,7 +7,7 @@ use tokio_util::compat::{TokioAsyncReadCompatExt as _, TokioAsyncWriteCompatExt 
 
 use super::agent::{MockAgent, NotificationEnvelope};
 
-pub async fn run_stdio() -> Result<(), acp::Error> {
+pub async fn run_mock_stdio() -> Result<(), acp::Error> {
     run_connection(
         tokio::io::stdin().compat(),
         tokio::io::stdout().compat_write(),

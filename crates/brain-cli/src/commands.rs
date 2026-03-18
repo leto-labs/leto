@@ -9,7 +9,7 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Commands {
-    /// Run the mock ACP stdio agent
+    /// Run the ACP compatibility alias (canonical binaries live in brain-acp)
     Acp,
     /// Manage sessions
     Sessions {

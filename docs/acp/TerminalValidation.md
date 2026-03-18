@@ -31,24 +31,28 @@ elsewhere in the repo.
 
 ## Agent Command
 
-Use the existing `brain-cli` ACP entry point through Cargo so each run picks up
-local source changes automatically:
+Use the explicit mock ACP binary through Cargo so each run picks up local
+source changes automatically:
 
 ```bash
-acpx --agent "cargo run -q -p brain-cli -- acp" exec "Reply exactly with: hello world"
+acpx --agent "cargo run -q -p brain-acp --bin brain-acp-mock" exec "Reply exactly with: hello world"
 ```
 
 This is the canonical local launcher for the current repo state because:
 
-- `brain-cli` is the actual ACP entry point exposed to users
-- the `acp` subcommand dispatches directly to `brain_acp::run_stdio()`
+- `brain-acp-mock` is the explicit current mock ACP binary
+- it launches directly from the dedicated `brain-acp` crate
 - `cargo run` rebuilds when relevant source changes exist
+
+The `brain-acp` binary name also exists now, but it is still temporarily
+mock-backed and reserved for the future real ACP runtime. The explicit mock
+binary remains the correct compatibility target for now.
 
 The built-binary form remains possible for faster repeated runs, but it is not
 the default local validation path:
 
 ```bash
-brain acp
+cargo run -q -p brain-acp --bin brain-acp
 ```
 
 For an isolated temp working directory or an automated harness, use the repo's
@@ -137,8 +141,8 @@ The following commands were run successfully in this workspace:
 
 ```bash
 acpx codex exec "Reply exactly with: hello world"
-acpx --agent "cargo run -q -p brain-cli -- acp" exec "Reply exactly with: hello world"
-acpx --approve-all --agent "cargo run -q -p brain-cli -- acp" exec "mock:request-permission"
+acpx --agent "cargo run -q -p brain-acp --bin brain-acp-mock" exec "Reply exactly with: hello world"
+acpx --approve-all --agent "cargo run -q -p brain-acp --bin brain-acp-mock" exec "mock:request-permission"
 ```
 
 Observed outcomes:
