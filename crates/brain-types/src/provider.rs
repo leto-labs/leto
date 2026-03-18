@@ -1,7 +1,7 @@
 use std::pin::Pin;
 
-use futures::future::BoxFuture;
 use futures::Stream;
+use futures::future::BoxFuture;
 use serde::{Deserialize, Serialize};
 
 use ulid::Ulid;

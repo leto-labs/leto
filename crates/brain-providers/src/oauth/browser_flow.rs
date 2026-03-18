@@ -10,9 +10,9 @@ use tracing::debug;
 
 use brain_types::BrainError;
 
-use brain_types::OAuthCredentials;
 use super::jwt;
 use super::pkce;
+use brain_types::OAuthCredentials;
 
 /// Configuration for the browser-based OAuth authorization code + PKCE flow.
 pub struct BrowserFlowConfig {
@@ -75,11 +75,13 @@ where
 
     let listener = TcpListener::bind(format!("127.0.0.1:{}", config.callback_port))
         .await
-        .map_err(|e| BrainError::Auth(format!(
-            "failed to bind port {}: {e}", config.callback_port
-        )))?;
+        .map_err(|e| {
+            BrainError::Auth(format!("failed to bind port {}: {e}", config.callback_port))
+        })?;
 
-    on_prompt(BrowserFlowPrompt { url: auth_url.clone() });
+    on_prompt(BrowserFlowPrompt {
+        url: auth_url.clone(),
+    });
 
     debug!(url = %auth_url, "waiting for OAuth callback");
     try_open_browser(&auth_url);
@@ -98,7 +100,11 @@ fn generate_state() -> String {
     (0..32)
         .map(|_| {
             let idx = rng.random_range(0..36u8);
-            if idx < 10 { (b'0' + idx) as char } else { (b'a' + idx - 10) as char }
+            if idx < 10 {
+                (b'0' + idx) as char
+            } else {
+                (b'a' + idx - 10) as char
+            }
         })
         .collect()
 }
@@ -109,7 +115,9 @@ fn try_open_browser(url: &str) {
     #[cfg(target_os = "linux")]
     let _ = std::process::Command::new("xdg-open").arg(url).spawn();
     #[cfg(target_os = "windows")]
-    let _ = std::process::Command::new("cmd").args(["/c", "start", url]).spawn();
+    let _ = std::process::Command::new("cmd")
+        .args(["/c", "start", url])
+        .spawn();
 }
 
 const SUCCESS_HTML: &str = r#"<html><body style="font-family:sans-serif;text-align:center;padding:60px">
@@ -161,7 +169,9 @@ async fn wait_for_callback(
         if state.as_deref() != Some(expected_state) {
             let response = "HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\nstate mismatch";
             let _ = stream.write_all(response.as_bytes()).await;
-            return Err(BrainError::Auth("OAuth state mismatch (possible CSRF)".into()));
+            return Err(BrainError::Auth(
+                "OAuth state mismatch (possible CSRF)".into(),
+            ));
         }
 
         let code = extract_param(query, "code")

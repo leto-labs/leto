@@ -6,9 +6,7 @@ use futures::future::BoxFuture;
 use tokio::sync::RwLock;
 
 use brain_types::*;
-use mistralrs::{
-    GgufModelBuilder, Model, Response, TextMessageRole, TextMessages,
-};
+use mistralrs::{GgufModelBuilder, Model, Response, TextMessageRole, TextMessages};
 
 use super::config::{DevicePreference, MistralRsConfig};
 
@@ -23,10 +21,7 @@ pub struct MistralRsProvider {
 }
 
 impl MistralRsProvider {
-    pub fn new(
-        configs: Vec<(String, MistralRsConfig)>,
-        default_model: impl Into<String>,
-    ) -> Self {
+    pub fn new(configs: Vec<(String, MistralRsConfig)>, default_model: impl Into<String>) -> Self {
         Self {
             configs: configs.into_iter().collect(),
             models: RwLock::new(HashMap::new()),
@@ -55,24 +50,24 @@ impl MistralRsProvider {
             }
         }
 
-        let config = self.configs.get(name).ok_or_else(|| {
-            BrainError::Inference(format!("unknown model: {name}"))
-        })?;
+        let config = self
+            .configs
+            .get(name)
+            .ok_or_else(|| BrainError::Inference(format!("unknown model: {name}")))?;
 
         let model = load_model(config).await?;
         let model = Arc::new(model);
 
         let mut cache = self.models.write().await;
-        cache.entry(name.to_owned()).or_insert_with(|| model.clone());
+        cache
+            .entry(name.to_owned())
+            .or_insert_with(|| model.clone());
         Ok(model)
     }
 }
 
 async fn load_model(config: &MistralRsConfig) -> Result<Model, BrainError> {
-    let mut builder = GgufModelBuilder::new(
-        config.model_id.clone(),
-        config.gguf_files.clone(),
-    );
+    let mut builder = GgufModelBuilder::new(config.model_id.clone(), config.gguf_files.clone());
 
     if matches!(config.device, DevicePreference::Cpu) {
         builder = builder.with_force_cpu();
@@ -95,12 +90,16 @@ fn to_mistral_role(role: &Role) -> TextMessageRole {
 
 impl Provider for MistralRsProvider {
     fn info(&self) -> ProviderInfo {
-        let models = self.configs.keys().map(|name| ProviderModelInfo {
-            id: name.clone(),
-            name: name.clone(),
-            reasoning: false,
-            tool_call: false,
-        }).collect();
+        let models = self
+            .configs
+            .keys()
+            .map(|name| ProviderModelInfo {
+                id: name.clone(),
+                name: name.clone(),
+                reasoning: false,
+                tool_call: false,
+            })
+            .collect();
         ProviderInfo {
             name: "mistralrs".into(),
             default_model: Some(self.default_model.clone()),
@@ -123,10 +122,7 @@ impl Provider for MistralRsProvider {
 
         let mut text_messages = TextMessages::new();
         for msg in messages {
-            text_messages = text_messages.add_message(
-                to_mistral_role(&msg.role),
-                &msg.content,
-            );
+            text_messages = text_messages.add_message(to_mistral_role(&msg.role), &msg.content);
         }
 
         Box::pin(async move {

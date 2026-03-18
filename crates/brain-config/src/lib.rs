@@ -117,7 +117,10 @@ pub fn resolve_fs_config(root: &Path) -> Result<ProjectConfig> {
 }
 
 /// Like [`resolve_fs_config`] but with an explicit global config path.
-pub fn resolve_fs_config_with_global(root: &Path, global_config: Option<&Path>) -> Result<ProjectConfig> {
+pub fn resolve_fs_config_with_global(
+    root: &Path,
+    global_config: Option<&Path>,
+) -> Result<ProjectConfig> {
     let mut config = ProjectConfig::default();
 
     if let Some(global) = global_config {
@@ -261,7 +264,8 @@ fn interpolate_string(value: &str) -> Result<String> {
                 i = j + 1;
                 continue;
             }
-            let replacement = env::var(&key).map_err(|_| ConfigError::MissingEnvVar { name: key })?;
+            let replacement =
+                env::var(&key).map_err(|_| ConfigError::MissingEnvVar { name: key })?;
             out.push_str(&replacement);
             i = j + 1;
             continue;
@@ -273,7 +277,8 @@ fn interpolate_string(value: &str) -> Result<String> {
                 j += 1;
             }
             let key: String = chars[(i + 1)..j].iter().collect();
-            let replacement = env::var(&key).map_err(|_| ConfigError::MissingEnvVar { name: key })?;
+            let replacement =
+                env::var(&key).map_err(|_| ConfigError::MissingEnvVar { name: key })?;
             out.push_str(&replacement);
             i = j;
             continue;
@@ -358,7 +363,7 @@ mod tests {
         fs::create_dir_all(&agents_dir).unwrap();
         fs::write(
             agents_dir.join("config.toml"),
-        "[agent]\nsystem_prompt = \"$BRAIN_CONFIG_TEST_SYSTEM_PROMPT\"\n",
+            "[agent]\nsystem_prompt = \"$BRAIN_CONFIG_TEST_SYSTEM_PROMPT\"\n",
         )
         .unwrap();
 
@@ -372,8 +377,11 @@ mod tests {
         let dir = tempdir().unwrap();
         let agents_dir = dir.path().join(".agents");
         fs::create_dir_all(&agents_dir).unwrap();
-        fs::write(agents_dir.join("config.toml"), "[agent]\nsystem_prompt = \"$DOES_NOT_EXIST_VAR\"\n")
-            .unwrap();
+        fs::write(
+            agents_dir.join("config.toml"),
+            "[agent]\nsystem_prompt = \"$DOES_NOT_EXIST_VAR\"\n",
+        )
+        .unwrap();
 
         let err = resolve_fs_config_with_global(dir.path(), None).unwrap_err();
         match err {
@@ -415,11 +423,7 @@ mod tests {
     fn resolve_merges_global_and_project_config() {
         let global_home = tempdir().unwrap();
         let global_config = global_home.path().join("config.toml");
-        fs::write(
-            &global_config,
-            "[agent]\nmax_iterations = 50\n",
-        )
-        .unwrap();
+        fs::write(&global_config, "[agent]\nmax_iterations = 50\n").unwrap();
 
         let project = tempdir().unwrap();
         let agents_dir = project.path().join(".agents");

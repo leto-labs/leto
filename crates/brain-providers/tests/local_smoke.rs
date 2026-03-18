@@ -11,10 +11,7 @@ async fn smoke_mistralrs_qwen3_0_6b() {
     eprintln!("  (first run downloads ~400 MB from HuggingFace)");
 
     let config = preset.into_config();
-    let provider = MistralRsProvider::new(
-        vec![(preset.name.to_owned(), config)],
-        preset.name,
-    );
+    let provider = MistralRsProvider::new(vec![(preset.name.to_owned(), config)], preset.name);
     if let Err(e) = provider.preload(preset.name).await {
         eprintln!("    SKIP: failed to load model: {e}");
         return;

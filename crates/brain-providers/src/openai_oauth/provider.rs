@@ -75,7 +75,9 @@ impl OpenAiOAuthProvider {
     {
         let entry = OAuthFlow::login_browser(&*store, preset, on_prompt).await?;
         let ProviderCredential::OAuth(creds) = entry.credential else {
-            return Err(BrainError::Internal("OAuthFlow returned non-OAuth credential".into()));
+            return Err(BrainError::Internal(
+                "OAuthFlow returned non-OAuth credential".into(),
+            ));
         };
         Ok(Self::new(creds, store, preset))
     }
@@ -92,7 +94,9 @@ impl OpenAiOAuthProvider {
     {
         let entry = OAuthFlow::login_device(&*store, preset, on_user_prompt).await?;
         let ProviderCredential::OAuth(creds) = entry.credential else {
-            return Err(BrainError::Internal("OAuthFlow returned non-OAuth credential".into()));
+            return Err(BrainError::Internal(
+                "OAuthFlow returned non-OAuth credential".into(),
+            ));
         };
         Ok(Self::new(creds, store, preset))
     }

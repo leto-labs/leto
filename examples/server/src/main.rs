@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use brain_core::*;
-use brain_server::{serve, BrainServer};
+use brain_server::{BrainServer, serve};
 
 #[tokio::main]
 async fn main() {
@@ -19,7 +19,9 @@ async fn main() {
     eprintln!();
     eprintln!("Try:");
     eprintln!("  curl -s http://{addr}/status | jq");
-    eprintln!("  curl -s -X POST http://{addr}/projects -H 'Content-Type: application/json' -d '{{\"name\":\"demo\"}}' | jq");
+    eprintln!(
+        "  curl -s -X POST http://{addr}/projects -H 'Content-Type: application/json' -d '{{\"name\":\"demo\"}}' | jq"
+    );
 
     serve(server, addr).await.unwrap();
 }

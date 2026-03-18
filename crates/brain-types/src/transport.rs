@@ -7,7 +7,11 @@ use crate::{BrainError, Event};
 #[non_exhaustive]
 pub enum InputEvent {
     Message(String),
-    ToolApproval { id: String, approved: bool, reason: Option<String> },
+    ToolApproval {
+        id: String,
+        approved: bool,
+        reason: Option<String>,
+    },
     Cancel,
     SwitchSession(Ulid),
 }

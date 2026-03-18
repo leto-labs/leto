@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use futures::future::BoxFuture;
 use futures::StreamExt;
-use tokio::sync::{broadcast, RwLock};
+use futures::future::BoxFuture;
+use tokio::sync::{RwLock, broadcast};
 use tokio_util::sync::CancellationToken;
 use ulid::Ulid;
 
@@ -46,78 +46,71 @@ impl BrainApi for BrainServer {
     // -- Project management --
 
     fn create_project(&self, project: Project) -> BoxFuture<'_, Result<Project, BrainError>> {
-        Box::pin(async move {
-            self.inner.brain.store.project_create(project).await
-        })
+        Box::pin(async move { self.inner.brain.store.project_create(project).await })
     }
 
     fn list_projects(&self) -> BoxFuture<'_, Result<Vec<Project>, BrainError>> {
-        Box::pin(async move {
-            self.inner.brain.store.project_list().await
-        })
+        Box::pin(async move { self.inner.brain.store.project_list().await })
     }
 
     fn get_project(&self, id: ProjectId) -> BoxFuture<'_, Result<Project, BrainError>> {
-        Box::pin(async move {
-            self.inner.brain.store.project_get(id).await
-        })
+        Box::pin(async move { self.inner.brain.store.project_get(id).await })
     }
 
-    fn update_project(&self, id: ProjectId, update: ProjectUpdate) -> BoxFuture<'_, Result<(), BrainError>> {
-        Box::pin(async move {
-            self.inner.brain.store.project_update(id, update).await
-        })
+    fn update_project(
+        &self,
+        id: ProjectId,
+        update: ProjectUpdate,
+    ) -> BoxFuture<'_, Result<(), BrainError>> {
+        Box::pin(async move { self.inner.brain.store.project_update(id, update).await })
     }
 
     fn delete_project(&self, id: ProjectId) -> BoxFuture<'_, Result<(), BrainError>> {
-        Box::pin(async move {
-            self.inner.brain.store.project_delete(id).await
-        })
+        Box::pin(async move { self.inner.brain.store.project_delete(id).await })
     }
 
     // -- Session management --
 
     fn create_session(&self, project_id: ProjectId) -> BoxFuture<'_, Result<Session, BrainError>> {
-        Box::pin(async move {
-            self.inner.brain.store.session_create(project_id).await
-        })
+        Box::pin(async move { self.inner.brain.store.session_create(project_id).await })
     }
 
-    fn list_sessions(&self, project_id: ProjectId) -> BoxFuture<'_, Result<Vec<Session>, BrainError>> {
-        Box::pin(async move {
-            self.inner.brain.store.session_list(project_id).await
-        })
+    fn list_sessions(
+        &self,
+        project_id: ProjectId,
+    ) -> BoxFuture<'_, Result<Vec<Session>, BrainError>> {
+        Box::pin(async move { self.inner.brain.store.session_list(project_id).await })
     }
 
     fn get_session(&self, id: Ulid) -> BoxFuture<'_, Result<Session, BrainError>> {
-        Box::pin(async move {
-            self.inner.brain.store.session_get(id).await
-        })
+        Box::pin(async move { self.inner.brain.store.session_get(id).await })
     }
 
-    fn update_session(&self, id: Ulid, update: SessionUpdate) -> BoxFuture<'_, Result<(), BrainError>> {
-        Box::pin(async move {
-            self.inner.brain.store.session_update(id, update).await
-        })
+    fn update_session(
+        &self,
+        id: Ulid,
+        update: SessionUpdate,
+    ) -> BoxFuture<'_, Result<(), BrainError>> {
+        Box::pin(async move { self.inner.brain.store.session_update(id, update).await })
     }
 
     fn delete_session(&self, id: Ulid) -> BoxFuture<'_, Result<(), BrainError>> {
-        Box::pin(async move {
-            self.inner.brain.store.session_delete(id).await
-        })
+        Box::pin(async move { self.inner.brain.store.session_delete(id).await })
     }
 
     // -- Message history --
 
     fn list_messages(&self, session_id: Ulid) -> BoxFuture<'_, Result<Vec<Message>, BrainError>> {
-        Box::pin(async move {
-            self.inner.brain.store.message_list(session_id).await
-        })
+        Box::pin(async move { self.inner.brain.store.message_list(session_id).await })
     }
 
     // -- Turn management --
 
-    fn send_message(&self, session_id: Ulid, content: &str) -> BoxFuture<'_, Result<(), BrainError>> {
+    fn send_message(
+        &self,
+        session_id: Ulid,
+        content: &str,
+    ) -> BoxFuture<'_, Result<(), BrainError>> {
         let content = content.to_owned();
         let inner = self.inner.clone();
         Box::pin(async move {
@@ -143,7 +136,11 @@ impl BrainApi for BrainServer {
         })
     }
 
-    fn send_message_stream(&self, session_id: Ulid, content: &str) -> BoxFuture<'_, Result<EventStream, BrainError>> {
+    fn send_message_stream(
+        &self,
+        session_id: Ulid,
+        content: &str,
+    ) -> BoxFuture<'_, Result<EventStream, BrainError>> {
         let content = content.to_owned();
         let inner = self.inner.clone();
         Box::pin(async move {
@@ -170,7 +167,9 @@ impl BrainApi for BrainServer {
                 use futures::StreamExt;
                 let mut stream = stream;
                 while let Some(event) = stream.next().await {
-                    inner_clone.event_bus.publish(ServerEvent::new(session_id, event.clone()));
+                    inner_clone
+                        .event_bus
+                        .publish(ServerEvent::new(session_id, event.clone()));
                     if tx.send(event).await.is_err() {
                         break;
                     }
@@ -195,37 +194,40 @@ impl BrainApi for BrainServer {
     // -- Provider & credentials --
 
     fn list_providers(&self) -> BoxFuture<'_, Result<Vec<ProviderInfo>, BrainError>> {
-        Box::pin(async move {
-            Ok(vec![self.inner.brain.provider.info()])
-        })
+        Box::pin(async move { Ok(vec![self.inner.brain.provider.info()]) })
     }
 
-    fn list_credentials(&self) -> BoxFuture<'_, Result<Vec<(String, CredentialEntry)>, BrainError>> {
-        Box::pin(async move {
-            self.inner.brain.store.credential_list().await
-        })
+    fn list_credentials(
+        &self,
+    ) -> BoxFuture<'_, Result<Vec<(String, CredentialEntry)>, BrainError>> {
+        Box::pin(async move { self.inner.brain.store.credential_list().await })
     }
 
-    fn get_credentials(&self, provider_name: &str) -> BoxFuture<'_, Result<Vec<CredentialEntry>, BrainError>> {
+    fn get_credentials(
+        &self,
+        provider_name: &str,
+    ) -> BoxFuture<'_, Result<Vec<CredentialEntry>, BrainError>> {
         let name = provider_name.to_owned();
-        Box::pin(async move {
-            self.inner.brain.store.credential_load_all(&name).await
-        })
+        Box::pin(async move { self.inner.brain.store.credential_load_all(&name).await })
     }
 
-    fn save_credential(&self, provider_name: &str, entry: CredentialEntry) -> BoxFuture<'_, Result<(), BrainError>> {
+    fn save_credential(
+        &self,
+        provider_name: &str,
+        entry: CredentialEntry,
+    ) -> BoxFuture<'_, Result<(), BrainError>> {
         let name = provider_name.to_owned();
-        Box::pin(async move {
-            self.inner.brain.store.credential_save(&name, &entry).await
-        })
+        Box::pin(async move { self.inner.brain.store.credential_save(&name, &entry).await })
     }
 
-    fn delete_credential(&self, provider_name: &str, credential_id: &str) -> BoxFuture<'_, Result<(), BrainError>> {
+    fn delete_credential(
+        &self,
+        provider_name: &str,
+        credential_id: &str,
+    ) -> BoxFuture<'_, Result<(), BrainError>> {
         let name = provider_name.to_owned();
         let cid = credential_id.to_owned();
-        Box::pin(async move {
-            self.inner.brain.store.credential_delete(&name, &cid).await
-        })
+        Box::pin(async move { self.inner.brain.store.credential_delete(&name, &cid).await })
     }
 
     // -- Events & status --
@@ -237,7 +239,12 @@ impl BrainApi for BrainServer {
     fn status(&self) -> BoxFuture<'_, Result<ServerStatus, BrainError>> {
         let inner = &self.inner;
         Box::pin(async move {
-            let tools: Vec<String> = inner.brain.tools.iter().map(|t| t.definition().name).collect();
+            let tools: Vec<String> = inner
+                .brain
+                .tools
+                .iter()
+                .map(|t| t.definition().name)
+                .collect();
             let active = inner.active_turns.read().await;
             let active_turn_ids: Vec<Ulid> = active.keys().copied().collect();
             let projects = inner.brain.store.project_list().await?;
@@ -268,9 +275,9 @@ async fn drain_turn(inner: Arc<Inner>, session_id: Ulid, mut stream: EventStream
 #[cfg(test)]
 mod tests {
     use super::*;
+    use brain_loops::SimpleLoop;
     use brain_providers::MockProvider;
     use brain_stores::InMemoryStore;
-    use brain_loops::SimpleLoop;
 
     fn make_brain() -> Brain {
         let provider: Arc<dyn Provider> = Arc::new(MockProvider::new());
@@ -284,14 +291,20 @@ mod tests {
     }
 
     async fn make_project(server: &BrainServer) -> Project {
-        server.create_project(Project::with_defaults("test")).await.unwrap()
+        server
+            .create_project(Project::with_defaults("test"))
+            .await
+            .unwrap()
     }
 
     #[tokio::test]
     async fn project_crud() {
         let server = make_server();
 
-        let p = server.create_project(Project::with_defaults("myproject")).await.unwrap();
+        let p = server
+            .create_project(Project::with_defaults("myproject"))
+            .await
+            .unwrap();
         assert_eq!(p.name.as_deref(), Some("myproject"));
 
         let got = server.get_project(p.id).await.unwrap();
@@ -322,7 +335,10 @@ mod tests {
     async fn sessions_scoped_to_project() {
         let server = make_server();
         let p1 = make_project(&server).await;
-        let p2 = server.create_project(Project::with_defaults("other")).await.unwrap();
+        let p2 = server
+            .create_project(Project::with_defaults("other"))
+            .await
+            .unwrap();
 
         server.create_session(p1.id).await.unwrap();
         server.create_session(p1.id).await.unwrap();
@@ -366,13 +382,10 @@ mod tests {
         let mut saw_token = false;
 
         loop {
-            let ev = tokio::time::timeout(
-                std::time::Duration::from_secs(2),
-                rx.recv(),
-            )
-            .await
-            .expect("timed out waiting for event")
-            .expect("channel closed");
+            let ev = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
+                .await
+                .expect("timed out waiting for event")
+                .expect("channel closed");
 
             assert_eq!(ev.session_id, session.id);
             match &ev.event {
@@ -421,10 +434,16 @@ mod tests {
             match tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv()).await {
                 Ok(Ok(ev)) => {
                     if matches!(&ev.event, Event::TurnDone { .. }) {
-                        if ev.session_id == s1.id { s1_done = true; }
-                        if ev.session_id == s2.id { s2_done = true; }
+                        if ev.session_id == s1.id {
+                            s1_done = true;
+                        }
+                        if ev.session_id == s2.id {
+                            s2_done = true;
+                        }
                     }
-                    if s1_done && s2_done { break; }
+                    if s1_done && s2_done {
+                        break;
+                    }
                 }
                 _ => break,
             }
@@ -455,7 +474,11 @@ mod tests {
         for _ in 0..20 {
             match tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv()).await {
                 Ok(Ok(ev)) => {
-                    if let Event::Error { code: BrainErrorCode::Cancelled, .. } = &ev.event {
+                    if let Event::Error {
+                        code: BrainErrorCode::Cancelled,
+                        ..
+                    } = &ev.event
+                    {
                         saw_cancelled = true;
                         break;
                     }
@@ -493,7 +516,10 @@ mod tests {
         let server = make_server();
         let client = server.client();
 
-        let project = client.create_project(Project::with_defaults("test")).await.unwrap();
+        let project = client
+            .create_project(Project::with_defaults("test"))
+            .await
+            .unwrap();
         let session = client.create_session(project.id).await.unwrap();
         let list = client.list_sessions(project.id).await.unwrap();
         assert_eq!(list.len(), 1);
@@ -527,7 +553,15 @@ mod tests {
         let session = server.create_session(project.id).await.unwrap();
         assert!(session.title.is_none());
 
-        server.update_session(session.id, SessionUpdate { title: Some("renamed".into()) }).await.unwrap();
+        server
+            .update_session(
+                session.id,
+                SessionUpdate {
+                    title: Some("renamed".into()),
+                },
+            )
+            .await
+            .unwrap();
 
         let got = server.get_session(session.id).await.unwrap();
         assert_eq!(got.title.as_deref(), Some("renamed"));
@@ -573,7 +607,10 @@ mod tests {
         let project = make_project(&server).await;
         let session = server.create_session(project.id).await.unwrap();
 
-        let mut stream = server.send_message_stream(session.id, "hello").await.unwrap();
+        let mut stream = server
+            .send_message_stream(session.id, "hello")
+            .await
+            .unwrap();
 
         let mut saw_token = false;
         let mut saw_done = false;
@@ -581,7 +618,10 @@ mod tests {
         while let Some(event) = futures::StreamExt::next(&mut stream).await {
             match &event {
                 Event::Token { .. } => saw_token = true,
-                Event::TurnDone { .. } => { saw_done = true; break; }
+                Event::TurnDone { .. } => {
+                    saw_done = true;
+                    break;
+                }
                 _ => {}
             }
         }
@@ -597,7 +637,10 @@ mod tests {
         let session = server.create_session(project.id).await.unwrap();
 
         let mut bus_rx = server.subscribe();
-        let mut stream = server.send_message_stream(session.id, "hello").await.unwrap();
+        let mut stream = server
+            .send_message_stream(session.id, "hello")
+            .await
+            .unwrap();
 
         // Drain the stream to completion
         while futures::StreamExt::next(&mut stream).await.is_some() {}

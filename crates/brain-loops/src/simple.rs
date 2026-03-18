@@ -24,7 +24,17 @@ impl AgentLoop for SimpleLoop {
         let (tx, rx) = mpsc::channel(256);
 
         tokio::spawn(async move {
-            if let Err(e) = run_inner(provider, tools, messages, config, cancel, session_id, tx.clone()).await {
+            if let Err(e) = run_inner(
+                provider,
+                tools,
+                messages,
+                config,
+                cancel,
+                session_id,
+                tx.clone(),
+            )
+            .await
+            {
                 let _ = tx
                     .send(Event::Error {
                         code: e.code(),
@@ -66,7 +76,9 @@ async fn run_inner(
         }
         iterations += 1;
 
-        let mut stream = provider.chat(&messages, &tool_defs, &config.inference, session_id).await?;
+        let mut stream = provider
+            .chat(&messages, &tool_defs, &config.inference, session_id)
+            .await?;
 
         let mut text = String::new();
         let mut tool_calls: Vec<ToolCall> = Vec::new();
@@ -81,18 +93,34 @@ async fn run_inner(
                     text.push_str(&content);
                     let _ = tx.send(Event::Token { delta: content }).await;
                 }
-                ChatChunk::ToolCallDelta { id, name, arguments_delta } => {
+                ChatChunk::ToolCallDelta {
+                    id,
+                    name,
+                    arguments_delta,
+                } => {
                     tool_call_deltas
                         .entry(id.clone())
                         .or_default()
                         .push_str(&arguments_delta);
                     let _ = tx
-                        .send(Event::ToolCallDelta { id, name, arguments_delta })
+                        .send(Event::ToolCallDelta {
+                            id,
+                            name,
+                            arguments_delta,
+                        })
                         .await;
                 }
-                ChatChunk::ToolCall { id, name, arguments } => {
+                ChatChunk::ToolCall {
+                    id,
+                    name,
+                    arguments,
+                } => {
                     let _ = tool_call_deltas.remove(&id);
-                    tool_calls.push(ToolCall { id, name, arguments });
+                    tool_calls.push(ToolCall {
+                        id,
+                        name,
+                        arguments,
+                    });
                 }
                 ChatChunk::Done { usage } => {
                     if let Some(u) = usage {
@@ -105,7 +133,11 @@ async fn run_inner(
 
         let mut asst = Message::assistant(&text);
         asst.tool_calls = tool_calls.clone();
-        let _ = tx.send(Event::MessageDone { message: asst.clone() }).await;
+        let _ = tx
+            .send(Event::MessageDone {
+                message: asst.clone(),
+            })
+            .await;
         messages.push(asst);
 
         if tool_calls.is_empty() {
@@ -123,7 +155,9 @@ async fn run_inner(
 
             // Auto-approve (no approval gate configured yet)
             let _ = tx
-                .send(Event::ToolCallApproved { id: call.id.clone() })
+                .send(Event::ToolCallApproved {
+                    id: call.id.clone(),
+                })
                 .await;
 
             let _ = tx
@@ -156,7 +190,12 @@ async fn run_inner(
         }
     }
 
-    let _ = tx.send(Event::TurnDone { iterations, total_tokens }).await;
+    let _ = tx
+        .send(Event::TurnDone {
+            iterations,
+            total_tokens,
+        })
+        .await;
     Ok(())
 }
 
@@ -170,7 +209,11 @@ mod tests {
 
     impl Provider for EchoProvider {
         fn info(&self) -> ProviderInfo {
-            ProviderInfo { name: "echo".into(), default_model: None, models: vec![] }
+            ProviderInfo {
+                name: "echo".into(),
+                default_model: None,
+                models: vec![],
+            }
         }
 
         fn chat<'a>(
@@ -214,7 +257,11 @@ mod tests {
 
     impl Provider for ToolCallDeltaProvider {
         fn info(&self) -> ProviderInfo {
-            ProviderInfo { name: "tool-call-delta".into(), default_model: None, models: vec![] }
+            ProviderInfo {
+                name: "tool-call-delta".into(),
+                default_model: None,
+                models: vec![],
+            }
         }
 
         fn chat<'a>(
@@ -254,13 +301,19 @@ mod tests {
 
     impl ToolCallProvider {
         fn new(tool_calls: u32) -> Self {
-            Self { remaining: std::sync::atomic::AtomicU32::new(tool_calls) }
+            Self {
+                remaining: std::sync::atomic::AtomicU32::new(tool_calls),
+            }
         }
     }
 
     impl Provider for ToolCallProvider {
         fn info(&self) -> ProviderInfo {
-            ProviderInfo { name: "tool-call".into(), default_model: None, models: vec![] }
+            ProviderInfo {
+                name: "tool-call".into(),
+                default_model: None,
+                models: vec![],
+            }
         }
 
         fn chat<'a>(
@@ -270,7 +323,9 @@ mod tests {
             _config: &'a InferenceConfig,
             _session_id: Option<Ulid>,
         ) -> BoxFuture<'a, Result<ChatStream, BrainError>> {
-            let remaining = self.remaining.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+            let remaining = self
+                .remaining
+                .fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
             Box::pin(async move {
                 if remaining > 0 {
                     let s = stream! {
@@ -306,7 +361,11 @@ mod tests {
 
         fn execute(&self, args: serde_json::Value) -> BoxFuture<'_, Result<String, BrainError>> {
             Box::pin(async move {
-                Ok(args.get("message").and_then(|v| v.as_str()).unwrap_or("").to_string())
+                Ok(args
+                    .get("message")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string())
             })
         }
     }
@@ -325,7 +384,14 @@ mod tests {
         let provider: Arc<dyn Provider> = Arc::new(EchoProvider);
         let messages = vec![Message::user("hello")];
 
-        let mut stream = agent_loop.run(provider, vec![], messages, default_config(), CancellationToken::new(), None);
+        let mut stream = agent_loop.run(
+            provider,
+            vec![],
+            messages,
+            default_config(),
+            CancellationToken::new(),
+            None,
+        );
 
         let mut tokens = String::new();
         let mut saw_message_done = false;
@@ -357,7 +423,11 @@ mod tests {
 
         impl Provider for CaptureProvider {
             fn info(&self) -> ProviderInfo {
-                ProviderInfo { name: "capture".into(), default_model: None, models: vec![] }
+                ProviderInfo {
+                    name: "capture".into(),
+                    default_model: None,
+                    models: vec![],
+                }
             }
 
             fn chat<'a>(
@@ -456,7 +526,10 @@ mod tests {
                     saw_delta = true;
                 }
                 Event::ToolCallPending { .. } => {
-                    assert!(saw_delta, "ToolCallPending should arrive after delta stream");
+                    assert!(
+                        saw_delta,
+                        "ToolCallPending should arrive after delta stream"
+                    );
                     saw_pending = true;
                 }
                 Event::ToolCallDone { is_error, .. } => {
@@ -534,7 +607,11 @@ mod tests {
 
         impl Provider for OneCallProvider {
             fn info(&self) -> ProviderInfo {
-                ProviderInfo { name: "one-call".into(), default_model: None, models: vec![] }
+                ProviderInfo {
+                    name: "one-call".into(),
+                    default_model: None,
+                    models: vec![],
+                }
             }
 
             fn chat<'a>(
@@ -578,7 +655,10 @@ mod tests {
 
         let mut saw_error_result = false;
         while let Some(event) = stream.next().await {
-            if let Event::ToolCallDone { is_error, result, .. } = event {
+            if let Event::ToolCallDone {
+                is_error, result, ..
+            } = event
+            {
                 assert!(is_error);
                 assert!(result.contains("not found"));
                 saw_error_result = true;
@@ -628,7 +708,13 @@ mod tests {
         assert!(saw_pending, "should emit ToolCallPending");
         assert!(saw_approved, "should emit ToolCallApproved");
         assert!(saw_start, "should emit ToolCallStart");
-        assert!(pending_before_approved, "ToolCallPending must precede ToolCallApproved");
-        assert!(approved_before_start, "ToolCallApproved must precede ToolCallStart");
+        assert!(
+            pending_before_approved,
+            "ToolCallPending must precede ToolCallApproved"
+        );
+        assert!(
+            approved_before_start,
+            "ToolCallApproved must precede ToolCallStart"
+        );
     }
 }

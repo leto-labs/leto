@@ -233,14 +233,32 @@ enum PromptBehavior {
     Echo(String),
     CreatePlan,
     SummarizeSession,
-    Think { topic: String },
-    Search { query: String },
-    Fetch { resource: String },
-    EditFile { path: Option<PathBuf> },
-    DeleteFile { path: Option<PathBuf> },
-    MoveFile { from: Option<PathBuf>, to: Option<PathBuf> },
-    ReadFile { path: Option<PathBuf> },
-    WriteFile { path: Option<PathBuf>, content: Option<String> },
+    Think {
+        topic: String,
+    },
+    Search {
+        query: String,
+    },
+    Fetch {
+        resource: String,
+    },
+    EditFile {
+        path: Option<PathBuf>,
+    },
+    DeleteFile {
+        path: Option<PathBuf>,
+    },
+    MoveFile {
+        from: Option<PathBuf>,
+        to: Option<PathBuf>,
+    },
+    ReadFile {
+        path: Option<PathBuf>,
+    },
+    WriteFile {
+        path: Option<PathBuf>,
+        content: Option<String>,
+    },
     RequestPermission,
     Terminal {
         command: Option<String>,
@@ -702,9 +720,9 @@ impl MockAgent {
         behavior: PromptBehavior,
     ) -> Result<MockPromptOutcome, acp::Error> {
         match behavior {
-            PromptBehavior::Echo(prompt_text) => {
-                Ok(MockPromptOutcome::assistant(format!("Mock brain-acp response: {prompt_text}")))
-            }
+            PromptBehavior::Echo(prompt_text) => Ok(MockPromptOutcome::assistant(format!(
+                "Mock brain-acp response: {prompt_text}"
+            ))),
             PromptBehavior::CreatePlan => {
                 self.emit_mock_plan(session_id).await?;
                 Ok(MockPromptOutcome::assistant("Mock plan emitted."))
@@ -722,21 +740,21 @@ impl MockAgent {
             PromptBehavior::MoveFile { from, to } => {
                 self.emit_mock_move_file(session_id, from, to).await
             }
-            PromptBehavior::ReadFile { path } => Ok(self.read_file_via_client(session_id, path).await),
+            PromptBehavior::ReadFile { path } => {
+                Ok(self.read_file_via_client(session_id, path).await)
+            }
             PromptBehavior::WriteFile { path, content } => {
                 Ok(self.write_file_via_client(session_id, path, content).await)
             }
-            PromptBehavior::RequestPermission => Ok(self.request_permission_via_client(session_id).await),
-            PromptBehavior::Terminal { command, args } => {
-                Ok(self
-                    .run_terminal_via_client(session_id, command, args, false)
-                    .await)
+            PromptBehavior::RequestPermission => {
+                Ok(self.request_permission_via_client(session_id).await)
             }
-            PromptBehavior::TerminalKill { command, args } => {
-                Ok(self
-                    .run_terminal_via_client(session_id, command, args, true)
-                    .await)
-            }
+            PromptBehavior::Terminal { command, args } => Ok(self
+                .run_terminal_via_client(session_id, command, args, false)
+                .await),
+            PromptBehavior::TerminalKill { command, args } => Ok(self
+                .run_terminal_via_client(session_id, command, args, true)
+                .await),
         }
     }
 
@@ -885,23 +903,20 @@ impl MockAgent {
 
         self.emit(
             session_id,
-            acp::SessionUpdate::ToolCallUpdate(acp::ToolCallUpdate::new(
-                tool_call_id,
-                {
-                    let fields = acp::ToolCallUpdateFields::new()
+            acp::SessionUpdate::ToolCallUpdate(acp::ToolCallUpdate::new(tool_call_id, {
+                let fields = acp::ToolCallUpdateFields::new()
                     .title(title_owned)
                     .kind(kind)
                     .status(acp::ToolCallStatus::Completed)
                     .raw_input(raw_input)
                     .locations(locations)
                     .content(vec![output.into()]);
-                    if let Some(raw_output) = raw_output {
-                        fields.raw_output(raw_output)
-                    } else {
-                        fields
-                    }
-                },
-            )),
+                if let Some(raw_output) = raw_output {
+                    fields.raw_output(raw_output)
+                } else {
+                    fields
+                }
+            })),
         )
         .await
     }
@@ -1178,7 +1193,10 @@ impl MockAgent {
         ))
     }
 
-    async fn request_permission_via_client(&self, session_id: &acp::SessionId) -> MockPromptOutcome {
+    async fn request_permission_via_client(
+        &self,
+        session_id: &acp::SessionId,
+    ) -> MockPromptOutcome {
         let client = match self.client_connection() {
             Ok(client) => client,
             Err(_) => {
@@ -1246,10 +1264,9 @@ impl MockAgent {
                     acp::RequestPermissionOutcome::Cancelled => {
                         "mock permission outcome: cancelled".to_owned()
                     }
-                    acp::RequestPermissionOutcome::Selected(selected) => format!(
-                        "mock permission outcome: {}",
-                        selected.option_id.0.as_ref()
-                    ),
+                    acp::RequestPermissionOutcome::Selected(selected) => {
+                        format!("mock permission outcome: {}", selected.option_id.0.as_ref())
+                    }
                     _ => "mock permission outcome: unknown".to_owned(),
                 };
 
@@ -1274,9 +1291,9 @@ impl MockAgent {
                 }
 
                 match response.outcome {
-                    acp::RequestPermissionOutcome::Cancelled => MockPromptOutcome::assistant(
-                        "Mock permission probe completed: cancelled.",
-                    ),
+                    acp::RequestPermissionOutcome::Cancelled => {
+                        MockPromptOutcome::assistant("Mock permission probe completed: cancelled.")
+                    }
                     acp::RequestPermissionOutcome::Selected(selected) => {
                         MockPromptOutcome::assistant(format!(
                             "Mock permission probe completed: {}.",
@@ -1288,9 +1305,9 @@ impl MockAgent {
                     ),
                 }
             }
-            Err(error) => MockPromptOutcome::assistant(format!(
-                "Mock ACP permission request failed: {error}"
-            )),
+            Err(error) => {
+                MockPromptOutcome::assistant(format!("Mock ACP permission request failed: {error}"))
+            }
         }
     }
 
@@ -1315,7 +1332,10 @@ impl MockAgent {
         } else if kill_after_create {
             ("sleep".to_owned(), vec!["5".to_owned()])
         } else {
-            ("echo".to_owned(), vec!["hello-from-mock-terminal".to_owned()])
+            (
+                "echo".to_owned(),
+                vec!["hello-from-mock-terminal".to_owned()],
+            )
         };
 
         let create = client
@@ -1664,7 +1684,7 @@ impl acp::Agent for MockAgent {
                 &arguments.session_id,
                 acp::SessionUpdate::SessionInfoUpdate(info_update),
             )
-                .await?;
+            .await?;
         }
 
         self.emit_prompt_metadata(&arguments.session_id).await?;

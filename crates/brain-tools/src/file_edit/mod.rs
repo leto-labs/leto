@@ -52,13 +52,12 @@ impl<T: FileEditDriver> Tool for FileEditTool<T> {
 
     fn execute(&self, args: serde_json::Value) -> BoxFuture<'_, Result<String, BrainError>> {
         Box::pin(async move {
-            let path = args
-                .get("path")
-                .and_then(|v| v.as_str())
-                .ok_or_else(|| BrainError::ToolFailed {
+            let path = args.get("path").and_then(|v| v.as_str()).ok_or_else(|| {
+                BrainError::ToolFailed {
                     tool: "file_edit".into(),
                     reason: "missing required parameter 'path'".into(),
-                })?;
+                }
+            })?;
             let old_string = args
                 .get("old_string")
                 .and_then(|v| v.as_str())

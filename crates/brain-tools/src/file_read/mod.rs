@@ -52,15 +52,20 @@ impl<T: FileReadDriver> Tool for FileReadTool<T> {
 
     fn execute(&self, args: serde_json::Value) -> BoxFuture<'_, Result<String, BrainError>> {
         Box::pin(async move {
-            let path = args
-                .get("path")
-                .and_then(|v| v.as_str())
-                .ok_or_else(|| BrainError::ToolFailed {
+            let path = args.get("path").and_then(|v| v.as_str()).ok_or_else(|| {
+                BrainError::ToolFailed {
                     tool: "file_read".into(),
                     reason: "missing required parameter 'path'".into(),
-                })?;
-            let offset = args.get("offset").and_then(|v| v.as_u64()).map(|v| v as usize);
-            let limit = args.get("limit").and_then(|v| v.as_u64()).map(|v| v as usize);
+                }
+            })?;
+            let offset = args
+                .get("offset")
+                .and_then(|v| v.as_u64())
+                .map(|v| v as usize);
+            let limit = args
+                .get("limit")
+                .and_then(|v| v.as_u64())
+                .map(|v| v as usize);
 
             tracing::info!(path, ?offset, ?limit, "file_read invoked");
             self.driver.read_file(path, offset, limit).await

@@ -37,7 +37,11 @@ impl GlobDriver for GlobDriverNative {
             if paths.is_empty() {
                 Ok("No files found matching the pattern.".into())
             } else {
-                Ok(format!("{} files found:\n{}", paths.len(), paths.join("\n")))
+                Ok(format!(
+                    "{} files found:\n{}",
+                    paths.len(),
+                    paths.join("\n")
+                ))
             }
         })
     }

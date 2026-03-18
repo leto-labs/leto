@@ -57,10 +57,22 @@ async fn file_read_with_offset_and_limit() {
         .await
         .unwrap();
 
-    assert!(result.contains("|b"), "expected line 2 content 'b': {result}");
-    assert!(result.contains("|c"), "expected line 3 content 'c': {result}");
-    assert!(!result.contains("|a"), "should not contain line 1: {result}");
-    assert!(!result.contains("|d"), "should not contain line 4: {result}");
+    assert!(
+        result.contains("|b"),
+        "expected line 2 content 'b': {result}"
+    );
+    assert!(
+        result.contains("|c"),
+        "expected line 3 content 'c': {result}"
+    );
+    assert!(
+        !result.contains("|a"),
+        "should not contain line 1: {result}"
+    );
+    assert!(
+        !result.contains("|d"),
+        "should not contain line 4: {result}"
+    );
 }
 
 #[tokio::test]

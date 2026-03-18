@@ -52,9 +52,8 @@ mod tests {
 
     #[test]
     fn chatgpt_account_id_takes_precedence() {
-        let jwt = make_jwt(
-            r#"{"chatgpt_account_id": "acct_1", "organizations": [{"id": "org_2"}]}"#,
-        );
+        let jwt =
+            make_jwt(r#"{"chatgpt_account_id": "acct_1", "organizations": [{"id": "org_2"}]}"#);
         assert_eq!(extract_account_id(&jwt), Some("acct_1".into()));
     }
 

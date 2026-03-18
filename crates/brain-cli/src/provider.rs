@@ -57,10 +57,7 @@ async fn discover_api_providers(
     providers: &mut Vec<(String, Arc<dyn Provider>, bool)>,
 ) {
     for preset in OpenAiConfigPreset::ALL {
-        let has_credentials = pool
-            .resolve(preset.name, None)
-            .await
-            .is_ok();
+        let has_credentials = pool.resolve(preset.name, None).await.is_ok();
 
         if !has_credentials {
             continue;
@@ -100,7 +97,8 @@ async fn discover_oauth_providers(
         preset.default_model
     };
 
-    let provider: Arc<dyn Provider> = Arc::new(OpenAiOAuthProvider::with_pool(pool.clone(), preset));
+    let provider: Arc<dyn Provider> =
+        Arc::new(OpenAiOAuthProvider::with_pool(pool.clone(), preset));
     tracing::info!("provider: {} (OAuth) | model: {model}", preset.name);
     providers.push((model.to_owned(), provider, is_default));
 }
@@ -249,6 +247,9 @@ mod tests {
 
         let provider = build_provider(&config, pool).await;
         let info = provider.info();
-        assert_eq!(info.default_model, Some("llama-3.3-70b-versatile".to_owned()));
+        assert_eq!(
+            info.default_model,
+            Some("llama-3.3-70b-versatile".to_owned())
+        );
     }
 }

@@ -5,8 +5,8 @@ use tokio::sync::RwLock;
 use ulid::Ulid;
 
 use brain_types::{
-    BrainError, CredentialEntry, CredentialHealth, CredentialStore,
-    SelectionContext, SelectionStrategy,
+    BrainError, CredentialEntry, CredentialHealth, CredentialStore, SelectionContext,
+    SelectionStrategy,
 };
 
 #[cfg(feature = "openai-oauth")]
@@ -24,10 +24,7 @@ pub struct CredentialPool {
 }
 
 impl CredentialPool {
-    pub fn new(
-        store: Arc<dyn CredentialStore>,
-        strategy: Arc<dyn SelectionStrategy>,
-    ) -> Self {
+    pub fn new(store: Arc<dyn CredentialStore>, strategy: Arc<dyn SelectionStrategy>) -> Self {
         Self {
             store,
             strategy,
@@ -190,8 +187,7 @@ impl CredentialPool {
         #[cfg(feature = "openai-oauth")]
         if let ProviderCredential::OAuth(ref creds) = entry.credential {
             if creds.needs_refresh() {
-                let refreshed =
-                    crate::oauth::refresh::refresh_token(&self.client, creds).await?;
+                let refreshed = crate::oauth::refresh::refresh_token(&self.client, creds).await?;
                 entry.credential = ProviderCredential::OAuth(refreshed);
                 self.store.credential_save(provider_name, &entry).await?;
             }
@@ -213,7 +209,10 @@ mod tests {
         Arc::new(InMemoryStore::new())
     }
 
-    fn pool(store: Arc<dyn CredentialStore>, strategy: Arc<dyn SelectionStrategy>) -> CredentialPool {
+    fn pool(
+        store: Arc<dyn CredentialStore>,
+        strategy: Arc<dyn SelectionStrategy>,
+    ) -> CredentialPool {
         CredentialPool::new(store, strategy)
     }
 
@@ -223,7 +222,10 @@ mod tests {
         let entry = CredentialEntry::api_key("key-1", "sk-123");
         s.credential_save("openai", &entry).await.unwrap();
 
-        let p = pool(s as Arc<dyn CredentialStore>, Arc::new(StickyRoundRobin::new()));
+        let p = pool(
+            s as Arc<dyn CredentialStore>,
+            Arc::new(StickyRoundRobin::new()),
+        );
         let resolved = p.resolve("openai", None).await.unwrap();
         assert_eq!(resolved.id, "key-1");
     }
@@ -231,7 +233,10 @@ mod tests {
     #[tokio::test]
     async fn resolve_no_credentials_errors() {
         let s = store();
-        let p = pool(s as Arc<dyn CredentialStore>, Arc::new(StickyRoundRobin::new()));
+        let p = pool(
+            s as Arc<dyn CredentialStore>,
+            Arc::new(StickyRoundRobin::new()),
+        );
         let result = p.resolve("openai", None).await;
         assert!(result.is_err());
     }
@@ -246,12 +251,18 @@ mod tests {
             .await
             .unwrap();
 
-        let p = pool(s as Arc<dyn CredentialStore>, Arc::new(StickyRoundRobin::new()));
+        let p = pool(
+            s as Arc<dyn CredentialStore>,
+            Arc::new(StickyRoundRobin::new()),
+        );
         let sid = Ulid::new();
 
         let first = p.resolve("openai", Some(sid)).await.unwrap();
         let second = p.resolve("openai", Some(sid)).await.unwrap();
-        assert_eq!(first.id, second.id, "same session should get same credential");
+        assert_eq!(
+            first.id, second.id,
+            "same session should get same credential"
+        );
     }
 
     #[tokio::test]
@@ -264,7 +275,10 @@ mod tests {
             .await
             .unwrap();
 
-        let p = pool(s as Arc<dyn CredentialStore>, Arc::new(StickyRoundRobin::new()));
+        let p = pool(
+            s as Arc<dyn CredentialStore>,
+            Arc::new(StickyRoundRobin::new()),
+        );
 
         let a = p.resolve("openai", Some(Ulid::new())).await.unwrap();
         let b = p.resolve("openai", Some(Ulid::new())).await.unwrap();
@@ -281,7 +295,10 @@ mod tests {
             .await
             .unwrap();
 
-        let p = pool(s as Arc<dyn CredentialStore>, Arc::new(StickyRoundRobin::new()));
+        let p = pool(
+            s as Arc<dyn CredentialStore>,
+            Arc::new(StickyRoundRobin::new()),
+        );
         let sid = Ulid::new();
 
         let first = p.resolve("openai", Some(sid)).await.unwrap();

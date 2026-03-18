@@ -64,15 +64,18 @@ impl LlamaCppProvider {
             }
         }
 
-        let config = self.configs.get(name).ok_or_else(|| {
-            BrainError::Inference(format!("unknown model: {name}"))
-        })?;
+        let config = self
+            .configs
+            .get(name)
+            .ok_or_else(|| BrainError::Inference(format!("unknown model: {name}")))?;
 
         let model = load_model(&self.backend, config)?;
         let model = Arc::new(model);
 
         let mut cache = self.models.write().await;
-        cache.entry(name.to_owned()).or_insert_with(|| model.clone());
+        cache
+            .entry(name.to_owned())
+            .or_insert_with(|| model.clone());
         Ok(model)
     }
 }
@@ -104,7 +107,9 @@ fn download_gguf(model_id: &str, gguf_file: &str) -> Result<PathBuf, BrainError>
         .map_err(|e| BrainError::Inference(format!("failed to init HF API: {e}")))?
         .model(model_id.to_string())
         .get(gguf_file)
-        .map_err(|e| BrainError::Inference(format!("failed to download {model_id}/{gguf_file}: {e}")))
+        .map_err(|e| {
+            BrainError::Inference(format!("failed to download {model_id}/{gguf_file}: {e}"))
+        })
 }
 
 fn build_chat_prompt(model: &LlamaModel, messages: &[Message]) -> Result<String, BrainError> {
@@ -133,12 +138,16 @@ fn build_chat_prompt(model: &LlamaModel, messages: &[Message]) -> Result<String,
 
 impl Provider for LlamaCppProvider {
     fn info(&self) -> ProviderInfo {
-        let models = self.configs.keys().map(|name| ProviderModelInfo {
-            id: name.clone(),
-            name: name.clone(),
-            reasoning: false,
-            tool_call: false,
-        }).collect();
+        let models = self
+            .configs
+            .keys()
+            .map(|name| ProviderModelInfo {
+                id: name.clone(),
+                name: name.clone(),
+                reasoning: false,
+                tool_call: false,
+            })
+            .collect();
         ProviderInfo {
             name: "llamacpp".into(),
             default_model: Some(self.default_model.clone()),
@@ -172,7 +181,9 @@ impl Provider for LlamaCppProvider {
             let (tx, mut rx) = tokio::sync::mpsc::channel::<Result<ChatChunk, BrainError>>(32);
 
             tokio::task::spawn_blocking(move || {
-                if let Err(e) = run_inference(&backend, &model, &prompt, max_tokens, temperature, &tx) {
+                if let Err(e) =
+                    run_inference(&backend, &model, &prompt, max_tokens, temperature, &tx)
+                {
                     let _ = tx.blocking_send(Err(e));
                 }
             });
@@ -252,9 +263,7 @@ fn run_inference(
 
         if !piece.is_empty() {
             if tx
-                .blocking_send(Ok(ChatChunk::Delta {
-                    content: piece,
-                }))
+                .blocking_send(Ok(ChatChunk::Delta { content: piece }))
                 .is_err()
             {
                 return Ok(());

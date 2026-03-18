@@ -3,7 +3,7 @@ use std::sync::Arc;
 use brain_core::Brain;
 use brain_loops::SimpleLoop;
 use brain_providers::MockProvider;
-use brain_server::{build_router, BrainServer, ServerEvent, ServerStatus};
+use brain_server::{BrainServer, ServerEvent, ServerStatus, build_router};
 use brain_stores::InMemoryStore;
 use brain_types::*;
 use futures::StreamExt;
@@ -289,11 +289,7 @@ async fn sse_receives_events() {
     let project = create_project(&client, &base).await;
     let session = create_session(&client, &base, project.id).await;
 
-    let sse_resp = client
-        .get(format!("{base}/events"))
-        .send()
-        .await
-        .unwrap();
+    let sse_resp = client.get(format!("{base}/events")).send().await.unwrap();
     assert_eq!(sse_resp.status(), 200);
 
     client
@@ -327,7 +323,10 @@ async fn sse_receives_events() {
         }
     }
 
-    assert!(found_event, "should have received at least one SSE event, got: {accumulated}");
+    assert!(
+        found_event,
+        "should have received at least one SSE event, got: {accumulated}"
+    );
 }
 
 // -- Session update --
@@ -444,7 +443,11 @@ async fn send_message_stream_returns_ndjson() {
         .unwrap();
     assert_eq!(resp.status(), 200);
     assert_eq!(
-        resp.headers().get("content-type").unwrap().to_str().unwrap(),
+        resp.headers()
+            .get("content-type")
+            .unwrap()
+            .to_str()
+            .unwrap(),
         "application/x-ndjson"
     );
 
@@ -459,7 +462,9 @@ async fn send_message_stream_returns_ndjson() {
             Ok(Some(Ok(chunk))) => {
                 accumulated.push_str(&String::from_utf8_lossy(&chunk));
                 for line in accumulated.lines() {
-                    if line.trim().is_empty() { continue; }
+                    if line.trim().is_empty() {
+                        continue;
+                    }
                     if let Ok(event) = serde_json::from_str::<brain_types::Event>(line) {
                         match event {
                             brain_types::Event::Token { .. } => saw_token = true,
@@ -468,13 +473,18 @@ async fn send_message_stream_returns_ndjson() {
                         }
                     }
                 }
-                if saw_done { break; }
+                if saw_done {
+                    break;
+                }
             }
             _ => break,
         }
     }
 
-    assert!(saw_token, "should have received token events in NDJSON stream");
+    assert!(
+        saw_token,
+        "should have received token events in NDJSON stream"
+    );
     assert!(saw_done, "should have received TurnDone in NDJSON stream");
 }
 
@@ -485,7 +495,11 @@ async fn list_providers_returns_200() {
     let base = start_server().await;
     let client = reqwest::Client::new();
 
-    let resp = client.get(format!("{base}/providers")).send().await.unwrap();
+    let resp = client
+        .get(format!("{base}/providers"))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(resp.status(), 200);
 
     let providers: Vec<brain_types::ProviderInfo> = resp.json().await.unwrap();
@@ -501,13 +515,21 @@ async fn credential_crud_via_http() {
     let client = reqwest::Client::new();
 
     // List empty
-    let resp = client.get(format!("{base}/credentials")).send().await.unwrap();
+    let resp = client
+        .get(format!("{base}/credentials"))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(resp.status(), 200);
     let list: Vec<serde_json::Value> = resp.json().await.unwrap();
     assert!(list.is_empty());
 
     // Get non-existent (returns empty array, not 404)
-    let resp = client.get(format!("{base}/credentials/openai")).send().await.unwrap();
+    let resp = client
+        .get(format!("{base}/credentials/openai"))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(resp.status(), 200);
     let entries: Vec<serde_json::Value> = resp.json().await.unwrap();
     assert!(entries.is_empty());
@@ -523,7 +545,11 @@ async fn credential_crud_via_http() {
     assert_eq!(resp.status(), 204);
 
     // Get
-    let resp = client.get(format!("{base}/credentials/openai")).send().await.unwrap();
+    let resp = client
+        .get(format!("{base}/credentials/openai"))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(resp.status(), 200);
     let entries: Vec<brain_types::CredentialEntry> = resp.json().await.unwrap();
     assert_eq!(entries.len(), 1);
@@ -534,16 +560,28 @@ async fn credential_crud_via_http() {
     }
 
     // List
-    let resp = client.get(format!("{base}/credentials")).send().await.unwrap();
+    let resp = client
+        .get(format!("{base}/credentials"))
+        .send()
+        .await
+        .unwrap();
     let list: Vec<serde_json::Value> = resp.json().await.unwrap();
     assert_eq!(list.len(), 1);
     assert_eq!(list[0]["provider"], "openai");
 
     // Delete by provider + credential_id
-    let resp = client.delete(format!("{base}/credentials/openai/key-1")).send().await.unwrap();
+    let resp = client
+        .delete(format!("{base}/credentials/openai/key-1"))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(resp.status(), 204);
 
-    let resp = client.get(format!("{base}/credentials/openai")).send().await.unwrap();
+    let resp = client
+        .get(format!("{base}/credentials/openai"))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(resp.status(), 200);
     let entries: Vec<brain_types::CredentialEntry> = resp.json().await.unwrap();
     assert!(entries.is_empty());

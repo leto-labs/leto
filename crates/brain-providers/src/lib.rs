@@ -23,19 +23,20 @@ pub mod mistralrs;
 #[cfg(feature = "llamacpp")]
 pub mod llamacpp;
 
+#[cfg(feature = "llamacpp")]
+pub use self::llamacpp::{LlamaCppConfig, LlamaCppModelPreset, LlamaCppProvider};
+#[cfg(feature = "mistralrs")]
+pub use self::mistralrs::{
+    DevicePreference, MistralRsConfig, MistralRsModelPreset, MistralRsProvider,
+};
 pub use mock::MockProvider;
-pub use strategy::{StickyRoundRobin, Fallback};
+#[cfg(feature = "openai-oauth")]
+pub use oauth::{
+    CredentialStore, OAuthCredentials, ProviderCredential, browser_flow, device_flow, pkce, refresh,
+};
 #[cfg(feature = "openai")]
 pub use openai::{OpenAiConfig, OpenAiConfigPreset, OpenAiProvider};
 #[cfg(feature = "openai-oauth")]
 pub use openai_oauth::{OAuthFlow, OpenAiOAuthPreset, OpenAiOAuthProvider};
-#[cfg(feature = "openai-oauth")]
-pub use oauth::{
-    OAuthCredentials, ProviderCredential, CredentialStore,
-    browser_flow, device_flow, pkce, refresh,
-};
 pub use pool::CredentialPool;
-#[cfg(feature = "mistralrs")]
-pub use self::mistralrs::{DevicePreference, MistralRsConfig, MistralRsModelPreset, MistralRsProvider};
-#[cfg(feature = "llamacpp")]
-pub use self::llamacpp::{LlamaCppConfig, LlamaCppModelPreset, LlamaCppProvider};
+pub use strategy::{Fallback, StickyRoundRobin};

@@ -135,7 +135,12 @@ mod tests {
         let mut stream = provider.chat(&msgs, &tools, &config, None).await.unwrap();
         let mut saw_tool_call = false;
         while let Some(chunk) = stream.next().await {
-            if let ChatChunk::ToolCall { id, name, arguments } = chunk.unwrap() {
+            if let ChatChunk::ToolCall {
+                id,
+                name,
+                arguments,
+            } = chunk.unwrap()
+            {
                 assert_eq!(id, "mock-call-1");
                 assert_eq!(name, "echo");
                 assert_eq!(arguments["message"], "do something");

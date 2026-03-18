@@ -4,8 +4,8 @@ use tracing::debug;
 
 use brain_types::BrainError;
 
-use brain_types::OAuthCredentials;
 use super::jwt;
+use brain_types::OAuthCredentials;
 
 /// Configuration for the device code OAuth flow.
 pub struct DeviceFlowConfig {
@@ -64,13 +64,7 @@ where
 {
     let device_resp = request_device_code(client, config).await?;
 
-    let interval_ms = device_resp
-        .interval
-        .parse::<u64>()
-        .unwrap_or(5)
-        .max(1)
-        * 1000
-        + 3000; // safety margin like OpenCode
+    let interval_ms = device_resp.interval.parse::<u64>().unwrap_or(5).max(1) * 1000 + 3000; // safety margin like OpenCode
 
     let full_url = format!("{}?user_code={}", verification_url, device_resp.user_code);
 

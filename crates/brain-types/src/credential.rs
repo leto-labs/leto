@@ -6,9 +6,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ProviderCredential {
-    ApiKey {
-        api_key: String,
-    },
+    ApiKey { api_key: String },
     OAuth(OAuthCredentials),
 }
 
@@ -46,7 +44,9 @@ impl CredentialEntry {
     pub fn api_key(id: impl Into<String>, key: impl Into<String>) -> Self {
         Self {
             id: id.into(),
-            credential: ProviderCredential::ApiKey { api_key: key.into() },
+            credential: ProviderCredential::ApiKey {
+                api_key: key.into(),
+            },
             health: CredentialHealth::default(),
             enabled: true,
             created_at: Utc::now(),
@@ -91,11 +91,7 @@ impl CredentialHealth {
         self.consecutive_errors == 0
             || self
                 .last_ok
-                .map(|ok| {
-                    self.last_error
-                        .as_ref()
-                        .map_or(true, |err| ok > err.at)
-                })
+                .map(|ok| self.last_error.as_ref().map_or(true, |err| ok > err.at))
                 .unwrap_or(true)
     }
 
@@ -159,7 +155,9 @@ mod tests {
 
     #[test]
     fn api_key_serializes_with_tag() {
-        let cred = ProviderCredential::ApiKey { api_key: "sk-123".into() };
+        let cred = ProviderCredential::ApiKey {
+            api_key: "sk-123".into(),
+        };
         let json = serde_json::to_string(&cred).unwrap();
         assert!(json.contains(r#""type":"api_key""#));
 

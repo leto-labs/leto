@@ -499,6 +499,8 @@ impl OpenAiConfigPreset {
     /// Try to load the API key from the environment and build a config.
     /// Returns `None` if the env var is not set.
     pub fn from_env(self) -> Option<OpenAiConfig> {
-        std::env::var(self.env_key).ok().map(|key| self.into_config(key))
+        std::env::var(self.env_key)
+            .ok()
+            .map(|key| self.into_config(key))
     }
 }

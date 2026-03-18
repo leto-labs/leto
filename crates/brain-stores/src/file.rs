@@ -116,7 +116,11 @@ impl ProjectStore for FileStore {
         })
     }
 
-    fn project_update(&self, id: ProjectId, update: ProjectUpdate) -> BoxFuture<'_, Result<(), BrainError>> {
+    fn project_update(
+        &self,
+        id: ProjectId,
+        update: ProjectUpdate,
+    ) -> BoxFuture<'_, Result<(), BrainError>> {
         Box::pin(async move {
             let path = self.project_file(id);
             let mut project: Project = read_json(&path).await?;
@@ -169,7 +173,10 @@ impl SessionStore for FileStore {
         })
     }
 
-    fn session_list(&self, project_id: ProjectId) -> BoxFuture<'_, Result<Vec<Session>, BrainError>> {
+    fn session_list(
+        &self,
+        project_id: ProjectId,
+    ) -> BoxFuture<'_, Result<Vec<Session>, BrainError>> {
         Box::pin(async move {
             let sessions_dir = self.root.join("sessions");
             if !sessions_dir.exists() {
@@ -200,7 +207,11 @@ impl SessionStore for FileStore {
         })
     }
 
-    fn session_update(&self, id: Ulid, update: SessionUpdate) -> BoxFuture<'_, Result<(), BrainError>> {
+    fn session_update(
+        &self,
+        id: Ulid,
+        update: SessionUpdate,
+    ) -> BoxFuture<'_, Result<(), BrainError>> {
         Box::pin(async move {
             let path = self.session_file(id);
             let mut session: Session = read_json(&path).await?;
@@ -226,7 +237,11 @@ impl SessionStore for FileStore {
 }
 
 impl MessageStore for FileStore {
-    fn message_append(&self, session_id: Ulid, msgs: &[Message]) -> BoxFuture<'_, Result<(), BrainError>> {
+    fn message_append(
+        &self,
+        session_id: Ulid,
+        msgs: &[Message],
+    ) -> BoxFuture<'_, Result<(), BrainError>> {
         let msgs = msgs.to_vec();
         Box::pin(async move {
             let path = self.messages_file(session_id);
@@ -289,7 +304,11 @@ impl MessageStore for FileStore {
 }
 
 impl CredentialStore for FileStore {
-    fn credential_save(&self, provider_name: &str, entry: &CredentialEntry) -> BoxFuture<'_, Result<(), BrainError>> {
+    fn credential_save(
+        &self,
+        provider_name: &str,
+        entry: &CredentialEntry,
+    ) -> BoxFuture<'_, Result<(), BrainError>> {
         let name = provider_name.to_owned();
         let entry = entry.clone();
         Box::pin(async move {
@@ -305,28 +324,38 @@ impl CredentialStore for FileStore {
         })
     }
 
-    fn credential_load(&self, provider_name: &str, credential_id: &str) -> BoxFuture<'_, Result<Option<CredentialEntry>, BrainError>> {
+    fn credential_load(
+        &self,
+        provider_name: &str,
+        credential_id: &str,
+    ) -> BoxFuture<'_, Result<Option<CredentialEntry>, BrainError>> {
         let name = provider_name.to_owned();
         let cid = credential_id.to_owned();
         Box::pin(async move {
             let path = self.credential_file(&name, &cid);
             match tokio::fs::read_to_string(&path).await {
                 Ok(data) => {
-                    let entry: CredentialEntry = serde_json::from_str(&data)
-                        .map_err(|e| BrainError::Storage(format!(
-                            "corrupt credential file {}: {e}", path.display()
-                        )))?;
+                    let entry: CredentialEntry = serde_json::from_str(&data).map_err(|e| {
+                        BrainError::Storage(format!(
+                            "corrupt credential file {}: {e}",
+                            path.display()
+                        ))
+                    })?;
                     Ok(Some(entry))
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
                 Err(e) => Err(BrainError::Storage(format!(
-                    "read credential {}: {e}", path.display()
+                    "read credential {}: {e}",
+                    path.display()
                 ))),
             }
         })
     }
 
-    fn credential_load_all(&self, provider_name: &str) -> BoxFuture<'_, Result<Vec<CredentialEntry>, BrainError>> {
+    fn credential_load_all(
+        &self,
+        provider_name: &str,
+    ) -> BoxFuture<'_, Result<Vec<CredentialEntry>, BrainError>> {
         let name = provider_name.to_owned();
         Box::pin(async move {
             let dir = self.credential_provider_dir(&name);
@@ -357,7 +386,11 @@ impl CredentialStore for FileStore {
         })
     }
 
-    fn credential_delete(&self, provider_name: &str, credential_id: &str) -> BoxFuture<'_, Result<(), BrainError>> {
+    fn credential_delete(
+        &self,
+        provider_name: &str,
+        credential_id: &str,
+    ) -> BoxFuture<'_, Result<(), BrainError>> {
         let name = provider_name.to_owned();
         let cid = credential_id.to_owned();
         Box::pin(async move {
@@ -366,13 +399,19 @@ impl CredentialStore for FileStore {
                 Ok(()) => Ok(()),
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
                 Err(e) => Err(BrainError::Storage(format!(
-                    "delete credential {}: {e}", path.display()
+                    "delete credential {}: {e}",
+                    path.display()
                 ))),
             }
         })
     }
 
-    fn credential_update_health(&self, provider_name: &str, credential_id: &str, health: &CredentialHealth) -> BoxFuture<'_, Result<(), BrainError>> {
+    fn credential_update_health(
+        &self,
+        provider_name: &str,
+        credential_id: &str,
+        health: &CredentialHealth,
+    ) -> BoxFuture<'_, Result<(), BrainError>> {
         let name = provider_name.to_owned();
         let cid = credential_id.to_owned();
         let health = health.clone();
@@ -380,17 +419,20 @@ impl CredentialStore for FileStore {
             let path = self.credential_file(&name, &cid);
             match tokio::fs::read_to_string(&path).await {
                 Ok(data) => {
-                    let mut entry: CredentialEntry = serde_json::from_str(&data)
-                        .map_err(|e| BrainError::Storage(format!(
-                            "corrupt credential file {}: {e}", path.display()
-                        )))?;
+                    let mut entry: CredentialEntry = serde_json::from_str(&data).map_err(|e| {
+                        BrainError::Storage(format!(
+                            "corrupt credential file {}: {e}",
+                            path.display()
+                        ))
+                    })?;
                     entry.health = health;
                     write_json(&path, &entry).await?;
                     Ok(())
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
                 Err(e) => Err(BrainError::Storage(format!(
-                    "read credential {}: {e}", path.display()
+                    "read credential {}: {e}",
+                    path.display()
                 ))),
             }
         })
@@ -449,9 +491,7 @@ async fn set_file_permissions_restrictive(path: &Path) -> Result<(), BrainError>
     let perms = std::fs::Permissions::from_mode(0o600);
     tokio::fs::set_permissions(path, perms)
         .await
-        .map_err(|e| BrainError::Storage(format!(
-            "set permissions on {}: {e}", path.display()
-        )))
+        .map_err(|e| BrainError::Storage(format!("set permissions on {}: {e}", path.display())))
 }
 
 #[cfg(not(unix))]
@@ -492,7 +532,13 @@ mod tests {
         assert_eq!(list.len(), 1);
 
         store
-            .project_update(id, ProjectUpdate { name: Some("renamed".into()), config: None })
+            .project_update(
+                id,
+                ProjectUpdate {
+                    name: Some("renamed".into()),
+                    config: None,
+                },
+            )
             .await
             .unwrap();
         let updated = store.project_get(id).await.unwrap();
@@ -511,8 +557,14 @@ mod tests {
     #[tokio::test]
     async fn project_list_multiple() {
         let (store, _dir) = temp_store().await;
-        store.project_create(Project::with_defaults("a")).await.unwrap();
-        store.project_create(Project::with_defaults("b")).await.unwrap();
+        store
+            .project_create(Project::with_defaults("a"))
+            .await
+            .unwrap();
+        store
+            .project_create(Project::with_defaults("b"))
+            .await
+            .unwrap();
         let list = store.project_list().await.unwrap();
         assert_eq!(list.len(), 2);
     }
@@ -543,7 +595,12 @@ mod tests {
         assert_eq!(list.len(), 1);
 
         store
-            .session_update(sid, SessionUpdate { title: Some("My Chat".into()) })
+            .session_update(
+                sid,
+                SessionUpdate {
+                    title: Some("My Chat".into()),
+                },
+            )
             .await
             .unwrap();
         let updated = store.session_get(sid).await.unwrap();
@@ -632,8 +689,14 @@ mod tests {
         let session = store.session_create(pid).await.unwrap();
         let sid = session.id;
 
-        store.message_append(sid, &[Message::user("first")]).await.unwrap();
-        store.message_append(sid, &[Message::user("second")]).await.unwrap();
+        store
+            .message_append(sid, &[Message::user("first")])
+            .await
+            .unwrap();
+        store
+            .message_append(sid, &[Message::user("second")])
+            .await
+            .unwrap();
 
         let loaded = store.message_list(sid).await.unwrap();
         assert_eq!(loaded.len(), 2);
@@ -647,11 +710,24 @@ mod tests {
     async fn credential_crud() {
         let (store, _dir) = temp_store().await;
 
-        assert!(store.credential_load("openai", "key-1").await.unwrap().is_none());
+        assert!(
+            store
+                .credential_load("openai", "key-1")
+                .await
+                .unwrap()
+                .is_none()
+        );
 
-        store.credential_save("openai", &api_key_entry("key-1", "sk-123")).await.unwrap();
+        store
+            .credential_save("openai", &api_key_entry("key-1", "sk-123"))
+            .await
+            .unwrap();
 
-        let loaded = store.credential_load("openai", "key-1").await.unwrap().unwrap();
+        let loaded = store
+            .credential_load("openai", "key-1")
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(loaded.id, "key-1");
         match &loaded.credential {
             ProviderCredential::ApiKey { api_key } => assert_eq!(api_key, "sk-123"),
@@ -662,14 +738,26 @@ mod tests {
         assert_eq!(list.len(), 1);
 
         store.credential_delete("openai", "key-1").await.unwrap();
-        assert!(store.credential_load("openai", "key-1").await.unwrap().is_none());
+        assert!(
+            store
+                .credential_load("openai", "key-1")
+                .await
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[tokio::test]
     async fn credential_multi_per_provider() {
         let (store, _dir) = temp_store().await;
-        store.credential_save("openai", &api_key_entry("key-1", "sk-111")).await.unwrap();
-        store.credential_save("openai", &api_key_entry("key-2", "sk-222")).await.unwrap();
+        store
+            .credential_save("openai", &api_key_entry("key-1", "sk-111"))
+            .await
+            .unwrap();
+        store
+            .credential_save("openai", &api_key_entry("key-2", "sk-222"))
+            .await
+            .unwrap();
 
         let all = store.credential_load_all("openai").await.unwrap();
         assert_eq!(all.len(), 2);
@@ -683,7 +771,10 @@ mod tests {
     #[tokio::test]
     async fn credential_delete_idempotent() {
         let (store, _dir) = temp_store().await;
-        store.credential_delete("nonexistent", "nope").await.unwrap();
+        store
+            .credential_delete("nonexistent", "nope")
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
@@ -696,8 +787,14 @@ mod tests {
     #[tokio::test]
     async fn credential_overwrite() {
         let (store, _dir) = temp_store().await;
-        store.credential_save("p", &api_key_entry("k", "old")).await.unwrap();
-        store.credential_save("p", &api_key_entry("k", "new")).await.unwrap();
+        store
+            .credential_save("p", &api_key_entry("k", "old"))
+            .await
+            .unwrap();
+        store
+            .credential_save("p", &api_key_entry("k", "new"))
+            .await
+            .unwrap();
 
         let loaded = store.credential_load("p", "k").await.unwrap().unwrap();
         match &loaded.credential {
@@ -712,7 +809,10 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
 
         let (store, _dir) = temp_store().await;
-        store.credential_save("secret", &api_key_entry("key-1", "sk-x")).await.unwrap();
+        store
+            .credential_save("secret", &api_key_entry("key-1", "sk-x"))
+            .await
+            .unwrap();
 
         let path = store.credential_file("secret", "key-1");
         let metadata = std::fs::metadata(&path).unwrap();

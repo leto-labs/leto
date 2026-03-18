@@ -46,8 +46,15 @@ impl Brain {
 
         tokio::spawn(async move {
             if let Err(e) = turn_inner(
-                store, provider, agent_loop, tools, config, cancel,
-                session_id, user_msg, tx.clone(),
+                store,
+                provider,
+                agent_loop,
+                tools,
+                config,
+                cancel,
+                session_id,
+                user_msg,
+                tx.clone(),
             )
             .await
             {
@@ -83,12 +90,18 @@ impl Brain {
                 )));
             }
             tracing::info!(session_id = %id, "session resumed");
-            transport.send(Event::SessionResume { session_id: id }).await?;
+            transport
+                .send(Event::SessionResume { session_id: id })
+                .await?;
             id
         } else {
             let session = self.store.session_create(project.id).await?;
             tracing::info!(session_id = %session.id, "session started");
-            transport.send(Event::SessionStart { session_id: session.id }).await?;
+            transport
+                .send(Event::SessionStart {
+                    session_id: session.id,
+                })
+                .await?;
             session.id
         };
         let config = project.config.agent.clone();
@@ -115,7 +128,9 @@ impl Brain {
                         )));
                     }
                     session_id = target;
-                    transport.send(Event::SessionResume { session_id: target }).await?;
+                    transport
+                        .send(Event::SessionResume { session_id: target })
+                        .await?;
                     continue;
                 }
                 None => break,
@@ -160,14 +175,8 @@ async fn turn_inner(
     let mut history = store.message_list(session_id).await?;
     history.push(user_msg.clone());
 
-    let mut inner_stream = agent_loop.run(
-        provider,
-        tools,
-        history,
-        config,
-        cancel,
-        Some(session_id),
-    );
+    let mut inner_stream =
+        agent_loop.run(provider, tools, history, config, cancel, Some(session_id));
 
     let mut new_messages: Vec<Message> = vec![user_msg];
 
@@ -194,10 +203,10 @@ async fn turn_inner(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use futures::future::BoxFuture;
+    use brain_loops::SimpleLoop;
     use brain_providers::MockProvider;
     use brain_stores::InMemoryStore;
-    use brain_loops::SimpleLoop;
+    use futures::future::BoxFuture;
 
     fn make_brain() -> (Brain, Project, Arc<InMemoryStore>) {
         let project = Project::with_defaults("test");
@@ -205,12 +214,7 @@ mod tests {
         let store = Arc::new(InMemoryStore::new());
         let agent_loop: Arc<dyn AgentLoop> = Arc::new(SimpleLoop);
 
-        let brain = Brain::new(
-            provider,
-            store.clone(),
-            agent_loop,
-            vec![],
-        );
+        let brain = Brain::new(provider, store.clone(), agent_loop, vec![]);
         (brain, project, store)
     }
 
@@ -276,7 +280,12 @@ mod tests {
         let config = project.config.agent.clone();
 
         // First turn
-        let mut events = brain.turn(session.id, "first", config.clone(), CancellationToken::new());
+        let mut events = brain.turn(
+            session.id,
+            "first",
+            config.clone(),
+            CancellationToken::new(),
+        );
         while events.next().await.is_some() {}
 
         // Second turn
@@ -297,7 +306,9 @@ mod tests {
         }
 
         impl Transport for MockTransport {
-            fn name(&self) -> &str { "mock" }
+            fn name(&self) -> &str {
+                "mock"
+            }
 
             fn recv(&self) -> BoxFuture<'_, Result<Option<InputEvent>, BrainError>> {
                 Box::pin(async {
@@ -341,7 +352,9 @@ mod tests {
         }
 
         impl Transport for MockTransport {
-            fn name(&self) -> &str { "mock" }
+            fn name(&self) -> &str {
+                "mock"
+            }
 
             fn recv(&self) -> BoxFuture<'_, Result<Option<InputEvent>, BrainError>> {
                 Box::pin(async {
@@ -448,7 +461,9 @@ mod tests {
         }
 
         impl Transport for MockTransport {
-            fn name(&self) -> &str { "mock" }
+            fn name(&self) -> &str {
+                "mock"
+            }
 
             fn recv(&self) -> BoxFuture<'_, Result<Option<InputEvent>, BrainError>> {
                 Box::pin(async {
@@ -509,7 +524,9 @@ mod tests {
         }
 
         impl Transport for MockTransport {
-            fn name(&self) -> &str { "mock" }
+            fn name(&self) -> &str {
+                "mock"
+            }
             fn recv(&self) -> BoxFuture<'_, Result<Option<InputEvent>, BrainError>> {
                 Box::pin(async { Ok(None) })
             }
@@ -536,6 +553,9 @@ mod tests {
         let result = brain
             .run(&project, &transport, Some(other_session.id))
             .await;
-        assert!(result.is_err(), "should error when session belongs to different project");
+        assert!(
+            result.is_err(),
+            "should error when session belongs to different project"
+        );
     }
 }

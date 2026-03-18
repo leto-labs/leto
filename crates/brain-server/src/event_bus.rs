@@ -16,10 +16,7 @@ impl EventBus {
 
     pub fn publish(&self, event: ServerEvent) {
         if let Err(e) = self.tx.send(event) {
-            tracing::warn!(
-                "EventBus: no active subscribers, event dropped ({})",
-                e
-            );
+            tracing::warn!("EventBus: no active subscribers, event dropped ({})", e);
         }
     }
 
@@ -41,7 +38,13 @@ mod tests {
     use ulid::Ulid;
 
     fn test_event(session_id: Ulid) -> ServerEvent {
-        ServerEvent::new(session_id, Event::TurnDone { iterations: 1, total_tokens: 10 })
+        ServerEvent::new(
+            session_id,
+            Event::TurnDone {
+                iterations: 1,
+                total_tokens: 10,
+            },
+        )
     }
 
     #[tokio::test]

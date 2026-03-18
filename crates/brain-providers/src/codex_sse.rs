@@ -219,8 +219,8 @@ fn event_to_chunk(event: &SseEvent) -> Option<ChatChunk> {
             let name = event.name.clone().unwrap_or_default();
             let call_id = event.call_id.clone().unwrap_or_default();
             let args_str = event.arguments.as_deref().unwrap_or("{}");
-            let args: serde_json::Value =
-                serde_json::from_str(args_str).unwrap_or(serde_json::Value::Object(Default::default()));
+            let args: serde_json::Value = serde_json::from_str(args_str)
+                .unwrap_or(serde_json::Value::Object(Default::default()));
             Some(ChatChunk::ToolCall {
                 id: call_id,
                 name,

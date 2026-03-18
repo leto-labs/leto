@@ -9,11 +9,7 @@ use super::FileWriteDriver;
 pub struct FileWriteDriverNative;
 
 impl FileWriteDriver for FileWriteDriverNative {
-    fn write_file(
-        &self,
-        path: &str,
-        content: &str,
-    ) -> BoxFuture<'_, Result<String, BrainError>> {
+    fn write_file(&self, path: &str, content: &str) -> BoxFuture<'_, Result<String, BrainError>> {
         let path = path.to_owned();
         let content = content.to_owned();
         Box::pin(async move {

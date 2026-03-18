@@ -88,13 +88,20 @@ mod tests {
         let json = serde_json::to_string(&cfg).unwrap();
         let deserialized: AgentConfig = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized.max_iterations, 10);
-        assert_eq!(deserialized.system_prompt.as_deref(), Some("You are helpful."));
+        assert_eq!(
+            deserialized.system_prompt.as_deref(),
+            Some("You are helpful.")
+        );
         assert_eq!(deserialized.inference.model.as_deref(), Some("gpt-4"));
     }
 
     #[test]
     fn token_usage_serde() {
-        let usage = TokenUsage { prompt: 100, completion: 50, total: 150 };
+        let usage = TokenUsage {
+            prompt: 100,
+            completion: 50,
+            total: 150,
+        };
         let json = serde_json::to_string(&usage).unwrap();
         let deserialized: TokenUsage = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized.total, 150);

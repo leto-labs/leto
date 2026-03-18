@@ -49,7 +49,12 @@ impl Provider for OpenAiProvider {
         ProviderInfo {
             name: self.config.name.clone(),
             default_model: Some(self.config.default_model.clone()),
-            models: self.config.models.iter().map(ProviderModelInfo::from).collect(),
+            models: self
+                .config
+                .models
+                .iter()
+                .map(ProviderModelInfo::from)
+                .collect(),
         }
     }
 
@@ -74,7 +79,9 @@ impl Provider for OpenAiProvider {
                 messages: messages.iter().map(to_oai_message).collect(),
                 tools: tools.iter().map(to_oai_tool).collect(),
                 stream: true,
-                stream_options: Some(StreamOptions { include_usage: true }),
+                stream_options: Some(StreamOptions {
+                    include_usage: true,
+                }),
                 max_tokens: config.max_tokens,
                 temperature: config.temperature,
             };

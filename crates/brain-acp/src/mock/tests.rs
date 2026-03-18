@@ -215,7 +215,10 @@ async fn mock_create_plan_emits_plan_updates() {
             assert!(
                 notifications
                     .iter()
-                    .filter(|notification| matches!(notification.update, acp::SessionUpdate::Plan(_)))
+                    .filter(|notification| matches!(
+                        notification.update,
+                        acp::SessionUpdate::Plan(_)
+                    ))
                     .count()
                     >= 2
             );
@@ -344,9 +347,7 @@ async fn mock_fetch_emits_fetch_tool_updates() {
             let tool_output = completed_tool_output(&notifications);
             assert!(tool_output.contains("mock fetched content for https://example.invalid/data"));
             assert!(
-                streamed.contains(
-                    "Mock fetch probe completed for `https://example.invalid/data`."
-                )
+                streamed.contains("Mock fetch probe completed for `https://example.invalid/data`.")
             );
             assert!(notifications.iter().any(|notification| matches!(
                 &notification.update,
@@ -399,7 +400,9 @@ async fn mock_delete_file_emits_patch_style_tool_updates() {
             let (client, connection) = initialized_connection(RecordingClient::default()).await;
 
             let session = connection
-                .new_session(acp::NewSessionRequest::new(PathBuf::from("/tmp/delete-file")))
+                .new_session(acp::NewSessionRequest::new(PathBuf::from(
+                    "/tmp/delete-file",
+                )))
                 .await
                 .expect("new session should succeed");
 
@@ -449,7 +452,9 @@ async fn mock_move_file_emits_move_tool_updates() {
             let streamed = streamed_agent_text(&notifications);
             let tool_output = completed_tool_output(&notifications);
             assert!(tool_output.contains("mock move prepared from /tmp/old.rs to /tmp/new.rs"));
-            assert!(streamed.contains("Mock move probe completed from /tmp/old.rs to /tmp/new.rs."));
+            assert!(
+                streamed.contains("Mock move probe completed from /tmp/old.rs to /tmp/new.rs.")
+            );
             assert!(notifications.iter().any(|notification| matches!(
                 &notification.update,
                 acp::SessionUpdate::ToolCall(tool_call)
@@ -499,7 +504,9 @@ async fn mock_read_file_without_path_uses_session_default() {
             let (client, connection) = initialized_connection(client).await;
 
             let session = connection
-                .new_session(acp::NewSessionRequest::new(PathBuf::from("/tmp/read-default")))
+                .new_session(acp::NewSessionRequest::new(PathBuf::from(
+                    "/tmp/read-default",
+                )))
                 .await
                 .expect("new session should succeed");
 
@@ -513,7 +520,10 @@ async fn mock_read_file_without_path_uses_session_default() {
 
             let notifications = client.take_notifications();
             let streamed = streamed_agent_text(&notifications);
-            assert!(streamed.contains("Mock file read probe completed for /tmp/read-default/Cargo.toml."));
+            assert!(
+                streamed
+                    .contains("Mock file read probe completed for /tmp/read-default/Cargo.toml.")
+            );
             assert_eq!(client.reads(), vec![default_path]);
         })
         .await;
@@ -581,7 +591,8 @@ async fn mock_write_file_is_stateless_and_streams_tool_updates() {
             let streamed = streamed_agent_text(&notifications);
             let tool_output = completed_tool_output(&notifications);
             assert!(
-                streamed.contains("Mock file write probe completed for /tmp/mock-write-marker.txt.")
+                streamed
+                    .contains("Mock file write probe completed for /tmp/mock-write-marker.txt.")
             );
             assert!(tool_output.contains("mock write completed for /tmp/mock-write-marker.txt"));
             assert!(client.writes().is_empty());
@@ -597,7 +608,9 @@ async fn mock_write_file_without_args_uses_defaults() {
             let (client, connection) = initialized_connection(RecordingClient::default()).await;
 
             let session = connection
-                .new_session(acp::NewSessionRequest::new(PathBuf::from("/tmp/write-default")))
+                .new_session(acp::NewSessionRequest::new(PathBuf::from(
+                    "/tmp/write-default",
+                )))
                 .await
                 .expect("new session should succeed");
 
@@ -612,8 +625,12 @@ async fn mock_write_file_without_args_uses_defaults() {
             let notifications = client.take_notifications();
             let streamed = streamed_agent_text(&notifications);
             let tool_output = completed_tool_output(&notifications);
-            assert!(streamed.contains("Mock file write probe completed for /tmp/write-default/mock-output.txt."));
-            assert!(tool_output.contains("mock write completed for /tmp/write-default/mock-output.txt"));
+            assert!(streamed.contains(
+                "Mock file write probe completed for /tmp/write-default/mock-output.txt."
+            ));
+            assert!(
+                tool_output.contains("mock write completed for /tmp/write-default/mock-output.txt")
+            );
             assert!(client.writes().is_empty());
         })
         .await;
@@ -698,7 +715,9 @@ async fn mock_terminal_without_args_uses_defaults() {
             let (client, connection) = initialized_connection(RecordingClient::default()).await;
 
             let session = connection
-                .new_session(acp::NewSessionRequest::new(PathBuf::from("/tmp/terminal-default")))
+                .new_session(acp::NewSessionRequest::new(PathBuf::from(
+                    "/tmp/terminal-default",
+                )))
                 .await
                 .expect("new session should succeed");
 
@@ -713,11 +732,16 @@ async fn mock_terminal_without_args_uses_defaults() {
             let notifications = client.take_notifications();
             let streamed = streamed_agent_text(&notifications);
             let tool_output = completed_tool_output(&notifications);
-            assert!(streamed.contains("Mock terminal probe completed for `echo hello-from-mock-terminal` with exit=0."));
+            assert!(streamed.contains(
+                "Mock terminal probe completed for `echo hello-from-mock-terminal` with exit=0."
+            ));
             assert!(tool_output.contains("mock terminal output: echo hello-from-mock-terminal"));
             assert_eq!(
                 client.created_terminals(),
-                vec![("echo".to_owned(), vec!["hello-from-mock-terminal".to_owned()])]
+                vec![(
+                    "echo".to_owned(),
+                    vec!["hello-from-mock-terminal".to_owned()]
+                )]
             );
         })
         .await;
@@ -731,7 +755,9 @@ async fn mock_edit_file_without_path_uses_defaults() {
             let (client, connection) = initialized_connection(RecordingClient::default()).await;
 
             let session = connection
-                .new_session(acp::NewSessionRequest::new(PathBuf::from("/tmp/edit-default")))
+                .new_session(acp::NewSessionRequest::new(PathBuf::from(
+                    "/tmp/edit-default",
+                )))
                 .await
                 .expect("new session should succeed");
 
@@ -746,7 +772,9 @@ async fn mock_edit_file_without_path_uses_defaults() {
             let notifications = client.take_notifications();
             let streamed = streamed_agent_text(&notifications);
             let tool_output = completed_tool_output(&notifications);
-            assert!(streamed.contains("Mock edit probe completed for /tmp/edit-default/mock-edit.rs."));
+            assert!(
+                streamed.contains("Mock edit probe completed for /tmp/edit-default/mock-edit.rs.")
+            );
             assert!(tool_output.contains("mock edit prepared for /tmp/edit-default/mock-edit.rs"));
         })
         .await;
@@ -850,7 +878,10 @@ async fn load_session_restores_unknown_mock_session_for_external_clients() {
                 .expect("load_session should restore unknown mock session ids");
 
             assert_eq!(
-                response.modes.as_ref().map(|m| m.current_mode_id.0.as_ref()),
+                response
+                    .modes
+                    .as_ref()
+                    .map(|m| m.current_mode_id.0.as_ref()),
                 Some("ask")
             );
 

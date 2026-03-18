@@ -63,7 +63,11 @@ impl ProjectStore for InMemoryStore {
         })
     }
 
-    fn project_update(&self, id: ProjectId, update: ProjectUpdate) -> BoxFuture<'_, Result<(), BrainError>> {
+    fn project_update(
+        &self,
+        id: ProjectId,
+        update: ProjectUpdate,
+    ) -> BoxFuture<'_, Result<(), BrainError>> {
         Box::pin(async move {
             let mut projects = self.projects.write().await;
             let project = projects
@@ -96,10 +100,13 @@ impl SessionStore for InMemoryStore {
         Box::pin(async move {
             let session = Session::new(project_id);
             let mut sessions = self.sessions.write().await;
-            sessions.insert(session.id, SessionData {
-                session: session.clone(),
-                messages: Vec::new(),
-            });
+            sessions.insert(
+                session.id,
+                SessionData {
+                    session: session.clone(),
+                    messages: Vec::new(),
+                },
+            );
             Ok(session)
         })
     }
@@ -114,7 +121,10 @@ impl SessionStore for InMemoryStore {
         })
     }
 
-    fn session_list(&self, project_id: ProjectId) -> BoxFuture<'_, Result<Vec<Session>, BrainError>> {
+    fn session_list(
+        &self,
+        project_id: ProjectId,
+    ) -> BoxFuture<'_, Result<Vec<Session>, BrainError>> {
         Box::pin(async move {
             let sessions = self.sessions.read().await;
             let mut list: Vec<Session> = sessions
@@ -127,7 +137,11 @@ impl SessionStore for InMemoryStore {
         })
     }
 
-    fn session_update(&self, id: Ulid, update: SessionUpdate) -> BoxFuture<'_, Result<(), BrainError>> {
+    fn session_update(
+        &self,
+        id: Ulid,
+        update: SessionUpdate,
+    ) -> BoxFuture<'_, Result<(), BrainError>> {
         Box::pin(async move {
             let mut sessions = self.sessions.write().await;
             let entry = sessions
@@ -151,7 +165,11 @@ impl SessionStore for InMemoryStore {
 }
 
 impl MessageStore for InMemoryStore {
-    fn message_append(&self, session_id: Ulid, msgs: &[Message]) -> BoxFuture<'_, Result<(), BrainError>> {
+    fn message_append(
+        &self,
+        session_id: Ulid,
+        msgs: &[Message],
+    ) -> BoxFuture<'_, Result<(), BrainError>> {
         let msgs = msgs.to_vec();
         Box::pin(async move {
             let mut sessions = self.sessions.write().await;
@@ -176,7 +194,11 @@ impl MessageStore for InMemoryStore {
 }
 
 impl CredentialStore for InMemoryStore {
-    fn credential_save(&self, provider_name: &str, entry: &CredentialEntry) -> BoxFuture<'_, Result<(), BrainError>> {
+    fn credential_save(
+        &self,
+        provider_name: &str,
+        entry: &CredentialEntry,
+    ) -> BoxFuture<'_, Result<(), BrainError>> {
         let key = (provider_name.to_owned(), entry.id.clone());
         let entry = entry.clone();
         Box::pin(async move {
@@ -185,14 +207,19 @@ impl CredentialStore for InMemoryStore {
         })
     }
 
-    fn credential_load(&self, provider_name: &str, credential_id: &str) -> BoxFuture<'_, Result<Option<CredentialEntry>, BrainError>> {
+    fn credential_load(
+        &self,
+        provider_name: &str,
+        credential_id: &str,
+    ) -> BoxFuture<'_, Result<Option<CredentialEntry>, BrainError>> {
         let key = (provider_name.to_owned(), credential_id.to_owned());
-        Box::pin(async move {
-            Ok(self.credentials.read().await.get(&key).cloned())
-        })
+        Box::pin(async move { Ok(self.credentials.read().await.get(&key).cloned()) })
     }
 
-    fn credential_load_all(&self, provider_name: &str) -> BoxFuture<'_, Result<Vec<CredentialEntry>, BrainError>> {
+    fn credential_load_all(
+        &self,
+        provider_name: &str,
+    ) -> BoxFuture<'_, Result<Vec<CredentialEntry>, BrainError>> {
         let name = provider_name.to_owned();
         Box::pin(async move {
             let creds = self.credentials.read().await;
@@ -204,7 +231,11 @@ impl CredentialStore for InMemoryStore {
         })
     }
 
-    fn credential_delete(&self, provider_name: &str, credential_id: &str) -> BoxFuture<'_, Result<(), BrainError>> {
+    fn credential_delete(
+        &self,
+        provider_name: &str,
+        credential_id: &str,
+    ) -> BoxFuture<'_, Result<(), BrainError>> {
         let key = (provider_name.to_owned(), credential_id.to_owned());
         Box::pin(async move {
             self.credentials.write().await.remove(&key);
@@ -212,7 +243,12 @@ impl CredentialStore for InMemoryStore {
         })
     }
 
-    fn credential_update_health(&self, provider_name: &str, credential_id: &str, health: &CredentialHealth) -> BoxFuture<'_, Result<(), BrainError>> {
+    fn credential_update_health(
+        &self,
+        provider_name: &str,
+        credential_id: &str,
+        health: &CredentialHealth,
+    ) -> BoxFuture<'_, Result<(), BrainError>> {
         let key = (provider_name.to_owned(), credential_id.to_owned());
         let health = health.clone();
         Box::pin(async move {
@@ -227,7 +263,10 @@ impl CredentialStore for InMemoryStore {
     fn credential_list(&self) -> BoxFuture<'_, Result<Vec<(String, CredentialEntry)>, BrainError>> {
         Box::pin(async move {
             let creds = self.credentials.read().await;
-            Ok(creds.iter().map(|((pn, _), v)| (pn.clone(), v.clone())).collect())
+            Ok(creds
+                .iter()
+                .map(|((pn, _), v)| (pn.clone(), v.clone()))
+                .collect())
         })
     }
 }
@@ -258,7 +297,13 @@ mod tests {
         assert_eq!(list.len(), 1);
 
         store
-            .project_update(id, ProjectUpdate { name: Some("renamed".into()), config: None })
+            .project_update(
+                id,
+                ProjectUpdate {
+                    name: Some("renamed".into()),
+                    config: None,
+                },
+            )
             .await
             .unwrap();
         let updated = store.project_get(id).await.unwrap();
@@ -286,7 +331,13 @@ mod tests {
 
         // Update p1 so its updated_at is newest
         store
-            .project_update(id1, ProjectUpdate { name: Some("first-updated".into()), config: None })
+            .project_update(
+                id1,
+                ProjectUpdate {
+                    name: Some("first-updated".into()),
+                    config: None,
+                },
+            )
             .await
             .unwrap();
 
@@ -329,7 +380,12 @@ mod tests {
         assert_eq!(list.len(), 1);
 
         store
-            .session_update(sid, SessionUpdate { title: Some("My Chat".into()) })
+            .session_update(
+                sid,
+                SessionUpdate {
+                    title: Some("My Chat".into()),
+                },
+            )
             .await
             .unwrap();
         let updated = store.session_get(sid).await.unwrap();
@@ -394,12 +450,22 @@ mod tests {
     async fn credential_crud() {
         let store = InMemoryStore::new();
 
-        assert!(store.credential_load("openai", "key-1").await.unwrap().is_none());
+        assert!(
+            store
+                .credential_load("openai", "key-1")
+                .await
+                .unwrap()
+                .is_none()
+        );
 
         let entry = api_key_entry("key-1", "sk-123");
         store.credential_save("openai", &entry).await.unwrap();
 
-        let loaded = store.credential_load("openai", "key-1").await.unwrap().unwrap();
+        let loaded = store
+            .credential_load("openai", "key-1")
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(loaded.id, "key-1");
         match &loaded.credential {
             ProviderCredential::ApiKey { api_key } => assert_eq!(api_key, "sk-123"),
@@ -411,14 +477,26 @@ mod tests {
         assert_eq!(list[0].0, "openai");
 
         store.credential_delete("openai", "key-1").await.unwrap();
-        assert!(store.credential_load("openai", "key-1").await.unwrap().is_none());
+        assert!(
+            store
+                .credential_load("openai", "key-1")
+                .await
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[tokio::test]
     async fn credential_multi_per_provider() {
         let store = InMemoryStore::new();
-        store.credential_save("openai", &api_key_entry("key-1", "sk-111")).await.unwrap();
-        store.credential_save("openai", &api_key_entry("key-2", "sk-222")).await.unwrap();
+        store
+            .credential_save("openai", &api_key_entry("key-1", "sk-111"))
+            .await
+            .unwrap();
+        store
+            .credential_save("openai", &api_key_entry("key-2", "sk-222"))
+            .await
+            .unwrap();
 
         let all = store.credential_load_all("openai").await.unwrap();
         assert_eq!(all.len(), 2);
@@ -432,8 +510,14 @@ mod tests {
     #[tokio::test]
     async fn credential_overwrite() {
         let store = InMemoryStore::new();
-        store.credential_save("p", &api_key_entry("k", "old")).await.unwrap();
-        store.credential_save("p", &api_key_entry("k", "new")).await.unwrap();
+        store
+            .credential_save("p", &api_key_entry("k", "old"))
+            .await
+            .unwrap();
+        store
+            .credential_save("p", &api_key_entry("k", "new"))
+            .await
+            .unwrap();
 
         let loaded = store.credential_load("p", "k").await.unwrap().unwrap();
         match &loaded.credential {
@@ -445,15 +529,28 @@ mod tests {
     #[tokio::test]
     async fn credential_update_health() {
         let store = InMemoryStore::new();
-        store.credential_save("openai", &api_key_entry("key-1", "sk-123")).await.unwrap();
+        store
+            .credential_save("openai", &api_key_entry("key-1", "sk-123"))
+            .await
+            .unwrap();
 
         let mut health = CredentialHealth::default();
         health.record_error("rate limited", Some("429".into()));
-        store.credential_update_health("openai", "key-1", &health).await.unwrap();
+        store
+            .credential_update_health("openai", "key-1", &health)
+            .await
+            .unwrap();
 
-        let loaded = store.credential_load("openai", "key-1").await.unwrap().unwrap();
+        let loaded = store
+            .credential_load("openai", "key-1")
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(loaded.health.consecutive_errors, 1);
-        assert_eq!(loaded.health.last_error.as_ref().unwrap().code.as_deref(), Some("429"));
+        assert_eq!(
+            loaded.health.last_error.as_ref().unwrap().code.as_deref(),
+            Some("429")
+        );
     }
 
     #[tokio::test]

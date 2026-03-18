@@ -17,12 +17,13 @@ impl FileEditDriver for FileEditDriverNative {
         let old_string = old_string.to_owned();
         let new_string = new_string.to_owned();
         Box::pin(async move {
-            let content = tokio::fs::read_to_string(&path)
-                .await
-                .map_err(|e| BrainError::ToolFailed {
-                    tool: "file_edit".into(),
-                    reason: format!("{e}"),
-                })?;
+            let content =
+                tokio::fs::read_to_string(&path)
+                    .await
+                    .map_err(|e| BrainError::ToolFailed {
+                        tool: "file_edit".into(),
+                        reason: format!("{e}"),
+                    })?;
 
             let count = content.matches(&old_string).count();
             if count == 0 {

@@ -9,32 +9,82 @@ use crate::message::Message;
 #[non_exhaustive]
 pub enum Event {
     // -- existing --
-    Token { delta: String },
-    ToolCallStart { id: String, name: String, arguments: serde_json::Value },
-    ToolCallDone { id: String, result: String, is_error: bool },
-    MessageDone { message: Message },
-    TurnDone { iterations: u32, total_tokens: u32 },
-    Error { code: BrainErrorCode, message: String, recoverable: bool },
+    Token {
+        delta: String,
+    },
+    ToolCallStart {
+        id: String,
+        name: String,
+        arguments: serde_json::Value,
+    },
+    ToolCallDone {
+        id: String,
+        result: String,
+        is_error: bool,
+    },
+    MessageDone {
+        message: Message,
+    },
+    TurnDone {
+        iterations: u32,
+        total_tokens: u32,
+    },
+    Error {
+        code: BrainErrorCode,
+        message: String,
+        recoverable: bool,
+    },
 
     // -- streaming tool call args --
-    ToolCallDelta { id: String, name: String, arguments_delta: String },
+    ToolCallDelta {
+        id: String,
+        name: String,
+        arguments_delta: String,
+    },
 
     // -- tool approval flow --
-    ToolCallPending { id: String, name: String, arguments: serde_json::Value },
-    ToolCallApproved { id: String },
-    ToolCallRejected { id: String, reason: String },
+    ToolCallPending {
+        id: String,
+        name: String,
+        arguments: serde_json::Value,
+    },
+    ToolCallApproved {
+        id: String,
+    },
+    ToolCallRejected {
+        id: String,
+        reason: String,
+    },
 
     // -- progress --
-    Progress { phase: String, message: String, percent: Option<f32> },
+    Progress {
+        phase: String,
+        message: String,
+        percent: Option<f32>,
+    },
 
     // -- session lifecycle --
-    SessionStart { session_id: Ulid },
-    SessionResume { session_id: Ulid },
+    SessionStart {
+        session_id: Ulid,
+    },
+    SessionResume {
+        session_id: Ulid,
+    },
 
     // -- hardening/runtime --
-    Retry { attempt: u32, max: u32, error: String },
-    Compaction { original_messages: usize, summary_tokens: usize },
-    DoomLoopWarning { tool_name: String, repetitions: u32 },
+    Retry {
+        attempt: u32,
+        max: u32,
+        error: String,
+    },
+    Compaction {
+        original_messages: usize,
+        summary_tokens: usize,
+    },
+    DoomLoopWarning {
+        tool_name: String,
+        repetitions: u32,
+    },
 }
 
 #[cfg(test)]
@@ -53,7 +103,11 @@ mod tests {
         assert!(json.contains("\"type\":\"retry\""));
 
         match parsed {
-            Event::Retry { attempt, max, error } => {
+            Event::Retry {
+                attempt,
+                max,
+                error,
+            } => {
                 assert_eq!(attempt, 1);
                 assert_eq!(max, 3);
                 assert_eq!(error, "network");

@@ -162,10 +162,18 @@ mod tests {
         let strategy = Fallback::new();
         let entries = make_entries(3);
 
-        let id = strategy.select(&entries, &ctx(&["key-0"])).unwrap().id.as_str();
+        let id = strategy
+            .select(&entries, &ctx(&["key-0"]))
+            .unwrap()
+            .id
+            .as_str();
         assert_eq!(id, "key-1");
 
-        let id = strategy.select(&entries, &ctx(&["key-0", "key-1"])).unwrap().id.as_str();
+        let id = strategy
+            .select(&entries, &ctx(&["key-0", "key-1"]))
+            .unwrap()
+            .id
+            .as_str();
         assert_eq!(id, "key-2");
     }
 
@@ -173,7 +181,11 @@ mod tests {
     fn fallback_all_failed() {
         let strategy = Fallback::new();
         let entries = make_entries(2);
-        assert!(strategy.select(&entries, &ctx(&["key-0", "key-1"])).is_none());
+        assert!(
+            strategy
+                .select(&entries, &ctx(&["key-0", "key-1"]))
+                .is_none()
+        );
     }
 
     #[test]

@@ -6,11 +6,7 @@ use futures::future::BoxFuture;
 use brain_types::{BrainError, Tool, ToolDef};
 
 pub trait FileWriteDriver: Send + Sync {
-    fn write_file(
-        &self,
-        path: &str,
-        content: &str,
-    ) -> BoxFuture<'_, Result<String, BrainError>>;
+    fn write_file(&self, path: &str, content: &str) -> BoxFuture<'_, Result<String, BrainError>>;
 }
 
 pub struct FileWriteTool<T: FileWriteDriver> {
@@ -47,13 +43,12 @@ impl<T: FileWriteDriver> Tool for FileWriteTool<T> {
 
     fn execute(&self, args: serde_json::Value) -> BoxFuture<'_, Result<String, BrainError>> {
         Box::pin(async move {
-            let path = args
-                .get("path")
-                .and_then(|v| v.as_str())
-                .ok_or_else(|| BrainError::ToolFailed {
+            let path = args.get("path").and_then(|v| v.as_str()).ok_or_else(|| {
+                BrainError::ToolFailed {
                     tool: "file_write".into(),
                     reason: "missing required parameter 'path'".into(),
-                })?;
+                }
+            })?;
             let content = args
                 .get("content")
                 .and_then(|v| v.as_str())

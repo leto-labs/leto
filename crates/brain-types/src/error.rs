@@ -73,22 +73,50 @@ mod tests {
 
     #[test]
     fn error_codes() {
-        assert_eq!(BrainError::Inference("x".into()).code(), BrainErrorCode::InferenceFailed);
-        assert_eq!(BrainError::Auth("x".into()).code(), BrainErrorCode::AuthFailed);
-        assert_eq!(BrainError::ToolNotFound("x".into()).code(), BrainErrorCode::ToolNotFound);
         assert_eq!(
-            BrainError::ToolFailed { tool: "t".into(), reason: "r".into() }.code(),
+            BrainError::Inference("x".into()).code(),
+            BrainErrorCode::InferenceFailed
+        );
+        assert_eq!(
+            BrainError::Auth("x".into()).code(),
+            BrainErrorCode::AuthFailed
+        );
+        assert_eq!(
+            BrainError::ToolNotFound("x".into()).code(),
+            BrainErrorCode::ToolNotFound
+        );
+        assert_eq!(
+            BrainError::ToolFailed {
+                tool: "t".into(),
+                reason: "r".into()
+            }
+            .code(),
             BrainErrorCode::ToolFailed
         );
-        assert_eq!(BrainError::MaxIterations(5).code(), BrainErrorCode::MaxIterations);
+        assert_eq!(
+            BrainError::MaxIterations(5).code(),
+            BrainErrorCode::MaxIterations
+        );
         assert_eq!(BrainError::Cancelled.code(), BrainErrorCode::Cancelled);
-        assert_eq!(BrainError::Storage("x".into()).code(), BrainErrorCode::StorageFailed);
-        assert_eq!(BrainError::Internal("x".into()).code(), BrainErrorCode::Internal);
+        assert_eq!(
+            BrainError::Storage("x".into()).code(),
+            BrainErrorCode::StorageFailed
+        );
+        assert_eq!(
+            BrainError::Internal("x".into()).code(),
+            BrainErrorCode::Internal
+        );
     }
 
     #[test]
     fn recoverable_errors() {
-        assert!(BrainError::ToolFailed { tool: "t".into(), reason: "r".into() }.recoverable());
+        assert!(
+            BrainError::ToolFailed {
+                tool: "t".into(),
+                reason: "r".into()
+            }
+            .recoverable()
+        );
         assert!(BrainError::Cancelled.recoverable());
 
         assert!(!BrainError::Inference("x".into()).recoverable());
@@ -100,13 +128,23 @@ mod tests {
 
     #[test]
     fn display_messages() {
-        assert_eq!(BrainError::Inference("fail".into()).to_string(), "inference: fail");
+        assert_eq!(
+            BrainError::Inference("fail".into()).to_string(),
+            "inference: fail"
+        );
         assert_eq!(BrainError::Cancelled.to_string(), "cancelled");
         assert_eq!(
-            BrainError::ToolFailed { tool: "echo".into(), reason: "boom".into() }.to_string(),
+            BrainError::ToolFailed {
+                tool: "echo".into(),
+                reason: "boom".into()
+            }
+            .to_string(),
             "tool failed: echo — boom"
         );
-        assert_eq!(BrainError::MaxIterations(10).to_string(), "max iterations reached: 10");
+        assert_eq!(
+            BrainError::MaxIterations(10).to_string(),
+            "max iterations reached: 10"
+        );
     }
 
     #[test]

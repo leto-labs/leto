@@ -3,8 +3,8 @@ use serde::Deserialize;
 
 use brain_types::BrainError;
 
-use brain_types::OAuthCredentials;
 use super::jwt;
+use brain_types::OAuthCredentials;
 
 #[derive(Deserialize)]
 struct TokenResponse {
@@ -45,12 +45,14 @@ pub async fn refresh_token(
         .await
         .map_err(|e| BrainError::Auth(format!("failed to parse refresh response: {e}")))?;
 
-    let account_id = jwt::extract_account_id(&token_resp.access_token)
-        .or_else(|| creds.account_id.clone());
+    let account_id =
+        jwt::extract_account_id(&token_resp.access_token).or_else(|| creds.account_id.clone());
 
     Ok(OAuthCredentials {
         access_token: token_resp.access_token,
-        refresh_token: token_resp.refresh_token.unwrap_or_else(|| creds.refresh_token.clone()),
+        refresh_token: token_resp
+            .refresh_token
+            .unwrap_or_else(|| creds.refresh_token.clone()),
         expires_at: Utc::now() + Duration::seconds(token_resp.expires_in),
         client_id: creds.client_id.clone(),
         token_endpoint: creds.token_endpoint.clone(),

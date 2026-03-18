@@ -7,13 +7,16 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::sse::{Event as SseEvent, KeepAlive, Sse};
 use axum::response::{IntoResponse, Json, Response};
-use axum::{routing, Router};
+use axum::{Router, routing};
 use futures::stream::Stream;
-use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::StreamExt as _;
+use tokio_stream::wrappers::BroadcastStream;
 use ulid::Ulid;
 
-use brain_types::{BrainError, BrainErrorCode, CredentialEntry, Project, ProjectConfig, ProjectId, ProjectUpdate, SessionUpdate};
+use brain_types::{
+    BrainError, BrainErrorCode, CredentialEntry, Project, ProjectConfig, ProjectId, ProjectUpdate,
+    SessionUpdate,
+};
 
 use crate::api::BrainApi;
 use crate::server::BrainServer;
@@ -24,30 +27,58 @@ type AppState = Arc<BrainServer>;
 pub fn build_router(server: Arc<BrainServer>) -> Router {
     Router::new()
         // Project CRUD
-        .route("/projects", routing::post(create_project).get(list_projects))
-        .route("/projects/{id}", routing::get(get_project).delete(delete_project).patch(update_project))
+        .route(
+            "/projects",
+            routing::post(create_project).get(list_projects),
+        )
+        .route(
+            "/projects/{id}",
+            routing::get(get_project)
+                .delete(delete_project)
+                .patch(update_project),
+        )
         // Sessions scoped under project (create, list)
-        .route("/projects/{project_id}/sessions", routing::post(create_session).get(list_sessions))
+        .route(
+            "/projects/{project_id}/sessions",
+            routing::post(create_session).get(list_sessions),
+        )
         // Session by id (flat, since session ids are globally unique)
-        .route("/sessions/{id}", routing::get(get_session).delete(delete_session).patch(update_session))
+        .route(
+            "/sessions/{id}",
+            routing::get(get_session)
+                .delete(delete_session)
+                .patch(update_session),
+        )
         // Messages
         .route("/sessions/{id}/messages", routing::get(list_messages))
         // Turn management
         .route("/sessions/{id}/message", routing::post(send_message))
-        .route("/sessions/{id}/message/stream", routing::post(send_message_stream))
+        .route(
+            "/sessions/{id}/message/stream",
+            routing::post(send_message_stream),
+        )
         .route("/sessions/{id}/cancel", routing::post(cancel_turn))
         // Providers & credentials
         .route("/providers", routing::get(list_providers))
         .route("/credentials", routing::get(list_credentials))
-        .route("/credentials/{name}", routing::get(get_credentials).put(save_credential))
-        .route("/credentials/{name}/{credential_id}", routing::delete(delete_credential))
+        .route(
+            "/credentials/{name}",
+            routing::get(get_credentials).put(save_credential),
+        )
+        .route(
+            "/credentials/{name}/{credential_id}",
+            routing::delete(delete_credential),
+        )
         // Server-wide
         .route("/events", routing::get(sse_handler))
         .route("/status", routing::get(status))
         .with_state(server)
 }
 
-pub async fn serve(server: Arc<BrainServer>, addr: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+pub async fn serve(
+    server: Arc<BrainServer>,
+    addr: &str,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let router = build_router(server);
     let listener = tokio::net::TcpListener::bind(addr).await?;
     tracing::info!("brain-server listening on {}", addr);
@@ -128,10 +159,7 @@ async fn create_session(
     }
 }
 
-async fn list_sessions(
-    State(server): State<AppState>,
-    Path(project_id): Path<String>,
-) -> Response {
+async fn list_sessions(State(server): State<AppState>, Path(project_id): Path<String>) -> Response {
     let project_id = match parse_project_id(&project_id) {
         Ok(id) => id,
         Err(r) => return r,
