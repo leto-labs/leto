@@ -126,6 +126,30 @@
     "enabled": true
   },
   {
+    "name": "agent-client-protocol-spec",
+    "url": "https://github.com/agentclientprotocol/agent-client-protocol",
+    "tag": "v0.9.1",
+    "searchPath": "docs",
+    "notes": "Canonical ACP protocol/spec repository. Includes transport docs, lifecycle docs, schema, and RFDs. Use for protocol surface, Streamable HTTP status, session semantics, and extension points rather than SDK implementation details.",
+    "enabled": true
+  },
+  {
+    "name": "@zed-industries/codex-acp",
+    "url": "https://github.com/zed-industries/codex-acp",
+    "tag": "v0.9.5",
+    "searchPath": "src",
+    "notes": "ACP-compatible Codex adapter published by Zed Industries. Use for how a production ACP wrapper maps Codex CLI/runtime behavior into ACP sessions, prompts, approvals, and editor-facing capabilities.",
+    "enabled": true
+  },
+  {
+    "name": "vscode-acp",
+    "url": "https://github.com/formulahendry/vscode-acp",
+    "tag": "main",
+    "searchPath": "src",
+    "notes": "VS Code ACP client extension. Use to assess whether VS Code currently has a credible generic ACP chat/editor client and what ACP features it expects from agents.",
+    "enabled": true
+  },
+  {
     "name": "ratatui",
     "url": "https://github.com/ratatui/ratatui",
     "tag": "main",
