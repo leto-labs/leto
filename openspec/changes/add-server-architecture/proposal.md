@@ -34,7 +34,9 @@ brain runs as a single server. Two ways to talk to it:
 2. **HTTP REST + SSE** — for everything else. IDE extensions, web UIs,
    scripts, curl. One port, one protocol, universal.
 
-No stdio JSON-RPC mode. No three separate adapters. One server.
+This change defines the native `BrainServer` surface only. ACP is now tracked
+separately in `add-acp-client-surface` as a parallel first-class surface rather
+than a later bridge over HTTP.
 
 ### EventBus
 
@@ -88,17 +90,20 @@ The exact `brain-cli` mode surface is tracked in `add-brain-cli` and
 - headless HTTP + SSE server via `brain serve`
 - remote clients such as `brain attach <url>` over the same API surface
 
-### ACP compatibility (optional, future)
+### ACP relationship
 
-If we want ACP support for editors that only speak ACP (subprocess + JSON-RPC
-over stdio), we build a tiny bridge binary later:
+ACP support is no longer planned here as a thin HTTP client or bridge.
 
-```
-IDE ←→ brain-acp-bridge (subprocess) ←→ BrainServer (HTTP)
-```
+Instead:
 
-The bridge is a ~100 line shim. Not a core server mode — just a thin HTTP
-client that translates ACP JSON-RPC to REST calls. Separate concern.
+- `BrainServer` remains the native HTTP/SSE and in-process API surface
+- ACP is planned in `add-acp-client-surface` as its own first-class stdio
+  client surface over the same runtime concepts
+- future non-mock ACP work is expected to continue inside `brain-acp`, not as a
+  `BrainServer` transport adapter
+
+This change should therefore stay focused on the server boundary, event bus,
+and native `BrainApi` contract.
 
 ### What happens to Transport?
 

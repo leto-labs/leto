@@ -142,11 +142,66 @@
     "enabled": true
   },
   {
+    "name": "zed",
+    "url": "https://github.com/zed-industries/zed",
+    "tag": "main",
+    "searchPath": "crates",
+    "notes": "Zed editor source. Use to verify the external agent / ACP client transport implementation and the concrete behavior behind agent_servers, registry installs, and ACP session launch paths.",
+    "enabled": true
+  },
+  {
     "name": "vscode-acp",
     "url": "https://github.com/formulahendry/vscode-acp",
     "tag": "main",
     "searchPath": "src",
     "notes": "VS Code ACP client extension. Use to assess whether VS Code currently has a credible generic ACP chat/editor client and what ACP features it expects from agents.",
+    "enabled": true
+  },
+  {
+    "name": "acpx",
+    "url": "https://github.com/openclaw/acpx",
+    "tag": "main",
+    "searchPath": "src",
+    "notes": "Headless CLI client for the Agent Client Protocol (ACP). Use for terminal-side ACP session lifecycle, queueing, permissions, structured output, built-in Codex adapter behavior, and custom ACP server launch flows via --agent.",
+    "enabled": true
+  },
+  {
+    "name": "forge",
+    "url": "https://github.com/forge-agents/forge",
+    "tag": "main",
+    "searchPath": "packages/forge/src",
+    "notes": "OpenTUI/Solid terminal UI for ACP agents. Start with packages/forge/src/acp for the ACP client/orchestrator, packages/forge/src/cli/cmd/tui for the terminal UI, and packages/forge/test/acp for real protocol coverage. Key question for brain: Forge is a real ACP-native TUI, but agent launch currently appears registry-driven rather than a documented raw custom-command path.",
+    "enabled": true
+  },
+  {
+    "name": "nori-cli",
+    "url": "https://github.com/tilework-tech/nori-cli",
+    "tag": "nori-v0.9.0",
+    "searchPath": "codex-rs",
+    "notes": "Rust/Ratatui terminal AI client forked from Codex CLI with ACP-native subprocess orchestration. Start with codex-rs/acp for the ACP registry, connection, event translation, and custom-agent config path; codex-rs/tui for the terminal UX; and codex-rs/tui-pty-e2e/tests for real ACP session, file, approval, and custom-agent coverage. Important question for brain: Nori now appears to support custom ACP agents via [[agents]] in config.toml rather than only built-in Claude/Codex/Gemini providers.",
+    "enabled": true
+  },
+  {
+    "name": "acp-ui",
+    "url": "https://github.com/formulahendry/acp-ui",
+    "tag": "v0.1.10",
+    "notes": "Tauri/Vue desktop ACP client with explicit custom agent command configuration. Start with src/lib/acp-bridge.ts and src/stores/session.ts for ACP method coverage and update handling, plus src-tauri/src/agent.rs and src-tauri/src/config.rs for subprocess launch, agents.json config, and hot reload. Important question for brain: acp-ui looks strong for custom-command launch and file/permission flows, but may intentionally expose a smaller ACP client capability surface than richer TUIs.",
+    "enabled": true
+  },
+  {
+    "name": "agentic.nvim",
+    "url": "https://github.com/carlos-algms/agentic.nvim",
+    "tag": "main",
+    "searchPath": "lua",
+    "notes": "Neovim ACP-first client/plugin. Use to inspect how a keyboard-first editor shell launches ACP agents, restores sessions, renders streaming chat and diffs, and exposes ACP-native debug and provider configuration for custom servers such as brain acp.",
+    "enabled": true
+  },
+  {
+    "name": "codecompanion.nvim",
+    "url": "https://github.com/olimorris/codecompanion.nvim",
+    "tag": "v19.5.0",
+    "searchPath": "lua",
+    "notes": "Broad Neovim AI framework with ACP support among many adapters. Use to compare how much ACP sits at the center of the UX versus being one backend inside a richer chat/workflow platform, and to study custom agent launch, session handling, tools, and approval surfaces.",
     "enabled": true
   },
   {

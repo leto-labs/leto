@@ -46,6 +46,14 @@ build:
 build-release:
     cargo build --workspace --release
 
+# Run the opt-in acpx compatibility harness against brain-acp
+acpx-compat:
+    ./scripts/test-acpx-compat.sh
+
+# Install repo-owned Nori custom prompts into ~/.nori/cli/commands via symlink
+nori-prompts-install:
+    ./scripts/install-nori-prompts.sh
+
 # Clean build artifacts
 clean:
     cargo clean

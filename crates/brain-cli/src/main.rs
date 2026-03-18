@@ -19,6 +19,15 @@ async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
 
     let cli = Cli::parse();
+    let command = cli.command;
+
+    if matches!(command, Some(Commands::Acp)) {
+        brain_acp::run_stdio()
+            .await
+            .context("failed to run mock ACP stdio server")?;
+        return Ok(());
+    }
+
     let cwd = std::env::current_dir().context("failed to get current directory")?;
 
     let config = resolve_config(&cwd);
@@ -47,7 +56,8 @@ async fn main() -> Result<()> {
 
     let project = find_or_create_project(&client, &project_name, &cwd, config).await?;
 
-    match cli.command {
+    match command {
+        Some(Commands::Acp) => unreachable!("ACP command is handled before runtime initialization"),
         Some(Commands::Credentials { action }) => match action {
             CredentialsAction::Add {
                 provider,
@@ -64,9 +74,7 @@ async fn main() -> Result<()> {
         },
         Some(Commands::Sessions { action }) => match action {
             SessionsAction::List => cmd_sessions_list(&client, project.id).await,
-            SessionsAction::Resume { id } => {
-                cmd_sessions_resume(&client, &project, &id).await
-            }
+            SessionsAction::Resume { id } => cmd_sessions_resume(&client, &project, &id).await,
         },
         None => cmd_chat(&client, project.id, None).await,
     }
@@ -78,10 +86,10 @@ fn resolve_config(cwd: &std::path::Path) -> ProjectConfig {
         ProjectConfig::default()
     });
 
-    if config.agent.system_prompt.is_none() {
-        if let Ok(Some(agents_md)) = brain_config::load_root_agents_md(cwd) {
-            config.agent.system_prompt = Some(agents_md);
-        }
+    if config.agent.system_prompt.is_none()
+        && let Ok(Some(agents_md)) = brain_config::load_root_agents_md(cwd)
+    {
+        config.agent.system_prompt = Some(agents_md);
     }
 
     config
@@ -268,9 +276,7 @@ async fn cmd_credentials_login(
 
         let preset = match provider {
             "openai-oauth" | "openai_oauth" => &OpenAiOAuthPreset::OPENAI,
-            other => anyhow::bail!(
-                "unknown OAuth provider '{other}'. Available: openai-oauth"
-            ),
+            other => anyhow::bail!("unknown OAuth provider '{other}'. Available: openai-oauth"),
         };
 
         let entry = if device {
@@ -285,7 +291,7 @@ async fn cmd_credentials_login(
             "\nLogin successful! Credential '{}' saved for '{}'.",
             entry.id, provider
         );
-        return Ok(());
+        Ok(())
     }
 
     #[cfg(not(feature = "openai-oauth"))]
@@ -366,4 +372,3 @@ async fn cmd_credentials_remove(
     println!("Removed credential '{id}' from provider '{provider}'.");
     Ok(())
 }
-

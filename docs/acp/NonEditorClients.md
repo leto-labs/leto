@@ -105,6 +105,8 @@ The right stance is:
 For `brain` roadmap thinking:
 
 - use ACP to unlock editor clients now
+- use a terminal-native ACP client as the fastest manual validation loop for
+  the mock `brain acp` surface
 - watch Streamable HTTP and connector patterns closely
 - avoid building `brain` internals so tightly around editor-only assumptions
   that broader ACP clients become awkward later

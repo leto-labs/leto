@@ -11,7 +11,6 @@
         │                              │
         │  HTTP/SSE endpoint (axum)    │◄──── IDE extension (HTTP client)
         │                              │◄──── Web UI (HTTP client)
-        │                              │◄──── ACP bridge (thin proxy, optional)
         │  In-process channels         │◄──── TUI (same process)
         └──────────────────────────────┘
 ```
@@ -24,19 +23,22 @@ brain runs as a single server. Two ways to talk to it:
 2. **HTTP REST + SSE** — for everything else. One port, one protocol.
    IDE extensions, web UIs, scripts — all connect the same way.
 
-That's it. No stdio JSON-RPC mode. No three separate adapters.
+For this change, that's the complete native server surface.
 
-### ACP compatibility (optional, later)
+### ACP relationship
 
-If we want ACP compatibility for editors that only speak ACP (spawn
-subprocess + JSON-RPC over stdio), we can build a tiny bridge binary:
+ACP is now tracked separately in `add-acp-client-surface`.
 
-```
-IDE ←→ brain-acp-bridge (subprocess) ←→ BrainServer (HTTP)
-```
+That means this design should be read as:
 
-The bridge is a ~100 line shim that translates ACP JSON-RPC to HTTP calls
-against the running server. It's not a server mode — it's a thin client.
+- `BrainServer` defines the native HTTP/SSE and in-process surface
+- ACP is a parallel first-class client surface over the same runtime concepts
+- this server architecture change should not force ACP to be implemented as an
+  HTTP bridge or proxy
+- future real ACP work belongs in `brain-acp`, not in `BrainServer`
+
+In practice, `BrainServer` remains strategically important for first-party UI,
+automation, and generic HTTP consumers even when ACP exists alongside it.
 
 ### Why HTTP + SSE?
 
@@ -135,4 +137,4 @@ Events are also published to the bus (dual delivery).
 |-----------|-------|-----------|
 | EventBus | `tokio` (broadcast) | always |
 | HTTP/SSE | `axum` | yes (core server feature) |
-| ACP bridge | `agent-client-protocol` | optional, separate binary |
+| ACP surface | tracked in `add-acp-client-surface` | separate concern |

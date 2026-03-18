@@ -59,6 +59,20 @@ This research concentrates on the dimensions that matter most for `brain`:
 - [`Codex.md`](Codex.md)
 - [`OpenClaw.md`](OpenClaw.md)
 - [`NonEditorClients.md`](NonEditorClients.md)
+- [`Forge.md`](Forge.md)
+- [`Nori.md`](Nori.md)
+- [`AcpUi.md`](AcpUi.md)
+- [`NeovimClients.md`](NeovimClients.md)
+- [`TerminalValidation.md`](TerminalValidation.md)
+
+Current working set for this repo:
+
+- `acpx` for baseline ACP compatibility validation
+- Nori for multi-turn ACP TUI validation
+- ACP UI as a useful standalone desktop reference
+
+The remaining client notes are retained as research and comparison material,
+not as the current implementation target.
 
 ## Executive Summary
 

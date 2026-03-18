@@ -9,6 +9,8 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Commands {
+    /// Run the mock ACP stdio agent
+    Acp,
     /// Manage sessions
     Sessions {
         #[command(subcommand)]
