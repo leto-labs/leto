@@ -180,5 +180,85 @@
     "searchPath": "providers",
     "notes": "Open-source AI model database (3K+ stars). TOML-based model specs organized by provider in providers/<name>/models/<id>.toml. Schema: name, family, reasoning (bool), tool_call, attachment, structured_output, temperature, knowledge, release_date, cost (input/output/reasoning/cache_read/cache_write), limit (context/input/output), modalities, status. Used as canonical data source for brain ModelInfo presets.",
     "enabled": true
+  },
+  {
+    "name": "terminal-bench",
+    "url": "https://github.com/laude-institute/terminal-bench",
+    "tag": "main",
+    "searchPath": "terminal_bench",
+    "notes": "Official Terminal-Bench repository. Start with terminal_bench/ for the benchmark runtime, agents, parsers, terminal orchestration, and registry client. adapters/ contains dataset adapters and docker/ contains MCP/server and container setup.",
+    "enabled": true
+  },
+  {
+    "name": "harbor",
+    "url": "https://github.com/harbor-framework/harbor",
+    "tag": "main",
+    "searchPath": "src/harbor",
+    "notes": "Harbor evaluation framework. Start with src/harbor for the core framework and adapters/ for dataset-specific integrations and parity experiments. Useful for registry clients, trajectories, trial orchestration, and benchmark adapters.",
+    "enabled": true
+  },
+  {
+    "name": "swe-bench",
+    "url": "https://github.com/SWE-bench/SWE-bench",
+    "tag": "v4.1.0",
+    "searchPath": "swebench",
+    "notes": "Official SWE-bench repository. Start with swebench/harness for evaluation logic, swebench/inference for run entrypoints, and swebench/resources for packaged task assets and environment definitions.",
+    "enabled": true
+  },
+  {
+    "name": "mini-swe-agent",
+    "url": "https://github.com/SWE-agent/mini-swe-agent",
+    "tag": "v2.2.7",
+    "searchPath": "src/minisweagent",
+    "notes": "Minimal SWE-agent scaffold focused on reproducible, explicit agent workflows for SWE-bench-style tasks. Start with run/, agents/, models/, and config/benchmarks for the concrete scaffold assumptions.",
+    "enabled": true
+  },
+  {
+    "name": "hal-harness",
+    "url": "https://github.com/princeton-pli/hal-harness",
+    "tag": "main",
+    "searchPath": "hal",
+    "notes": "HAL evaluation harness from Princeton PLI. Start with hal/benchmarks, hal/benchmark_manager.py, hal/agent_runner.py, and agents/ for example agent integrations across supported benchmark families.",
+    "enabled": true
+  },
+  {
+    "name": "osworld",
+    "url": "https://github.com/xlang-ai/OSWorld",
+    "tag": "v0.1.16",
+    "searchPath": "desktop_env",
+    "notes": "Official OSWorld repository. Start with desktop_env/ for the environment and evaluator implementation, then mm_agents/ for agent-side integrations and evaluation_examples/ for runnable examples.",
+    "enabled": true
+  },
+  {
+    "name": "visualwebarena",
+    "url": "https://github.com/web-arena-x/visualwebarena",
+    "tag": "main",
+    "searchPath": "evaluation_harness",
+    "notes": "Official VisualWebArena repository. Start with evaluation_harness/ for scoring and task execution, browser_env/ for environment logic, and agent/ for prompt and policy setup.",
+    "enabled": true
+  },
+  {
+    "name": "appworld",
+    "url": "https://github.com/StonyBrookNLP/appworld",
+    "tag": "v0.1.3.post1",
+    "searchPath": "src/appworld",
+    "notes": "Official AppWorld repository. Start with src/appworld for the environment, evaluator, and APIs; experiments/ contains prompts and benchmark-oriented experiment code.",
+    "enabled": true
+  },
+  {
+    "name": "openhands-benchmarks",
+    "url": "https://github.com/OpenHands/benchmarks",
+    "tag": "main",
+    "searchPath": "benchmarks",
+    "notes": "OpenHands benchmark evaluation repository. Start with benchmarks/ for active suites including swebench and terminalbench; vendor/ and the README document how the repo ties into the Software Agent SDK.",
+    "enabled": true
+  },
+  {
+    "name": "openhands-software-agent-sdk",
+    "url": "https://github.com/OpenHands/software-agent-sdk",
+    "tag": "v1.14.0",
+    "searchPath": "openhands-sdk/openhands/sdk",
+    "notes": "OpenHands Software Agent SDK. Start with openhands-sdk/openhands/sdk for conversation, tool, event, critic, and subagent runtime code; pair with the benchmarks repo to understand newer OpenHands evaluation flows.",
+    "enabled": true
   }
 ]
