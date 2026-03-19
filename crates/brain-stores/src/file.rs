@@ -116,6 +116,23 @@ impl ProjectStore for FileStore {
         })
     }
 
+    fn project_find_by_root(
+        &self,
+        root: &Path,
+    ) -> BoxFuture<'_, Result<Option<Project>, BrainError>> {
+        let root = normalize_project_root(root);
+        Box::pin(async move {
+            let projects = self.project_list().await?;
+            Ok(projects.into_iter().find(|project| {
+                project
+                    .root
+                    .as_ref()
+                    .map(|project_root| normalize_project_root(project_root) == root)
+                    .unwrap_or(false)
+            }))
+        })
+    }
+
     fn project_update(
         &self,
         id: ProjectId,
@@ -217,6 +234,16 @@ impl SessionStore for FileStore {
             let mut session: Session = read_json(&path).await?;
             if let Some(title) = update.title {
                 session.title = Some(title);
+            }
+            if let Some(inference) = update.inference {
+                match inference {
+                    SessionInferenceUpdate::Set(config) => {
+                        session.inference = Some(config);
+                    }
+                    SessionInferenceUpdate::Clear => {
+                        session.inference = None;
+                    }
+                }
             }
             session.updated_at = Utc::now();
             write_json(&path, &session).await
@@ -595,12 +622,7 @@ mod tests {
         assert_eq!(list.len(), 1);
 
         store
-            .session_update(
-                sid,
-                SessionUpdate {
-                    title: Some("My Chat".into()),
-                },
-            )
+            .session_update(sid, SessionUpdate::title("My Chat"))
             .await
             .unwrap();
         let updated = store.session_get(sid).await.unwrap();
@@ -619,6 +641,51 @@ mod tests {
 
         let list = store.session_list(pid).await.unwrap();
         assert!(list.is_empty());
+    }
+
+    #[tokio::test]
+    async fn session_inference_can_be_set_and_cleared() {
+        let (store, _dir) = temp_store().await;
+        let project = Project::with_defaults("proj");
+        let pid = project.id;
+        store.project_create(project).await.unwrap();
+
+        let session = store.session_create(pid).await.unwrap();
+
+        store
+            .session_update(
+                session.id,
+                SessionUpdate::inference(InferenceConfig {
+                    provider: Some("openai".into()),
+                    model: Some("gpt-5".into()),
+                    max_tokens: None,
+                    temperature: Some(0.3),
+                }),
+            )
+            .await
+            .unwrap();
+        let updated = store.session_get(session.id).await.unwrap();
+        assert_eq!(
+            updated
+                .inference
+                .as_ref()
+                .and_then(|cfg| cfg.provider.as_deref()),
+            Some("openai")
+        );
+        assert_eq!(
+            updated
+                .inference
+                .as_ref()
+                .and_then(|cfg| cfg.model.as_deref()),
+            Some("gpt-5")
+        );
+
+        store
+            .session_update(session.id, SessionUpdate::clear_inference())
+            .await
+            .unwrap();
+        let cleared = store.session_get(session.id).await.unwrap();
+        assert!(cleared.inference.is_none());
     }
 
     #[tokio::test]

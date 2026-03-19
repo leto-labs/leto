@@ -63,6 +63,21 @@ impl ProjectStore for InMemoryStore {
         })
     }
 
+    fn project_find_by_root(
+        &self,
+        root: &std::path::Path,
+    ) -> BoxFuture<'_, Result<Option<Project>, BrainError>> {
+        let root = normalize_project_root(root);
+        Box::pin(async move {
+            let projects = self.projects.read().await;
+            Ok(projects.values().find_map(|project| {
+                project.root.as_ref().and_then(|project_root| {
+                    (normalize_project_root(project_root) == root).then(|| project.clone())
+                })
+            }))
+        })
+    }
+
     fn project_update(
         &self,
         id: ProjectId,
@@ -149,6 +164,16 @@ impl SessionStore for InMemoryStore {
                 .ok_or_else(|| BrainError::Storage(format!("session not found: {id}")))?;
             if let Some(title) = update.title {
                 entry.session.title = Some(title);
+            }
+            if let Some(inference) = update.inference {
+                match inference {
+                    SessionInferenceUpdate::Set(config) => {
+                        entry.session.inference = Some(config);
+                    }
+                    SessionInferenceUpdate::Clear => {
+                        entry.session.inference = None;
+                    }
+                }
             }
             entry.session.updated_at = Utc::now();
             Ok(())
@@ -320,6 +345,25 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn project_find_by_root_matches_normalized_path() {
+        let store = InMemoryStore::new();
+        let project = Project::new(
+            Some("test".into()),
+            Some("/tmp/work/repo".into()),
+            ProjectConfig::default(),
+        );
+        let id = project.id;
+        store.project_create(project).await.unwrap();
+
+        let found = store
+            .project_find_by_root(std::path::Path::new("/tmp/work/./repo"))
+            .await
+            .unwrap()
+            .expect("project should be found");
+        assert_eq!(found.id, id);
+    }
+
+    #[tokio::test]
     async fn project_list_sorted_by_updated_at() {
         let store = InMemoryStore::new();
         let p1 = Project::with_defaults("first");
@@ -380,12 +424,7 @@ mod tests {
         assert_eq!(list.len(), 1);
 
         store
-            .session_update(
-                sid,
-                SessionUpdate {
-                    title: Some("My Chat".into()),
-                },
-            )
+            .session_update(sid, SessionUpdate::title("My Chat"))
             .await
             .unwrap();
         let updated = store.session_get(sid).await.unwrap();
@@ -411,6 +450,51 @@ mod tests {
 
         assert_eq!(store.session_list(pid1).await.unwrap().len(), 2);
         assert_eq!(store.session_list(pid2).await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn session_inference_can_be_set_and_cleared() {
+        let store = InMemoryStore::new();
+        let project = Project::with_defaults("proj");
+        let pid = project.id;
+        store.project_create(project).await.unwrap();
+
+        let session = store.session_create(pid).await.unwrap();
+
+        store
+            .session_update(
+                session.id,
+                SessionUpdate::inference(InferenceConfig {
+                    provider: Some("openai".into()),
+                    model: Some("gpt-5".into()),
+                    max_tokens: Some(2048),
+                    temperature: None,
+                }),
+            )
+            .await
+            .unwrap();
+        let updated = store.session_get(session.id).await.unwrap();
+        assert_eq!(
+            updated
+                .inference
+                .as_ref()
+                .and_then(|cfg| cfg.provider.as_deref()),
+            Some("openai")
+        );
+        assert_eq!(
+            updated
+                .inference
+                .as_ref()
+                .and_then(|cfg| cfg.model.as_deref()),
+            Some("gpt-5")
+        );
+
+        store
+            .session_update(session.id, SessionUpdate::clear_inference())
+            .await
+            .unwrap();
+        let cleared = store.session_get(session.id).await.unwrap();
+        assert!(cleared.inference.is_none());
     }
 
     // ── MessageStore ───────────────────────────────────────────

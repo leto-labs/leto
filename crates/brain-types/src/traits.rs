@@ -1,3 +1,4 @@
+use std::path::Path;
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -23,6 +24,10 @@ pub trait ProjectStore: Send + Sync {
     fn project_create(&self, project: Project) -> BoxFuture<'_, Result<Project, BrainError>>;
     fn project_get(&self, id: ProjectId) -> BoxFuture<'_, Result<Project, BrainError>>;
     fn project_list(&self) -> BoxFuture<'_, Result<Vec<Project>, BrainError>>;
+    fn project_find_by_root(
+        &self,
+        root: &Path,
+    ) -> BoxFuture<'_, Result<Option<Project>, BrainError>>;
     fn project_update(
         &self,
         id: ProjectId,

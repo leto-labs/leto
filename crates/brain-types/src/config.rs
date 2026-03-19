@@ -38,6 +38,24 @@ impl Default for InferenceConfig {
     }
 }
 
+impl InferenceConfig {
+    pub fn is_empty(&self) -> bool {
+        self.provider.is_none()
+            && self.model.is_none()
+            && self.max_tokens.is_none()
+            && self.temperature.is_none()
+    }
+
+    pub fn merged_with(&self, overrides: &Self) -> Self {
+        Self {
+            provider: overrides.provider.clone().or_else(|| self.provider.clone()),
+            model: overrides.model.clone().or_else(|| self.model.clone()),
+            max_tokens: overrides.max_tokens.or(self.max_tokens),
+            temperature: overrides.temperature.or(self.temperature),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionSummary {
     pub id: Ulid,
@@ -71,6 +89,33 @@ mod tests {
         assert!(cfg.model.is_none());
         assert!(cfg.max_tokens.is_none());
         assert!(cfg.temperature.is_none());
+    }
+
+    #[test]
+    fn inference_config_is_empty_when_all_fields_missing() {
+        assert!(InferenceConfig::default().is_empty());
+    }
+
+    #[test]
+    fn inference_config_merged_with_overrides_only_replaces_present_fields() {
+        let defaults = InferenceConfig {
+            provider: Some("openai".into()),
+            model: Some("gpt-4o-mini".into()),
+            max_tokens: Some(4096),
+            temperature: Some(0.7),
+        };
+        let overrides = InferenceConfig {
+            provider: None,
+            model: Some("gpt-5".into()),
+            max_tokens: None,
+            temperature: Some(0.2),
+        };
+
+        let merged = defaults.merged_with(&overrides);
+        assert_eq!(merged.provider.as_deref(), Some("openai"));
+        assert_eq!(merged.model.as_deref(), Some("gpt-5"));
+        assert_eq!(merged.max_tokens, Some(4096));
+        assert_eq!(merged.temperature, Some(0.2));
     }
 
     #[test]

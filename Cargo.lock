@@ -529,6 +529,8 @@ version = "0.1.0"
 dependencies = [
  "agent-client-protocol",
  "async-trait",
+ "brain-config",
+ "brain-core",
  "chrono",
  "futures",
  "serde_json",
@@ -536,6 +538,7 @@ dependencies = [
  "tokio-util",
  "tracing",
  "tracing-subscriber",
+ "ulid",
 ]
 
 [[package]]
@@ -3849,6 +3852,16 @@ checksum = "52717f9a02b6965224f95ca2a81e2e0c5c43baacd28ca057577988930b6c3d5b"
 dependencies = [
  "quote",
  "syn 2.0.117",
+]
+
+[[package]]
+name = "provider-preset-gen"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "serde",
+ "toml 0.8.23",
 ]
 
 [[package]]

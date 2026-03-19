@@ -34,6 +34,7 @@ impl Provider for MockProvider {
             models: vec![ProviderModelInfo {
                 id: "mock-echo".into(),
                 name: "Mock Echo".into(),
+                provider: None,
                 reasoning: false,
                 tool_call: true,
             }],

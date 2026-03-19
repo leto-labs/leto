@@ -5,7 +5,8 @@ use futures::{AsyncRead, AsyncWrite};
 use tokio::sync::mpsc;
 use tokio_util::compat::{TokioAsyncReadCompatExt as _, TokioAsyncWriteCompatExt as _};
 
-use super::agent::{MockAgent, NotificationEnvelope};
+use super::agent::NotificationEnvelope;
+use super::app::build_agent;
 
 pub async fn run_mock_stdio() -> Result<(), acp::Error> {
     run_connection(
@@ -23,7 +24,7 @@ async fn run_connection(
     local_set
         .run_until(async move {
             let (session_update_tx, session_update_rx) = mpsc::unbounded_channel();
-            let agent = MockAgent::new(session_update_tx);
+            let agent = build_agent(session_update_tx);
             let agent_handle = agent.clone();
 
             let (connection, handle_io) =

@@ -40,11 +40,19 @@ pub async fn build_provider(
         .map(|(_, p, _)| p.clone())
         .unwrap();
 
-    let mut router = ProviderRouter::new(default);
-    for (model_name, provider, is_default) in &providers {
-        let tag = if *is_default { "default" } else { "  route" };
-        tracing::info!("{tag}: {model_name}");
-        router = router.add(model_name.clone(), provider.clone());
+    let mut router = ProviderRouter::new(
+        providers
+            .iter()
+            .find(|(_, _, is_default)| *is_default)
+            .or(providers.first())
+            .map(|(name, _, _)| name.clone())
+            .unwrap(),
+        default,
+    );
+    for (provider_name, provider, is_default) in &providers {
+        let tag = if *is_default { "default" } else { "provider" };
+        tracing::info!("{tag}: {provider_name}");
+        router = router.add_provider(provider_name.clone(), provider.clone());
     }
 
     Arc::new(router)
@@ -70,16 +78,15 @@ async fn discover_api_providers(
                 config = config.with_model(model);
             }
         }
-        let model_name = config.default_model.clone();
         let provider: Arc<dyn Provider> = Arc::new(OpenAiProvider::with_pool(config, pool.clone()));
-        providers.push((model_name, provider, is_default));
+        providers.push((preset.name.to_owned(), provider, is_default));
     }
 }
 
 #[cfg(feature = "openai-oauth")]
 async fn discover_oauth_providers(
     default_name: &str,
-    model_override: Option<&str>,
+    _model_override: Option<&str>,
     pool: &Arc<CredentialPool>,
     providers: &mut Vec<(String, Arc<dyn Provider>, bool)>,
 ) {
@@ -91,16 +98,10 @@ async fn discover_oauth_providers(
     }
 
     let is_default = preset.name == default_name;
-    let model = if is_default {
-        model_override.unwrap_or(preset.default_model)
-    } else {
-        preset.default_model
-    };
-
     let provider: Arc<dyn Provider> =
         Arc::new(OpenAiOAuthProvider::with_pool(pool.clone(), preset));
-    tracing::info!("provider: {} (OAuth) | model: {model}", preset.name);
-    providers.push((model.to_owned(), provider, is_default));
+    tracing::info!("provider: {} (OAuth)", preset.name);
+    providers.push((preset.name.to_owned(), provider, is_default));
 }
 
 #[cfg(not(feature = "openai-oauth"))]
@@ -115,7 +116,7 @@ async fn discover_oauth_providers(
 #[cfg(all(feature = "llamacpp", not(feature = "mistralrs")))]
 async fn discover_local_providers(
     default_name: &str,
-    model_override: Option<&str>,
+    _model_override: Option<&str>,
     config: &ProjectConfig,
     providers: &mut Vec<(String, Arc<dyn Provider>, bool)>,
 ) {
@@ -138,19 +139,14 @@ async fn discover_local_providers(
     };
 
     let is_default = default_name == "llamacpp";
-    let model = if is_default {
-        model_override.unwrap_or(&default_model).to_owned()
-    } else {
-        default_model
-    };
-    tracing::info!("backend: llama.cpp | default model: {model}");
-    providers.push((model, Arc::new(provider), is_default));
+    tracing::info!("backend: llama.cpp | default model: {default_model}");
+    providers.push(("llamacpp".to_owned(), Arc::new(provider), is_default));
 }
 
 #[cfg(feature = "mistralrs")]
 async fn discover_local_providers(
     default_name: &str,
-    model_override: Option<&str>,
+    _model_override: Option<&str>,
     config: &ProjectConfig,
     providers: &mut Vec<(String, Arc<dyn Provider>, bool)>,
 ) {
@@ -170,13 +166,8 @@ async fn discover_local_providers(
     let provider = MistralRsProvider::new(configs, &default_model);
 
     let is_default = default_name == "mistralrs";
-    let model = if is_default {
-        model_override.unwrap_or(&default_model).to_owned()
-    } else {
-        default_model
-    };
-    tracing::info!("backend: mistral.rs | default model: {model}");
-    providers.push((model, Arc::new(provider), is_default));
+    tracing::info!("backend: mistral.rs | default model: {default_model}");
+    providers.push(("mistralrs".to_owned(), Arc::new(provider), is_default));
 }
 
 #[cfg(not(any(feature = "mistralrs", feature = "llamacpp")))]

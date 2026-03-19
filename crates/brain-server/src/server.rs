@@ -124,12 +124,7 @@ impl BrainApi for BrainServer {
                 turns.insert(session_id, cancel.clone());
             }
 
-            // Look up the session's project to get AgentConfig
-            let session = inner.brain.store.session_get(session_id).await?;
-            let project = inner.brain.store.project_get(session.project_id).await?;
-            let config = project.config.agent.clone();
-
-            let stream = inner.brain.turn(session_id, &content, config, cancel);
+            let stream = inner.brain.turn(session_id, &content, cancel);
 
             tokio::spawn(drain_turn(inner, session_id, stream));
             Ok(())
@@ -154,11 +149,7 @@ impl BrainApi for BrainServer {
                 turns.insert(session_id, cancel.clone());
             }
 
-            let session = inner.brain.store.session_get(session_id).await?;
-            let project = inner.brain.store.project_get(session.project_id).await?;
-            let config = project.config.agent.clone();
-
-            let stream = inner.brain.turn(session_id, &content, config, cancel);
+            let stream = inner.brain.turn(session_id, &content, cancel);
 
             // Tap the stream: each event is published to the bus AND forwarded to the caller.
             let (tx, rx) = tokio::sync::mpsc::channel::<Event>(256);
@@ -554,12 +545,7 @@ mod tests {
         assert!(session.title.is_none());
 
         server
-            .update_session(
-                session.id,
-                SessionUpdate {
-                    title: Some("renamed".into()),
-                },
-            )
+            .update_session(session.id, SessionUpdate::title("renamed"))
             .await
             .unwrap();
 

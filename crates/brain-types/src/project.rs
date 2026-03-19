@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Component, Path, PathBuf};
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -56,6 +56,25 @@ impl Project {
     }
 }
 
+pub fn normalize_project_root(path: &Path) -> PathBuf {
+    let mut normalized = PathBuf::new();
+
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                normalized.pop();
+            }
+            Component::Normal(segment) => normalized.push(segment),
+            Component::RootDir | Component::Prefix(_) => {
+                normalized.push(component.as_os_str());
+            }
+        }
+    }
+
+    normalized
+}
+
 impl Default for Project {
     fn default() -> Self {
         Self::new(None, None, ProjectConfig::default())
@@ -107,5 +126,11 @@ mod tests {
         let update = ProjectUpdate::default();
         assert!(update.name.is_none());
         assert!(update.config.is_none());
+    }
+
+    #[test]
+    fn normalize_project_root_elides_dot_segments() {
+        let normalized = normalize_project_root(Path::new("/tmp/work/./src/../repo"));
+        assert_eq!(normalized, PathBuf::from("/tmp/work/repo"));
     }
 }

@@ -96,6 +96,7 @@ impl Provider for MistralRsProvider {
             .map(|name| ProviderModelInfo {
                 id: name.clone(),
                 name: name.clone(),
+                provider: None,
                 reasoning: false,
                 tool_call: false,
             })

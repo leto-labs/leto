@@ -1,61 +1,197 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use futures::future::BoxFuture;
 
 use brain_types::*;
 
-/// Routes `chat()` calls to different providers based on `InferenceConfig.model`.
-///
-/// Unknown model names and `None` both fall back to the default provider.
+struct RegisteredProvider {
+    provider: Arc<dyn Provider>,
+    info: ProviderInfo,
+}
+
+/// Routes `chat()` calls to registered providers using explicit provider selection first,
+/// then falling back to unambiguous model ownership, and finally the configured default provider.
 pub struct ProviderRouter {
-    routes: HashMap<String, Arc<dyn Provider>>,
-    default: Arc<dyn Provider>,
+    providers: HashMap<String, RegisteredProvider>,
+    provider_order: Vec<String>,
+    model_routes: HashMap<String, String>,
+    ambiguous_models: HashSet<String>,
+    default_provider: String,
 }
 
 impl ProviderRouter {
-    pub fn new(default: Arc<dyn Provider>) -> Self {
-        Self {
-            routes: HashMap::new(),
-            default,
-        }
+    pub fn new(default_name: impl Into<String>, default: Arc<dyn Provider>) -> Self {
+        let default_name = default_name.into();
+        let mut router = Self {
+            providers: HashMap::new(),
+            provider_order: Vec::new(),
+            model_routes: HashMap::new(),
+            ambiguous_models: HashSet::new(),
+            default_provider: default_name.clone(),
+        };
+        router.insert_provider(default_name, default);
+        router
     }
 
-    /// Register a provider under one or more model names.
-    pub fn add(mut self, name: impl Into<String>, provider: Arc<dyn Provider>) -> Self {
-        self.routes.insert(name.into(), provider);
+    pub fn add_provider(mut self, name: impl Into<String>, provider: Arc<dyn Provider>) -> Self {
+        self.insert_provider(name.into(), provider);
         self
     }
 
-    fn resolve(&self, model: Option<&str>) -> &Arc<dyn Provider> {
-        match model {
-            Some(name) => self.routes.get(name).unwrap_or(&self.default),
-            None => &self.default,
+    fn insert_provider(&mut self, name: String, provider: Arc<dyn Provider>) {
+        let mut info = provider.info();
+        for model in &mut info.models {
+            model.provider = Some(name.clone());
         }
+
+        for model in &info.models {
+            let model_id = model.id.clone();
+            if let Some(existing) = self.model_routes.get(&model_id) {
+                if existing != &name {
+                    self.model_routes.remove(&model_id);
+                    self.ambiguous_models.insert(model_id);
+                }
+            } else if !self.ambiguous_models.contains(&model_id) {
+                self.model_routes.insert(model_id, name.clone());
+            }
+        }
+
+        if !self.providers.contains_key(&name) {
+            self.provider_order.push(name.clone());
+        }
+
+        self.providers
+            .insert(name, RegisteredProvider { provider, info });
     }
+
+    pub fn default_provider_name(&self) -> &str {
+        &self.default_provider
+    }
+
+    pub fn provider_infos(&self) -> Vec<ProviderInfo> {
+        let mut providers = self
+            .providers
+            .values()
+            .map(|provider| provider.info.clone())
+            .collect::<Vec<_>>();
+        providers.sort_by(|left, right| left.name.cmp(&right.name));
+        providers
+    }
+
+    pub fn available_models(&self) -> Vec<ProviderModelInfo> {
+        let mut seen = HashSet::new();
+        let mut models = Vec::new();
+
+        for provider_name in &self.provider_order {
+            let Some(provider) = self.providers.get(provider_name) else {
+                continue;
+            };
+
+            for model in &provider.info.models {
+                if self.ambiguous_models.contains(&model.id) || !seen.insert(model.id.clone()) {
+                    continue;
+                }
+                models.push(model.clone());
+            }
+        }
+
+        models
+    }
+
+    pub fn resolve_model(&self, model_id: &str) -> Result<ResolvedModel, BrainError> {
+        let provider_name = self.model_routes.get(model_id).cloned().ok_or_else(|| {
+            BrainError::Internal(format!("unknown or ambiguous model: {model_id}"))
+        })?;
+        let provider = self.providers.get(&provider_name).ok_or_else(|| {
+            BrainError::Internal(format!(
+                "provider not found for model {model_id}: {provider_name}"
+            ))
+        })?;
+        let model = provider
+            .info
+            .models
+            .iter()
+            .find(|model| model.id == model_id)
+            .cloned()
+            .ok_or_else(|| BrainError::Internal(format!("model metadata not found: {model_id}")))?;
+
+        Ok(ResolvedModel {
+            provider: provider_name,
+            model,
+        })
+    }
+
+    pub fn current_model_id(&self, config: &InferenceConfig) -> Result<Option<String>, BrainError> {
+        let provider_name = self.resolve_provider_name(config)?;
+        let provider = self.providers.get(&provider_name).ok_or_else(|| {
+            BrainError::Internal(format!("provider not registered: {provider_name}"))
+        })?;
+
+        Ok(config
+            .model
+            .clone()
+            .or_else(|| provider.info.default_model.clone()))
+    }
+
+    fn resolve_provider_name(&self, config: &InferenceConfig) -> Result<String, BrainError> {
+        if let Some(provider_name) = config.provider.as_deref() {
+            let provider = self.providers.get(provider_name).ok_or_else(|| {
+                BrainError::Internal(format!("unknown provider: {provider_name}"))
+            })?;
+
+            if let Some(model_id) = config.model.as_deref()
+                && !provider.info.models.is_empty()
+                && !provider
+                    .info
+                    .models
+                    .iter()
+                    .any(|model| model.id == model_id)
+            {
+                return Err(BrainError::Internal(format!(
+                    "model {model_id} is not available for provider {provider_name}"
+                )));
+            }
+
+            return Ok(provider_name.to_owned());
+        }
+
+        if let Some(model_id) = config.model.as_deref() {
+            return self.model_routes.get(model_id).cloned().ok_or_else(|| {
+                BrainError::Internal(format!("unknown or ambiguous model: {model_id}"))
+            });
+        }
+
+        Ok(self.default_provider.clone())
+    }
+
+    fn resolve_provider(&self, config: &InferenceConfig) -> Result<&Arc<dyn Provider>, BrainError> {
+        let provider_name = self.resolve_provider_name(config)?;
+        self.providers
+            .get(&provider_name)
+            .map(|provider| &provider.provider)
+            .ok_or_else(|| {
+                BrainError::Internal(format!("provider not registered: {provider_name}"))
+            })
+    }
+}
+
+pub struct ResolvedModel {
+    pub provider: String,
+    pub model: ProviderModelInfo,
 }
 
 impl Provider for ProviderRouter {
     fn info(&self) -> ProviderInfo {
-        let mut all_models: Vec<ProviderModelInfo> = Vec::new();
-
-        let default_info = self.default.info();
-        let default_model = default_info.default_model.clone();
-        all_models.extend(default_info.models);
-
-        for (_route_name, provider) in &self.routes {
-            let info = provider.info();
-            for model in info.models {
-                if !all_models.iter().any(|m| m.id == model.id) {
-                    all_models.push(model);
-                }
-            }
-        }
+        let default_provider = self
+            .providers
+            .get(&self.default_provider)
+            .expect("default provider should always be registered");
 
         ProviderInfo {
             name: "router".into(),
-            default_model,
-            models: all_models,
+            default_model: default_provider.info.default_model.clone(),
+            models: self.available_models(),
         }
     }
 
@@ -66,8 +202,10 @@ impl Provider for ProviderRouter {
         config: &'a InferenceConfig,
         session_id: Option<ulid::Ulid>,
     ) -> BoxFuture<'a, Result<ChatStream, BrainError>> {
-        let provider = self.resolve(config.model.as_deref());
-        provider.chat(messages, tools, config, session_id)
+        Box::pin(async move {
+            let provider = self.resolve_provider(config)?;
+            provider.chat(messages, tools, config, session_id).await
+        })
     }
 }
 
@@ -77,10 +215,104 @@ mod tests {
     use brain_providers::MockProvider;
     use futures::StreamExt;
 
+    struct NamedMockProvider {
+        name: &'static str,
+        model: &'static str,
+        inner: MockProvider,
+    }
+
+    impl NamedMockProvider {
+        fn new(name: &'static str, model: &'static str) -> Self {
+            Self {
+                name,
+                model,
+                inner: MockProvider::new(),
+            }
+        }
+    }
+
+    impl Provider for NamedMockProvider {
+        fn info(&self) -> ProviderInfo {
+            ProviderInfo {
+                name: self.name.into(),
+                default_model: Some(self.model.into()),
+                models: vec![ProviderModelInfo {
+                    id: self.model.into(),
+                    name: self.model.into(),
+                    provider: None,
+                    reasoning: false,
+                    tool_call: true,
+                }],
+            }
+        }
+
+        fn chat<'a>(
+            &'a self,
+            messages: &'a [Message],
+            tools: &'a [ToolDef],
+            config: &'a InferenceConfig,
+            session_id: Option<ulid::Ulid>,
+        ) -> BoxFuture<'a, Result<ChatStream, BrainError>> {
+            self.inner.chat(messages, tools, config, session_id)
+        }
+    }
+
+    struct MultiModelProvider {
+        name: &'static str,
+        default_model: &'static str,
+        models: &'static [&'static str],
+        inner: MockProvider,
+    }
+
+    impl MultiModelProvider {
+        fn new(
+            name: &'static str,
+            default_model: &'static str,
+            models: &'static [&'static str],
+        ) -> Self {
+            Self {
+                name,
+                default_model,
+                models,
+                inner: MockProvider::new(),
+            }
+        }
+    }
+
+    impl Provider for MultiModelProvider {
+        fn info(&self) -> ProviderInfo {
+            ProviderInfo {
+                name: self.name.into(),
+                default_model: Some(self.default_model.into()),
+                models: self
+                    .models
+                    .iter()
+                    .map(|model| ProviderModelInfo {
+                        id: (*model).into(),
+                        name: (*model).into(),
+                        provider: None,
+                        reasoning: false,
+                        tool_call: true,
+                    })
+                    .collect(),
+            }
+        }
+
+        fn chat<'a>(
+            &'a self,
+            messages: &'a [Message],
+            tools: &'a [ToolDef],
+            config: &'a InferenceConfig,
+            session_id: Option<ulid::Ulid>,
+        ) -> BoxFuture<'a, Result<ChatStream, BrainError>> {
+            self.inner.chat(messages, tools, config, session_id)
+        }
+    }
+
     #[tokio::test]
-    async fn routes_to_default_when_no_model() {
+    async fn routes_to_default_when_no_provider_or_model() {
         let default = Arc::new(MockProvider::new());
-        let router = ProviderRouter::new(default);
+        let router = ProviderRouter::new("mock", default);
 
         let msgs = [Message::user("hello")];
         let config = InferenceConfig::default();
@@ -96,45 +328,82 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn routes_to_registered_provider() {
+    async fn resolves_provider_by_model_when_unambiguous() {
         let default = Arc::new(MockProvider::new());
-        let special = Arc::new(MockProvider::new());
-        let router = ProviderRouter::new(default).add("special-model", special);
+        let special = Arc::new(NamedMockProvider::new("special", "special-model"));
+        let router = ProviderRouter::new("mock", default).add_provider("special", special);
 
-        let msgs = [Message::user("routed")];
-        let config = InferenceConfig {
-            model: Some("special-model".into()),
-            ..InferenceConfig::default()
-        };
-        let mut stream = router.chat(&msgs, &[], &config, None).await.unwrap();
+        let resolved = router.resolve_model("special-model").unwrap();
+        assert_eq!(resolved.provider, "special");
 
-        let mut text = String::new();
-        while let Some(chunk) = stream.next().await {
-            if let ChatChunk::Delta { content } = chunk.unwrap() {
-                text.push_str(&content);
-            }
-        }
-        assert_eq!(text.trim(), "routed");
+        let resolved_provider = router
+            .resolve_provider_name(&InferenceConfig {
+                provider: None,
+                model: Some("special-model".into()),
+                max_tokens: None,
+                temperature: None,
+            })
+            .unwrap();
+        assert_eq!(resolved_provider, "special");
     }
 
     #[tokio::test]
-    async fn unknown_model_falls_back_to_default() {
+    async fn explicit_provider_must_exist() {
         let default = Arc::new(MockProvider::new());
-        let router = ProviderRouter::new(default);
+        let router = ProviderRouter::new("mock", default);
 
-        let msgs = [Message::user("fallback")];
-        let config = InferenceConfig {
-            model: Some("nonexistent".into()),
-            ..InferenceConfig::default()
-        };
-        let mut stream = router.chat(&msgs, &[], &config, None).await.unwrap();
+        let error = router
+            .resolve_provider_name(&InferenceConfig {
+                provider: Some("missing".into()),
+                model: None,
+                max_tokens: None,
+                temperature: None,
+            })
+            .unwrap_err();
 
-        let mut text = String::new();
-        while let Some(chunk) = stream.next().await {
-            if let ChatChunk::Delta { content } = chunk.unwrap() {
-                text.push_str(&content);
-            }
-        }
-        assert_eq!(text.trim(), "fallback");
+        assert!(error.to_string().contains("unknown provider"));
+    }
+
+    #[tokio::test]
+    async fn current_model_defaults_from_selected_provider() {
+        let default = Arc::new(MockProvider::new());
+        let router = ProviderRouter::new("mock", default);
+
+        let current = router
+            .current_model_id(&InferenceConfig::default())
+            .unwrap();
+        assert_eq!(current.as_deref(), Some("mock-echo"));
+    }
+
+    #[tokio::test]
+    async fn available_models_preserves_provider_declared_order() {
+        let default = Arc::new(MultiModelProvider::new(
+            "default",
+            "gpt-5.4",
+            &["gpt-5.4", "gpt-5.2", "gpt-5.1"],
+        ));
+        let extra = Arc::new(MultiModelProvider::new(
+            "extra",
+            "llama-3.3-70b-versatile",
+            &["llama-3.3-70b-versatile", "llama-3.1-8b-instant"],
+        ));
+        let router = ProviderRouter::new("default", default).add_provider("extra", extra);
+
+        let models = router
+            .available_models()
+            .into_iter()
+            .map(|model| model.id)
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            models,
+            vec![
+                "gpt-5.4",
+                "gpt-5.2",
+                "gpt-5.1",
+                "llama-3.3-70b-versatile",
+                "llama-3.1-8b-instant",
+            ]
+        );
     }
 }

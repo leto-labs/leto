@@ -6,7 +6,7 @@ use tokio::sync::mpsc;
 use tokio_util::compat::{TokioAsyncReadCompatExt as _, TokioAsyncWriteCompatExt as _};
 
 use super::agent::MockAgent;
-use super::runtime::spawn_notification_forwarder;
+use super::stdio::spawn_notification_forwarder;
 
 #[derive(Clone)]
 pub(super) struct RecordingClient {

@@ -23,6 +23,8 @@ pub struct ProviderInfo {
 pub struct ProviderModelInfo {
     pub id: String,
     pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
     pub reasoning: bool,
     pub tool_call: bool,
 }
@@ -32,6 +34,7 @@ impl From<&ModelInfo> for ProviderModelInfo {
         Self {
             id: m.id.to_owned(),
             name: m.name.to_owned(),
+            provider: None,
             reasoning: m.reasoning.is_some(),
             tool_call: m.tool_call,
         }

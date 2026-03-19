@@ -9,5 +9,5 @@ fn main() -> Result<(), agent_client_protocol::Error> {
         .enable_all()
         .build()
         .map_err(|_| agent_client_protocol::Error::internal_error())?
-        .block_on(brain_acp::run_mock_stdio())
+        .block_on(brain_acp::run_stdio())
 }

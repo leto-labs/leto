@@ -29,13 +29,7 @@ impl Brain {
     }
 
     /// Execute a single conversational turn: load history, run loop, persist results.
-    pub fn turn(
-        &self,
-        session_id: Ulid,
-        input: &str,
-        config: AgentConfig,
-        cancel: CancellationToken,
-    ) -> EventStream {
+    pub fn turn(&self, session_id: Ulid, input: &str, cancel: CancellationToken) -> EventStream {
         let store = self.store.clone();
         let provider = self.provider.clone();
         let agent_loop = self.agent_loop.clone();
@@ -50,7 +44,6 @@ impl Brain {
                 provider,
                 agent_loop,
                 tools,
-                config,
                 cancel,
                 session_id,
                 user_msg,
@@ -104,7 +97,6 @@ impl Brain {
                 .await?;
             session.id
         };
-        let config = project.config.agent.clone();
         let mut active_cancel = None::<CancellationToken>;
 
         loop {
@@ -139,7 +131,7 @@ impl Brain {
 
             let cancel = CancellationToken::new();
             active_cancel = Some(cancel.clone());
-            let mut events = self.turn(session_id, &input, config.clone(), cancel);
+            let mut events = self.turn(session_id, &input, cancel);
 
             while let Some(event) = events.next().await {
                 transport.send(event).await?;
@@ -158,6 +150,65 @@ impl Brain {
     pub async fn list_sessions(&self, project_id: ProjectId) -> Result<Vec<Session>, BrainError> {
         self.store.session_list(project_id).await
     }
+
+    pub async fn update_session_inference(
+        &self,
+        session_id: Ulid,
+        inference: Option<InferenceConfig>,
+    ) -> Result<Session, BrainError> {
+        let normalized = inference.filter(|config| !config.is_empty());
+        let update = match normalized {
+            Some(config) => SessionUpdate::inference(config),
+            None => SessionUpdate::clear_inference(),
+        };
+
+        self.store.session_update(session_id, update).await?;
+        self.store.session_get(session_id).await
+    }
+
+    pub async fn effective_inference_for_session(
+        &self,
+        session_id: Ulid,
+    ) -> Result<InferenceConfig, BrainError> {
+        let session = self.store.session_get(session_id).await?;
+        let project = self.store.project_get(session.project_id).await?;
+        Ok(resolve_effective_inference(
+            &project.config.agent.inference,
+            session.inference.as_ref(),
+        ))
+    }
+
+    pub async fn effective_agent_config_for_session(
+        &self,
+        session_id: Ulid,
+    ) -> Result<AgentConfig, BrainError> {
+        let session = self.store.session_get(session_id).await?;
+        let project = self.store.project_get(session.project_id).await?;
+        let mut config = project.config.agent.clone();
+        config.inference = resolve_effective_inference(
+            &project.config.agent.inference,
+            session.inference.as_ref(),
+        );
+        Ok(config)
+    }
+
+    pub async fn resolve_or_create_project(
+        &self,
+        root: std::path::PathBuf,
+    ) -> Result<Project, BrainError> {
+        let normalized_root = normalize_project_root(&root);
+        if let Some(project) = self.store.project_find_by_root(&normalized_root).await? {
+            return Ok(project);
+        }
+
+        let name = normalized_root
+            .file_name()
+            .and_then(|segment| segment.to_str())
+            .map(ToOwned::to_owned)
+            .unwrap_or_else(|| "brain".to_owned());
+        let project = Project::new(Some(name), Some(normalized_root), ProjectConfig::default());
+        self.store.project_create(project).await
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -166,12 +217,12 @@ async fn turn_inner(
     provider: Arc<dyn Provider>,
     agent_loop: Arc<dyn AgentLoop>,
     tools: Vec<Arc<dyn Tool>>,
-    config: AgentConfig,
     cancel: CancellationToken,
     session_id: Ulid,
     user_msg: Message,
     tx: tokio::sync::mpsc::Sender<Event>,
 ) -> Result<(), BrainError> {
+    let config = load_agent_config_for_session(store.clone(), session_id).await?;
     let mut history = store.message_list(session_id).await?;
     history.push(user_msg.clone());
 
@@ -200,6 +251,28 @@ async fn turn_inner(
     Ok(())
 }
 
+fn resolve_effective_inference(
+    defaults: &InferenceConfig,
+    session_inference: Option<&InferenceConfig>,
+) -> InferenceConfig {
+    match session_inference {
+        Some(overrides) => defaults.merged_with(overrides),
+        None => defaults.clone(),
+    }
+}
+
+async fn load_agent_config_for_session(
+    store: Arc<dyn Store>,
+    session_id: Ulid,
+) -> Result<AgentConfig, BrainError> {
+    let session = store.session_get(session_id).await?;
+    let project = store.project_get(session.project_id).await?;
+    let mut config = project.config.agent.clone();
+    config.inference =
+        resolve_effective_inference(&project.config.agent.inference, session.inference.as_ref());
+    Ok(config)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -208,13 +281,14 @@ mod tests {
     use brain_stores::InMemoryStore;
     use futures::future::BoxFuture;
 
-    fn make_brain() -> (Brain, Project, Arc<InMemoryStore>) {
+    async fn make_brain() -> (Brain, Project, Arc<InMemoryStore>) {
         let project = Project::with_defaults("test");
         let provider: Arc<dyn Provider> = Arc::new(MockProvider::new());
         let store = Arc::new(InMemoryStore::new());
         let agent_loop: Arc<dyn AgentLoop> = Arc::new(SimpleLoop);
 
         let brain = Brain::new(provider, store.clone(), agent_loop, vec![]);
+        store.project_create(project.clone()).await.unwrap();
         (brain, project, store)
     }
 
@@ -227,7 +301,7 @@ mod tests {
 
     #[tokio::test]
     async fn create_and_list_sessions() {
-        let (brain, project, _store) = make_brain();
+        let (brain, project, _store) = make_brain().await;
 
         let s1 = brain.create_session(project.id).await.unwrap();
         let s2 = brain.create_session(project.id).await.unwrap();
@@ -238,13 +312,90 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn turn_produces_events_and_persists() {
-        let (brain, project, store) = make_brain();
+    async fn resolve_or_create_project_reuses_existing_root() {
+        let (brain, _project, store) = make_brain().await;
+        let project = Project::new(
+            Some("repo".into()),
+            Some("/tmp/work/repo".into()),
+            ProjectConfig::default(),
+        );
+        let id = project.id;
+        store.project_create(project).await.unwrap();
+
+        let resolved = brain
+            .resolve_or_create_project("/tmp/work/./repo".into())
+            .await
+            .unwrap();
+        assert_eq!(resolved.id, id);
+    }
+
+    #[tokio::test]
+    async fn resolve_or_create_project_creates_missing_root() {
+        let (brain, _project, _store) = make_brain().await;
+        let project = brain
+            .resolve_or_create_project("/tmp/new-project".into())
+            .await
+            .unwrap();
+        assert_eq!(project.root, Some("/tmp/new-project".into()));
+        assert_eq!(project.name.as_deref(), Some("new-project"));
+    }
+
+    #[tokio::test]
+    async fn effective_inference_merges_project_defaults_with_session_overrides() {
+        let provider: Arc<dyn Provider> = Arc::new(MockProvider::new());
+        let store = Arc::new(InMemoryStore::new());
+        let agent_loop: Arc<dyn AgentLoop> = Arc::new(SimpleLoop);
+        let brain = Brain::new(provider, store.clone(), agent_loop, vec![]);
+
+        let project = Project::new(
+            Some("test".into()),
+            None,
+            ProjectConfig {
+                agent: AgentConfig {
+                    max_iterations: 20,
+                    system_prompt: None,
+                    inference: InferenceConfig {
+                        provider: Some("openai".into()),
+                        model: Some("gpt-4o-mini".into()),
+                        max_tokens: Some(4096),
+                        temperature: Some(0.7),
+                    },
+                },
+            },
+        );
+        let project = store.project_create(project).await.unwrap();
 
         let session = brain.create_session(project.id).await.unwrap();
-        let config = project.config.agent.clone();
+        brain
+            .update_session_inference(
+                session.id,
+                Some(InferenceConfig {
+                    provider: None,
+                    model: Some("gpt-5".into()),
+                    max_tokens: None,
+                    temperature: Some(0.2),
+                }),
+            )
+            .await
+            .unwrap();
+
+        let effective = brain
+            .effective_inference_for_session(session.id)
+            .await
+            .unwrap();
+        assert_eq!(effective.provider.as_deref(), Some("openai"));
+        assert_eq!(effective.model.as_deref(), Some("gpt-5"));
+        assert_eq!(effective.max_tokens, Some(4096));
+        assert_eq!(effective.temperature, Some(0.2));
+    }
+
+    #[tokio::test]
+    async fn turn_produces_events_and_persists() {
+        let (brain, project, store) = make_brain().await;
+
+        let session = brain.create_session(project.id).await.unwrap();
         let cancel = CancellationToken::new();
-        let mut events = brain.turn(session.id, "hello world", config, cancel);
+        let mut events = brain.turn(session.id, "hello world", cancel);
 
         let mut saw_token = false;
         let mut saw_message_done = false;
@@ -275,21 +426,15 @@ mod tests {
 
     #[tokio::test]
     async fn turn_appends_to_existing_history() {
-        let (brain, project, store) = make_brain();
+        let (brain, project, store) = make_brain().await;
         let session = brain.create_session(project.id).await.unwrap();
-        let config = project.config.agent.clone();
 
         // First turn
-        let mut events = brain.turn(
-            session.id,
-            "first",
-            config.clone(),
-            CancellationToken::new(),
-        );
+        let mut events = brain.turn(session.id, "first", CancellationToken::new());
         while events.next().await.is_some() {}
 
         // Second turn
-        let mut events = brain.turn(session.id, "second", config, CancellationToken::new());
+        let mut events = brain.turn(session.id, "second", CancellationToken::new());
         while events.next().await.is_some() {}
 
         let messages = store.message_list(session.id).await.unwrap();
@@ -329,7 +474,7 @@ mod tests {
             }
         }
 
-        let (brain, project, _store) = make_brain();
+        let (brain, project, _store) = make_brain().await;
         let transport = MockTransport {
             inputs: Mutex::new(vec!["hello".into()]),
             events: Mutex::new(vec![]),
@@ -375,7 +520,7 @@ mod tests {
             }
         }
 
-        let (brain, project, _store) = make_brain();
+        let (brain, project, _store) = make_brain().await;
         let transport = MockTransport {
             inputs: Mutex::new(vec!["hello".into()]),
             events: Mutex::new(vec![]),
@@ -424,7 +569,7 @@ mod tests {
             }
         }
 
-        let (brain, project, store) = make_brain();
+        let (brain, project, store) = make_brain().await;
         let alt_session = brain.create_session(project.id).await.unwrap();
         let transport = MockTransport {
             inputs: Mutex::new(vec![
@@ -484,8 +629,7 @@ mod tests {
             }
         }
 
-        let (brain, project, store) = make_brain();
-        let _ = store.project_create(project.clone()).await.unwrap();
+        let (brain, project, store) = make_brain().await;
         let session = brain.create_session(project.id).await.unwrap();
 
         let transport = MockTransport {
@@ -538,8 +682,7 @@ mod tests {
             }
         }
 
-        let (brain, project, store) = make_brain();
-        let _ = store.project_create(project.clone()).await.unwrap();
+        let (brain, project, store) = make_brain().await;
         let other_project = store
             .project_create(Project::with_defaults("other"))
             .await

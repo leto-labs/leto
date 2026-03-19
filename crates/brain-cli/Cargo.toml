@@ -9,9 +9,9 @@ path = "src/main.rs"
 
 [features]
 default = ["openai-oauth"]
-openai-oauth = ["brain-core/openai-oauth"]
-mistralrs = ["brain-core/mistralrs"]
-llamacpp = ["brain-core/llamacpp"]
+openai-oauth = ["brain-core/openai-oauth", "brain-acp/openai-oauth"]
+mistralrs = ["brain-core/mistralrs", "brain-acp/mistralrs"]
+llamacpp = ["brain-core/llamacpp", "brain-acp/llamacpp"]
 
 [dependencies]
 brain-core = { workspace = true }

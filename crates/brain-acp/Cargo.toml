@@ -5,11 +5,15 @@ version.workspace = true
 
 [features]
 default = [
+    "openai-oauth",
     "unstable_session_close",
     "unstable_session_fork",
     "unstable_session_model",
     "unstable_session_resume",
 ]
+openai-oauth = ["brain-core/openai-oauth"]
+mistralrs = ["brain-core/mistralrs"]
+llamacpp = ["brain-core/llamacpp"]
 unstable_session_close = ["agent-client-protocol/unstable_session_close"]
 unstable_session_fork = ["agent-client-protocol/unstable_session_fork"]
 unstable_session_model = ["agent-client-protocol/unstable_session_model"]
@@ -18,6 +22,8 @@ unstable_session_resume = ["agent-client-protocol/unstable_session_resume"]
 [dependencies]
 agent-client-protocol = { workspace = true }
 async-trait = "0.1"
+brain-config = { workspace = true }
+brain-core = { workspace = true }
 chrono = { workspace = true }
 futures = { workspace = true }
 serde_json = { workspace = true }
@@ -25,6 +31,7 @@ tokio = { workspace = true, features = ["io-std", "rt", "sync", "time"] }
 tokio-util = { workspace = true, features = ["compat"] }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
+ulid = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["io-util", "macros", "rt", "time"] }

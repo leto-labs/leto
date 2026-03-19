@@ -3,7 +3,7 @@ use std::{path::PathBuf, time::Duration};
 use agent_client_protocol::{self as acp, Agent as _};
 use serde_json::{json, value::to_raw_value};
 
-use super::agent::SEEDED_SESSION_ID;
+use super::SEEDED_SESSION_ID;
 use super::test_support::{
     RecordingClient, completed_tool_output, initialized_connection, start_test_connection,
     streamed_agent_text, streamed_agent_thoughts,

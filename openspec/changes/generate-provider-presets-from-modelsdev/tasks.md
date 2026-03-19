@@ -1,0 +1,6 @@
+- [x] Add a Rust workspace generator for OpenAI-compatible preset modules
+- [x] Split `brain-providers` OpenAI presets into a generated folder layout
+- [x] Generate preset modules from the configured models.dev provider allowlist
+- [x] Preserve the public `OpenAiConfigPreset` API and provider constants
+- [x] Add regression tests for preset lookup and generated catalog contents
+- [x] Validate the change with OpenSpec and workspace tests

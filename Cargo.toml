@@ -12,6 +12,7 @@ members = [
     "crates/brain-server",
     "crates/brain-config",
     "crates/brain-cli",
+    "tools/provider-preset-gen",
     "examples/server",
 ]
 

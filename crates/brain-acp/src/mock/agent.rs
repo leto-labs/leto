@@ -1,7 +1,6 @@
 use std::{
     cell::RefCell,
-    collections::HashMap,
-    path::{Path, PathBuf},
+    path::PathBuf,
     rc::Rc,
     sync::{
         Arc, Mutex,
@@ -11,223 +10,21 @@ use std::{
 };
 
 use agent_client_protocol::{
-    self as acp, AvailableCommand, AvailableCommandsUpdate, Client as _, CurrentModeUpdate, Plan,
-    PlanEntry, PlanEntryPriority, PlanEntryStatus,
+    self as acp, Client as _, Plan, PlanEntry, PlanEntryPriority, PlanEntryStatus,
 };
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use serde_json::{json, value::to_raw_value};
 use tokio::sync::{mpsc, oneshot};
 
-pub const SEEDED_SESSION_ID: &str = "mock-seeded-session";
-
-const AUTH_METHOD_ID: &str = "mock-browser-login";
-const MODE_ASK: &str = "ask";
-const MODE_ARCHITECT: &str = "architect";
-const MODE_CODE: &str = "code";
-const CONFIG_REASONING: &str = "reasoning_level";
-const CONFIG_APPROVAL: &str = "approval_preset";
-const REASONING_STANDARD: &str = "standard";
-const REASONING_DEEP: &str = "deep";
-const APPROVAL_DEFAULT: &str = "default";
-const APPROVAL_FULL: &str = "full-access";
-const SESSION_PAGE_SIZE: usize = 2;
-#[cfg(feature = "unstable_session_model")]
-const MODEL_FAST: &str = "brain-mock-fast";
-#[cfg(feature = "unstable_session_model")]
-const MODEL_DEEP: &str = "brain-mock-deep";
+use super::capabilities::{
+    APPROVAL_DEFAULT, APPROVAL_FULL, AUTH_METHOD_ID, CONFIG_APPROVAL, CONFIG_REASONING, MODE_ASK,
+    MODEL_DEEP, MODEL_FAST, REASONING_DEEP, REASONING_STANDARD, SESSION_PAGE_SIZE,
+    available_commands_update, config_options, current_mode_update, info_update, list_info,
+    model_state, session_mode_state,
+};
+use super::session_registry::{MessageRole, MockMessage, MockSession, MockState};
 
 pub(super) type NotificationEnvelope = (acp::SessionNotification, oneshot::Sender<()>);
-
-#[derive(Clone)]
-struct MockMessage {
-    role: MessageRole,
-    content: String,
-}
-
-impl MockMessage {
-    fn user(content: impl Into<String>) -> Self {
-        Self {
-            role: MessageRole::User,
-            content: content.into(),
-        }
-    }
-
-    fn agent(content: impl Into<String>) -> Self {
-        Self {
-            role: MessageRole::Agent,
-            content: content.into(),
-        }
-    }
-}
-
-#[derive(Clone, Copy)]
-enum MessageRole {
-    User,
-    Agent,
-}
-
-#[derive(Clone)]
-struct MockSession {
-    cwd: PathBuf,
-    title: String,
-    history: Vec<MockMessage>,
-    updated_at: DateTime<Utc>,
-    mode_id: acp::SessionModeId,
-    reasoning_level: acp::SessionConfigValueId,
-    approval_preset: acp::SessionConfigValueId,
-    #[cfg(feature = "unstable_session_model")]
-    model_id: acp::ModelId,
-    closed: bool,
-}
-
-impl MockSession {
-    fn seeded() -> Self {
-        Self {
-            cwd: PathBuf::from("/mock/seeded"),
-            title: "Seeded Mock Session".to_owned(),
-            history: vec![
-                MockMessage::user("What can you do?"),
-                MockMessage::agent(
-                    "I am a mock brain-acp agent used to validate the ACP transport and lifecycle.",
-                ),
-            ],
-            updated_at: Utc::now(),
-            mode_id: acp::SessionModeId::new(MODE_ASK),
-            reasoning_level: acp::SessionConfigValueId::new(REASONING_STANDARD),
-            approval_preset: acp::SessionConfigValueId::new(APPROVAL_DEFAULT),
-            #[cfg(feature = "unstable_session_model")]
-            model_id: acp::ModelId::new(MODEL_FAST),
-            closed: false,
-        }
-    }
-
-    fn restored(cwd: PathBuf, session_id: &acp::SessionId) -> Self {
-        let mut session = Self::new(cwd);
-        session.title = format!("Restored Mock Session: {}", session_id.0.as_ref());
-        session.history.push(MockMessage::agent(
-            "This mock session was reconstructed to satisfy an external ACP client load request.",
-        ));
-        session
-    }
-}
-
-struct MockState {
-    next_session_index: u64,
-    next_tool_call_index: u64,
-    sessions: HashMap<acp::SessionId, MockSession>,
-    active_turns: HashMap<acp::SessionId, Arc<AtomicBool>>,
-}
-
-impl MockState {
-    fn seeded() -> Self {
-        let mut sessions = HashMap::new();
-        sessions.insert(
-            acp::SessionId::new(SEEDED_SESSION_ID),
-            MockSession::seeded(),
-        );
-
-        Self {
-            next_session_index: 1,
-            next_tool_call_index: 1,
-            sessions,
-            active_turns: HashMap::new(),
-        }
-    }
-
-    fn create_session(&mut self, cwd: &Path) -> acp::SessionId {
-        let session_id = acp::SessionId::new(format!("mock-session-{}", self.next_session_index));
-        self.next_session_index += 1;
-        self.sessions
-            .insert(session_id.clone(), MockSession::new(cwd.to_path_buf()));
-        session_id
-    }
-
-    fn get_session(&self, session_id: &acp::SessionId) -> Result<&MockSession, acp::Error> {
-        self.sessions
-            .get(session_id)
-            .filter(|session| !session.closed)
-            .ok_or_else(acp::Error::invalid_params)
-    }
-
-    fn get_session_mut(
-        &mut self,
-        session_id: &acp::SessionId,
-    ) -> Result<&mut MockSession, acp::Error> {
-        self.sessions
-            .get_mut(session_id)
-            .filter(|session| !session.closed)
-            .ok_or_else(acp::Error::invalid_params)
-    }
-
-    fn visible_sessions(&self) -> Vec<(acp::SessionId, MockSession)> {
-        let mut sessions = self
-            .sessions
-            .iter()
-            .filter(|(_, session)| !session.closed)
-            .map(|(session_id, session)| (session_id.clone(), session.clone()))
-            .collect::<Vec<_>>();
-        sessions.sort_by(|left, right| {
-            right
-                .1
-                .updated_at
-                .cmp(&left.1.updated_at)
-                .then_with(|| left.0.0.as_ref().cmp(right.0.0.as_ref()))
-        });
-        sessions
-    }
-
-    fn restore_session_if_missing(
-        &mut self,
-        session_id: &acp::SessionId,
-        cwd: &Path,
-    ) -> Result<(), acp::Error> {
-        if self.sessions.contains_key(session_id) {
-            return Ok(());
-        }
-
-        let raw_id = session_id.0.as_ref();
-        let is_mock_session = raw_id == SEEDED_SESSION_ID || raw_id.starts_with("mock-session-");
-        if !is_mock_session {
-            return Err(acp::Error::invalid_params());
-        }
-
-        if let Some(index) = raw_id
-            .strip_prefix("mock-session-")
-            .and_then(|suffix| suffix.parse::<u64>().ok())
-        {
-            self.next_session_index = self.next_session_index.max(index + 1);
-        }
-
-        self.sessions.insert(
-            session_id.clone(),
-            MockSession::restored(cwd.to_path_buf(), session_id),
-        );
-        Ok(())
-    }
-}
-
-impl MockSession {
-    fn new(cwd: PathBuf) -> Self {
-        let default_title = cwd
-            .file_name()
-            .and_then(|name| name.to_str())
-            .map(|name| format!("Mock Session: {name}"))
-            .unwrap_or_else(|| "Mock Session".to_owned());
-
-        Self {
-            cwd,
-            title: default_title,
-            history: Vec::new(),
-            updated_at: Utc::now(),
-            mode_id: acp::SessionModeId::new(MODE_ASK),
-            reasoning_level: acp::SessionConfigValueId::new(REASONING_STANDARD),
-            approval_preset: acp::SessionConfigValueId::new(APPROVAL_DEFAULT),
-            #[cfg(feature = "unstable_session_model")]
-            model_id: acp::ModelId::new(MODEL_FAST),
-            closed: false,
-        }
-    }
-}
 
 enum PromptBehavior {
     Echo(String),
@@ -292,7 +89,11 @@ pub(super) struct MockAgent {
 impl MockAgent {
     pub(super) fn new(session_update_tx: mpsc::UnboundedSender<NotificationEnvelope>) -> Self {
         Self {
-            state: Arc::new(Mutex::new(MockState::seeded())),
+            state: Arc::new(Mutex::new(MockState::seeded(
+                MODE_ASK,
+                REASONING_STANDARD,
+                APPROVAL_DEFAULT,
+            ))),
             session_update_tx,
             client_connection: Rc::new(RefCell::new(None)),
         }
@@ -548,129 +349,6 @@ impl MockAgent {
         Ok(id)
     }
 
-    fn session_modes() -> Vec<acp::SessionMode> {
-        vec![
-            acp::SessionMode::new(MODE_ASK, "Ask")
-                .description("Answer questions without pretending to modify project state."),
-            acp::SessionMode::new(MODE_ARCHITECT, "Architect")
-                .description("Plan the work and explain the intended implementation shape."),
-            acp::SessionMode::new(MODE_CODE, "Code")
-                .description("Act like an implementation-focused coding agent."),
-        ]
-    }
-
-    fn default_available_commands() -> Vec<AvailableCommand> {
-        vec![
-            AvailableCommand::new(
-                "create-plan",
-                "Trigger with `mock:create-plan` to emit a small mock execution plan.",
-            ),
-            AvailableCommand::new(
-                "summarize-session",
-                "Trigger with `mock:summarize-session` to summarize the current mock session state.",
-            ),
-            AvailableCommand::new(
-                "think",
-                "Trigger with `mock:think [topic]` to emit mock reasoning chunks and a synthetic thinking tool result.",
-            ),
-            AvailableCommand::new(
-                "search",
-                "Trigger with `mock:search [query]` to emit a synthetic search tool flow.",
-            ),
-            AvailableCommand::new(
-                "fetch",
-                "Trigger with `mock:fetch [resource]` to emit a synthetic fetch tool flow.",
-            ),
-            AvailableCommand::new(
-                "edit-file",
-                "Trigger with `mock:edit-file [/absolute/path]` to emit a synthetic patch-style edit flow.",
-            ),
-            AvailableCommand::new(
-                "delete-file",
-                "Trigger with `mock:delete-file [/absolute/path]` to emit a synthetic patch-style delete flow.",
-            ),
-            AvailableCommand::new(
-                "move-file",
-                "Trigger with `mock:move-file [/absolute/from /absolute/to]` to emit a synthetic move flow.",
-            ),
-            AvailableCommand::new(
-                "read-file",
-                "Trigger the mock ACP file-read request via `mock:read-file [/absolute/path]`.",
-            ),
-            AvailableCommand::new(
-                "write-file",
-                "Trigger the mock ACP file-write request via `mock:write-file [/absolute/path] [content]`.",
-            ),
-            AvailableCommand::new(
-                "request-permission",
-                "Trigger the mock ACP permission request flow via `mock:request-permission`.",
-            ),
-            AvailableCommand::new(
-                "terminal",
-                "Trigger the mock ACP terminal flow via `mock:terminal [command] [args...]`.",
-            ),
-            AvailableCommand::new(
-                "terminal-kill",
-                "Trigger the mock ACP terminal kill flow via `mock:terminal-kill [command] [args...]`.",
-            ),
-        ]
-    }
-
-    fn config_options(session: &MockSession) -> Vec<acp::SessionConfigOption> {
-        vec![
-            acp::SessionConfigOption::select(
-                CONFIG_REASONING,
-                "Reasoning Level",
-                session.reasoning_level.clone(),
-                vec![
-                    acp::SessionConfigSelectOption::new(REASONING_STANDARD, "Standard"),
-                    acp::SessionConfigSelectOption::new(REASONING_DEEP, "Deep"),
-                ],
-            )
-            .description("Controls how thorough the mock agent claims to be.")
-            .category(acp::SessionConfigOptionCategory::ThoughtLevel),
-            acp::SessionConfigOption::select(
-                CONFIG_APPROVAL,
-                "Approval Preset",
-                session.approval_preset.clone(),
-                vec![
-                    acp::SessionConfigSelectOption::new(APPROVAL_DEFAULT, "Default"),
-                    acp::SessionConfigSelectOption::new(APPROVAL_FULL, "Full Access"),
-                ],
-            )
-            .description("Mock permission posture used only for ACP UI validation."),
-        ]
-    }
-
-    fn session_mode_state(session: &MockSession) -> acp::SessionModeState {
-        acp::SessionModeState::new(session.mode_id.clone(), Self::session_modes())
-    }
-
-    #[cfg(feature = "unstable_session_model")]
-    fn model_state(session: &MockSession) -> acp::SessionModelState {
-        acp::SessionModelState::new(
-            session.model_id.clone(),
-            vec![
-                acp::ModelInfo::new(MODEL_FAST, "Brain Mock Fast")
-                    .description("Fast mock model optimized for simple echo replies."),
-                acp::ModelInfo::new(MODEL_DEEP, "Brain Mock Deep")
-                    .description("Slower mock model with more verbose canned output."),
-            ],
-        )
-    }
-
-    fn info_update(session: &MockSession) -> acp::SessionInfoUpdate {
-        acp::SessionInfoUpdate::new()
-            .title(session.title.clone())
-            .updated_at(session.updated_at.to_rfc3339())
-    }
-
-    fn list_info(session_id: acp::SessionId, session: &MockSession) -> acp::SessionInfo {
-        acp::SessionInfo::new(session_id, session.cwd.clone())
-            .title(session.title.clone())
-            .updated_at(session.updated_at.to_rfc3339())
-    }
-
     fn ext_response(
         &self,
         method: &str,
@@ -705,13 +383,7 @@ impl MockAgent {
     }
 
     async fn emit_prompt_metadata(&self, session_id: &acp::SessionId) -> Result<(), acp::Error> {
-        self.emit(
-            session_id,
-            acp::SessionUpdate::AvailableCommandsUpdate(AvailableCommandsUpdate::new(
-                Self::default_available_commands(),
-            )),
-        )
-        .await
+        self.emit(session_id, available_commands_update()).await
     }
 
     async fn run_client_prompt_behavior(
@@ -1457,17 +1129,11 @@ impl MockAgent {
     ) -> Result<(), acp::Error> {
         self.emit(
             session_id,
-            acp::SessionUpdate::SessionInfoUpdate(Self::info_update(session)),
+            acp::SessionUpdate::SessionInfoUpdate(info_update(session)),
         )
         .await?;
 
-        self.emit(
-            session_id,
-            acp::SessionUpdate::AvailableCommandsUpdate(AvailableCommandsUpdate::new(
-                Self::default_available_commands(),
-            )),
-        )
-        .await?;
+        self.emit(session_id, available_commands_update()).await?;
 
         for message in &session.history {
             let update = match message.role {
@@ -1540,28 +1206,27 @@ impl acp::Agent for MockAgent {
                 .state
                 .lock()
                 .map_err(|_| acp::Error::internal_error())?;
-            let session_id = state.create_session(&arguments.cwd);
+            let session_id = state.create_session(
+                &arguments.cwd,
+                MODE_ASK,
+                REASONING_STANDARD,
+                APPROVAL_DEFAULT,
+            );
             let session = state.get_session(&session_id)?.clone();
             (
                 session_id,
                 session.clone(),
-                Self::session_mode_state(&session),
-                Self::config_options(&session),
+                session_mode_state(&session),
+                config_options(&session),
             )
         };
 
         self.emit(
             &session_id,
-            acp::SessionUpdate::SessionInfoUpdate(Self::info_update(&session)),
+            acp::SessionUpdate::SessionInfoUpdate(info_update(&session)),
         )
         .await?;
-        self.emit(
-            &session_id,
-            acp::SessionUpdate::AvailableCommandsUpdate(AvailableCommandsUpdate::new(
-                Self::default_available_commands(),
-            )),
-        )
-        .await?;
+        self.emit(&session_id, available_commands_update()).await?;
 
         let response = acp::NewSessionResponse::new(session_id)
             .modes(modes)
@@ -1573,7 +1238,7 @@ impl acp::Agent for MockAgent {
                 .lock()
                 .map_err(|_| acp::Error::internal_error())?;
             let session = state.get_session(&response.session_id)?.clone();
-            response.models(Self::model_state(&session))
+            response.models(model_state(&session))
         };
 
         Ok(response)
@@ -1594,7 +1259,13 @@ impl acp::Agent for MockAgent {
                 .state
                 .lock()
                 .map_err(|_| acp::Error::internal_error())?;
-            state.restore_session_if_missing(&arguments.session_id, &arguments.cwd)?;
+            state.restore_session_if_missing(
+                &arguments.session_id,
+                &arguments.cwd,
+                MODE_ASK,
+                REASONING_STANDARD,
+                APPROVAL_DEFAULT,
+            )?;
             state.get_session(&arguments.session_id)?.clone()
         };
 
@@ -1602,10 +1273,10 @@ impl acp::Agent for MockAgent {
             .await?;
 
         let response = acp::LoadSessionResponse::new()
-            .modes(Self::session_mode_state(&session))
-            .config_options(Self::config_options(&session));
+            .modes(session_mode_state(&session))
+            .config_options(config_options(&session));
         #[cfg(feature = "unstable_session_model")]
-        let response = response.models(Self::model_state(&session));
+        let response = response.models(model_state(&session));
 
         Ok(response)
     }
@@ -1614,7 +1285,7 @@ impl acp::Agent for MockAgent {
         &self,
         arguments: acp::SetSessionModeRequest,
     ) -> Result<acp::SetSessionModeResponse, acp::Error> {
-        let supported = Self::session_modes()
+        let supported = super::capabilities::session_modes()
             .into_iter()
             .any(|mode| mode.id == arguments.mode_id);
         if !supported {
@@ -1631,11 +1302,15 @@ impl acp::Agent for MockAgent {
             session.updated_at = Utc::now();
         }
 
-        self.emit(
-            &arguments.session_id,
-            acp::SessionUpdate::CurrentModeUpdate(CurrentModeUpdate::new(arguments.mode_id)),
-        )
-        .await?;
+        let session = {
+            let state = self
+                .state
+                .lock()
+                .map_err(|_| acp::Error::internal_error())?;
+            state.get_session(&arguments.session_id)?.clone()
+        };
+        self.emit(&arguments.session_id, current_mode_update(&session))
+            .await?;
 
         Ok(acp::SetSessionModeResponse::new())
     }
@@ -1666,9 +1341,9 @@ impl acp::Agent for MockAgent {
             let new_title = Self::session_title_from_prompt(&prompt_text);
             let title_update = if session.title != new_title {
                 session.title = new_title.clone();
-                Some(Self::info_update(session))
+                Some(info_update(session))
             } else {
-                Some(Self::info_update(session))
+                Some(info_update(session))
             };
 
             let cancel_flag = Arc::new(AtomicBool::new(false));
@@ -1781,7 +1456,7 @@ impl acp::Agent for MockAgent {
             .iter()
             .skip(offset)
             .take(SESSION_PAGE_SIZE)
-            .map(|(session_id, session)| Self::list_info(session_id.clone(), session))
+            .map(|(session_id, session)| list_info(session_id.clone(), session))
             .collect::<Vec<_>>();
 
         let next_offset = offset + page.len();
@@ -1825,7 +1500,7 @@ impl acp::Agent for MockAgent {
             }
 
             session.updated_at = Utc::now();
-            Self::config_options(session)
+            config_options(session)
         };
 
         Ok(acp::SetSessionConfigOptionResponse::new(config_options))
@@ -1880,10 +1555,10 @@ impl acp::Agent for MockAgent {
         };
 
         let response = acp::ForkSessionResponse::new(forked_session_id)
-            .modes(Self::session_mode_state(&forked_session))
-            .config_options(Self::config_options(&forked_session));
+            .modes(session_mode_state(&forked_session))
+            .config_options(config_options(&forked_session));
         #[cfg(feature = "unstable_session_model")]
-        let response = response.models(Self::model_state(&forked_session));
+        let response = response.models(model_state(&forked_session));
 
         Ok(response)
     }
@@ -1905,10 +1580,10 @@ impl acp::Agent for MockAgent {
         };
 
         let response = acp::ResumeSessionResponse::new()
-            .modes(Self::session_mode_state(&session))
-            .config_options(Self::config_options(&session));
+            .modes(session_mode_state(&session))
+            .config_options(config_options(&session));
         #[cfg(feature = "unstable_session_model")]
-        let response = response.models(Self::model_state(&session));
+        let response = response.models(model_state(&session));
 
         Ok(response)
     }

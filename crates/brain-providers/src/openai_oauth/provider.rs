@@ -28,6 +28,7 @@ pub struct OpenAiOAuthProvider {
     provider_name: String,
     api_base_url: String,
     default_model: String,
+    models: Vec<ProviderModelInfo>,
     client: reqwest::Client,
 }
 
@@ -48,6 +49,7 @@ impl OpenAiOAuthProvider {
             provider_name,
             api_base_url: preset.api_base_url.to_owned(),
             default_model: preset.default_model.to_owned(),
+            models: preset.models.iter().map(ProviderModelInfo::from).collect(),
             client: reqwest::Client::new(),
         }
     }
@@ -59,6 +61,7 @@ impl OpenAiOAuthProvider {
             provider_name: preset.name.to_owned(),
             api_base_url: preset.api_base_url.to_owned(),
             default_model: preset.default_model.to_owned(),
+            models: preset.models.iter().map(ProviderModelInfo::from).collect(),
             client: reqwest::Client::new(),
         }
     }
@@ -162,7 +165,7 @@ impl Provider for OpenAiOAuthProvider {
         ProviderInfo {
             name: self.provider_name.clone(),
             default_model: Some(self.default_model.clone()),
-            models: vec![],
+            models: self.models.clone(),
         }
     }
 
