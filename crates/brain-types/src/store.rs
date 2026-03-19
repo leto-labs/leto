@@ -1,24 +1,12 @@
 use std::path::Path;
-use std::pin::Pin;
-use std::sync::Arc;
 
-use futures::Stream;
 use futures::future::BoxFuture;
-use tokio_util::sync::CancellationToken;
 use ulid::Ulid;
 
-use crate::provider::Provider;
 use crate::{
-    AgentConfig, BrainError, CredentialEntry, CredentialHealth, Event, Message, Project, ProjectId,
-    ProjectUpdate, Session, SessionUpdate, ToolDef,
+    BrainError, CredentialEntry, CredentialHealth, Message, Project, ProjectId, ProjectUpdate,
+    Session, SessionUpdate,
 };
-
-pub type EventStream = Pin<Box<dyn Stream<Item = Event> + Send>>;
-
-pub trait Tool: Send + Sync {
-    fn definition(&self) -> ToolDef;
-    fn execute(&self, args: serde_json::Value) -> BoxFuture<'_, Result<String, BrainError>>;
-}
 
 pub trait ProjectStore: Send + Sync {
     fn project_create(&self, project: Project) -> BoxFuture<'_, Result<Project, BrainError>>;
@@ -90,16 +78,5 @@ pub trait CredentialStore: Send + Sync {
 }
 
 pub trait Store: ProjectStore + SessionStore + MessageStore + CredentialStore {}
-impl<T: ProjectStore + SessionStore + MessageStore + CredentialStore> Store for T {}
 
-pub trait AgentLoop: Send + Sync {
-    fn run(
-        &self,
-        provider: Arc<dyn Provider>,
-        tools: Vec<Arc<dyn Tool>>,
-        messages: Vec<Message>,
-        config: AgentConfig,
-        cancel: CancellationToken,
-        session_id: Option<Ulid>,
-    ) -> EventStream;
-}
+impl<T: ProjectStore + SessionStore + MessageStore + CredentialStore> Store for T {}
