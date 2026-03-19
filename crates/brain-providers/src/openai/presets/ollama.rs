@@ -20,7 +20,11 @@ pub const MODELS: &[ModelInfo] = &[
         input_modalities: &["text"],
         output_modalities: &["text"],
         cost: None,
-        limit: Some(brain_types::ModelLimit { context: 262144, input: None, output: 65536 }),
+        limit: Some(brain_types::ModelLimit {
+            context: 262144,
+            input: None,
+            output: 65536,
+        }),
         status: None,
     },
     ModelInfo {
@@ -39,7 +43,11 @@ pub const MODELS: &[ModelInfo] = &[
         input_modalities: &["text", "image"],
         output_modalities: &["text"],
         cost: None,
-        limit: Some(brain_types::ModelLimit { context: 262144, input: None, output: 81920 }),
+        limit: Some(brain_types::ModelLimit {
+            context: 262144,
+            input: None,
+            output: 81920,
+        }),
         status: None,
     },
     ModelInfo {
@@ -58,7 +66,11 @@ pub const MODELS: &[ModelInfo] = &[
         input_modalities: &["text"],
         output_modalities: &["text"],
         cost: None,
-        limit: Some(brain_types::ModelLimit { context: 204800, input: None, output: 131072 }),
+        limit: Some(brain_types::ModelLimit {
+            context: 204800,
+            input: None,
+            output: 131072,
+        }),
         status: None,
     },
     ModelInfo {
@@ -77,7 +89,11 @@ pub const MODELS: &[ModelInfo] = &[
         input_modalities: &["text"],
         output_modalities: &["text"],
         cost: None,
-        limit: Some(brain_types::ModelLimit { context: 202752, input: None, output: 131072 }),
+        limit: Some(brain_types::ModelLimit {
+            context: 202752,
+            input: None,
+            output: 131072,
+        }),
         status: None,
     },
     ModelInfo {
@@ -96,7 +112,11 @@ pub const MODELS: &[ModelInfo] = &[
         input_modalities: &["text"],
         output_modalities: &["text"],
         cost: None,
-        limit: Some(brain_types::ModelLimit { context: 262144, input: None, output: 65536 }),
+        limit: Some(brain_types::ModelLimit {
+            context: 262144,
+            input: None,
+            output: 65536,
+        }),
         status: None,
     },
     ModelInfo {
@@ -115,7 +135,11 @@ pub const MODELS: &[ModelInfo] = &[
         input_modalities: &["text", "image"],
         output_modalities: &["text"],
         cost: None,
-        limit: Some(brain_types::ModelLimit { context: 262144, input: None, output: 262144 }),
+        limit: Some(brain_types::ModelLimit {
+            context: 262144,
+            input: None,
+            output: 262144,
+        }),
         status: None,
     },
     ModelInfo {
@@ -134,7 +158,11 @@ pub const MODELS: &[ModelInfo] = &[
         input_modalities: &["text"],
         output_modalities: &["text"],
         cost: None,
-        limit: Some(brain_types::ModelLimit { context: 204800, input: None, output: 131072 }),
+        limit: Some(brain_types::ModelLimit {
+            context: 204800,
+            input: None,
+            output: 131072,
+        }),
         status: None,
     },
     ModelInfo {
@@ -153,7 +181,11 @@ pub const MODELS: &[ModelInfo] = &[
         input_modalities: &["text"],
         output_modalities: &["text"],
         cost: None,
-        limit: Some(brain_types::ModelLimit { context: 202752, input: None, output: 131072 }),
+        limit: Some(brain_types::ModelLimit {
+            context: 202752,
+            input: None,
+            output: 131072,
+        }),
         status: None,
     },
     ModelInfo {
@@ -172,7 +204,11 @@ pub const MODELS: &[ModelInfo] = &[
         input_modalities: &["text"],
         output_modalities: &["text"],
         cost: None,
-        limit: Some(brain_types::ModelLimit { context: 1048576, input: None, output: 65536 }),
+        limit: Some(brain_types::ModelLimit {
+            context: 1048576,
+            input: None,
+            output: 65536,
+        }),
         status: None,
     },
     ModelInfo {
@@ -191,7 +227,11 @@ pub const MODELS: &[ModelInfo] = &[
         input_modalities: &["text"],
         output_modalities: &["text"],
         cost: None,
-        limit: Some(brain_types::ModelLimit { context: 1048576, input: None, output: 131072 }),
+        limit: Some(brain_types::ModelLimit {
+            context: 1048576,
+            input: None,
+            output: 131072,
+        }),
         status: None,
     },
     ModelInfo {
@@ -210,7 +250,11 @@ pub const MODELS: &[ModelInfo] = &[
         input_modalities: &["text"],
         output_modalities: &["text"],
         cost: None,
-        limit: Some(brain_types::ModelLimit { context: 262144, input: None, output: 262144 }),
+        limit: Some(brain_types::ModelLimit {
+            context: 262144,
+            input: None,
+            output: 262144,
+        }),
         status: None,
     },
     ModelInfo {
@@ -229,7 +273,11 @@ pub const MODELS: &[ModelInfo] = &[
         input_modalities: &["text", "image"],
         output_modalities: &["text"],
         cost: None,
-        limit: Some(brain_types::ModelLimit { context: 262144, input: None, output: 262144 }),
+        limit: Some(brain_types::ModelLimit {
+            context: 262144,
+            input: None,
+            output: 262144,
+        }),
         status: None,
     },
     ModelInfo {
@@ -248,7 +296,11 @@ pub const MODELS: &[ModelInfo] = &[
         input_modalities: &["text"],
         output_modalities: &["text"],
         cost: None,
-        limit: Some(brain_types::ModelLimit { context: 32768, input: None, output: 4096 }),
+        limit: Some(brain_types::ModelLimit {
+            context: 32768,
+            input: None,
+            output: 4096,
+        }),
         status: None,
     },
     ModelInfo {
@@ -267,7 +319,11 @@ pub const MODELS: &[ModelInfo] = &[
         input_modalities: &["text", "image"],
         output_modalities: &["text"],
         cost: None,
-        limit: Some(brain_types::ModelLimit { context: 262144, input: None, output: 262144 }),
+        limit: Some(brain_types::ModelLimit {
+            context: 262144,
+            input: None,
+            output: 262144,
+        }),
         status: None,
     },
     ModelInfo {
@@ -286,7 +342,11 @@ pub const MODELS: &[ModelInfo] = &[
         input_modalities: &["text"],
         output_modalities: &["text"],
         cost: None,
-        limit: Some(brain_types::ModelLimit { context: 163840, input: None, output: 32000 }),
+        limit: Some(brain_types::ModelLimit {
+            context: 163840,
+            input: None,
+            output: 32000,
+        }),
         status: None,
     },
     ModelInfo {
@@ -305,7 +365,11 @@ pub const MODELS: &[ModelInfo] = &[
         input_modalities: &["text"],
         output_modalities: &["text"],
         cost: None,
-        limit: Some(brain_types::ModelLimit { context: 262144, input: None, output: 262144 }),
+        limit: Some(brain_types::ModelLimit {
+            context: 262144,
+            input: None,
+            output: 262144,
+        }),
         status: None,
     },
     ModelInfo {
@@ -324,7 +388,11 @@ pub const MODELS: &[ModelInfo] = &[
         input_modalities: &["text"],
         output_modalities: &["text"],
         cost: None,
-        limit: Some(brain_types::ModelLimit { context: 204800, input: None, output: 128000 }),
+        limit: Some(brain_types::ModelLimit {
+            context: 204800,
+            input: None,
+            output: 128000,
+        }),
         status: None,
     },
     ModelInfo {
@@ -343,7 +411,11 @@ pub const MODELS: &[ModelInfo] = &[
         input_modalities: &["text"],
         output_modalities: &["text"],
         cost: None,
-        limit: Some(brain_types::ModelLimit { context: 202752, input: None, output: 131072 }),
+        limit: Some(brain_types::ModelLimit {
+            context: 202752,
+            input: None,
+            output: 131072,
+        }),
         status: None,
     },
     ModelInfo {
@@ -362,7 +434,11 @@ pub const MODELS: &[ModelInfo] = &[
         input_modalities: &["text", "image"],
         output_modalities: &["text"],
         cost: None,
-        limit: Some(brain_types::ModelLimit { context: 262144, input: None, output: 32768 }),
+        limit: Some(brain_types::ModelLimit {
+            context: 262144,
+            input: None,
+            output: 32768,
+        }),
         status: None,
     },
     ModelInfo {
@@ -381,7 +457,11 @@ pub const MODELS: &[ModelInfo] = &[
         input_modalities: &["text", "image"],
         output_modalities: &["text"],
         cost: None,
-        limit: Some(brain_types::ModelLimit { context: 262144, input: None, output: 131072 }),
+        limit: Some(brain_types::ModelLimit {
+            context: 262144,
+            input: None,
+            output: 131072,
+        }),
         status: None,
     },
     ModelInfo {
@@ -400,7 +480,11 @@ pub const MODELS: &[ModelInfo] = &[
         input_modalities: &["text"],
         output_modalities: &["text"],
         cost: None,
-        limit: Some(brain_types::ModelLimit { context: 262144, input: None, output: 32768 }),
+        limit: Some(brain_types::ModelLimit {
+            context: 262144,
+            input: None,
+            output: 32768,
+        }),
         status: None,
     },
     ModelInfo {
@@ -419,7 +503,11 @@ pub const MODELS: &[ModelInfo] = &[
         input_modalities: &["text"],
         output_modalities: &["text"],
         cost: None,
-        limit: Some(brain_types::ModelLimit { context: 163840, input: None, output: 163840 }),
+        limit: Some(brain_types::ModelLimit {
+            context: 163840,
+            input: None,
+            output: 163840,
+        }),
         status: None,
     },
     ModelInfo {
@@ -438,7 +526,11 @@ pub const MODELS: &[ModelInfo] = &[
         input_modalities: &["text"],
         output_modalities: &["text"],
         cost: None,
-        limit: Some(brain_types::ModelLimit { context: 131072, input: None, output: 32768 }),
+        limit: Some(brain_types::ModelLimit {
+            context: 131072,
+            input: None,
+            output: 32768,
+        }),
         status: None,
     },
     ModelInfo {
@@ -457,7 +549,11 @@ pub const MODELS: &[ModelInfo] = &[
         input_modalities: &["text"],
         output_modalities: &["text"],
         cost: None,
-        limit: Some(brain_types::ModelLimit { context: 131072, input: None, output: 32768 }),
+        limit: Some(brain_types::ModelLimit {
+            context: 131072,
+            input: None,
+            output: 32768,
+        }),
         status: None,
     },
     ModelInfo {
@@ -476,7 +572,11 @@ pub const MODELS: &[ModelInfo] = &[
         input_modalities: &["text", "image"],
         output_modalities: &["text"],
         cost: None,
-        limit: Some(brain_types::ModelLimit { context: 131072, input: None, output: 131072 }),
+        limit: Some(brain_types::ModelLimit {
+            context: 131072,
+            input: None,
+            output: 131072,
+        }),
         status: None,
     },
     ModelInfo {
@@ -495,7 +595,11 @@ pub const MODELS: &[ModelInfo] = &[
         input_modalities: &["text"],
         output_modalities: &["text"],
         cost: None,
-        limit: Some(brain_types::ModelLimit { context: 262144, input: None, output: 65536 }),
+        limit: Some(brain_types::ModelLimit {
+            context: 262144,
+            input: None,
+            output: 65536,
+        }),
         status: None,
     },
     ModelInfo {
@@ -514,7 +618,11 @@ pub const MODELS: &[ModelInfo] = &[
         input_modalities: &["text"],
         output_modalities: &["text"],
         cost: None,
-        limit: Some(brain_types::ModelLimit { context: 262144, input: None, output: 262144 }),
+        limit: Some(brain_types::ModelLimit {
+            context: 262144,
+            input: None,
+            output: 262144,
+        }),
         status: None,
     },
     ModelInfo {
@@ -533,7 +641,11 @@ pub const MODELS: &[ModelInfo] = &[
         input_modalities: &["text"],
         output_modalities: &["text"],
         cost: None,
-        limit: Some(brain_types::ModelLimit { context: 163840, input: None, output: 65536 }),
+        limit: Some(brain_types::ModelLimit {
+            context: 163840,
+            input: None,
+            output: 65536,
+        }),
         status: None,
     },
     ModelInfo {
@@ -552,7 +664,11 @@ pub const MODELS: &[ModelInfo] = &[
         input_modalities: &["text", "image"],
         output_modalities: &["text"],
         cost: None,
-        limit: Some(brain_types::ModelLimit { context: 131072, input: None, output: 131072 }),
+        limit: Some(brain_types::ModelLimit {
+            context: 131072,
+            input: None,
+            output: 131072,
+        }),
         status: None,
     },
     ModelInfo {
@@ -571,7 +687,11 @@ pub const MODELS: &[ModelInfo] = &[
         input_modalities: &["text", "image"],
         output_modalities: &["text"],
         cost: None,
-        limit: Some(brain_types::ModelLimit { context: 131072, input: None, output: 131072 }),
+        limit: Some(brain_types::ModelLimit {
+            context: 131072,
+            input: None,
+            output: 131072,
+        }),
         status: None,
     },
     ModelInfo {
@@ -590,7 +710,11 @@ pub const MODELS: &[ModelInfo] = &[
         input_modalities: &["text", "image"],
         output_modalities: &["text"],
         cost: None,
-        limit: Some(brain_types::ModelLimit { context: 262144, input: None, output: 128000 }),
+        limit: Some(brain_types::ModelLimit {
+            context: 262144,
+            input: None,
+            output: 128000,
+        }),
         status: None,
     },
     ModelInfo {
@@ -609,7 +733,11 @@ pub const MODELS: &[ModelInfo] = &[
         input_modalities: &["text", "image"],
         output_modalities: &["text"],
         cost: None,
-        limit: Some(brain_types::ModelLimit { context: 262144, input: None, output: 128000 }),
+        limit: Some(brain_types::ModelLimit {
+            context: 262144,
+            input: None,
+            output: 128000,
+        }),
         status: None,
     },
     ModelInfo {
@@ -628,7 +756,11 @@ pub const MODELS: &[ModelInfo] = &[
         input_modalities: &["text", "image"],
         output_modalities: &["text"],
         cost: None,
-        limit: Some(brain_types::ModelLimit { context: 262144, input: None, output: 128000 }),
+        limit: Some(brain_types::ModelLimit {
+            context: 262144,
+            input: None,
+            output: 128000,
+        }),
         status: None,
     },
 ];
