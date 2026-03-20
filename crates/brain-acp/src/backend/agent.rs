@@ -8,7 +8,10 @@ use tokio_util::sync::CancellationToken;
 use super::app::BackendApp;
 #[cfg(feature = "unstable_session_model")]
 use super::capabilities::session_model_state;
-use super::capabilities::{initialize_response, list_info, session_info_update};
+use super::capabilities::{
+    CONFIG_MODEL, CONFIG_THOUGHT_LEVEL, config_options, initialize_response, list_info,
+    session_info_update,
+};
 use super::errors::{internal_error, map_brain_error};
 use super::event_mapper::{EventMapper, MappedEvent};
 use super::history_replay::replay_updates;
@@ -128,6 +131,30 @@ impl BackendAgent {
         let models = self.app.runtime.list_models().map_err(map_brain_error)?;
         Ok(session_model_state(current_model, &models))
     }
+
+    async fn config_options_for_session(
+        &self,
+        session_id: ulid::Ulid,
+    ) -> Result<Vec<acp::SessionConfigOption>, acp::Error> {
+        let current_model = self
+            .app
+            .runtime
+            .current_model_for_session(session_id)
+            .await
+            .map_err(map_brain_error)?;
+        let effective_inference = self
+            .app
+            .runtime
+            .effective_inference_for_session(session_id)
+            .await
+            .map_err(map_brain_error)?;
+        let models = self.app.runtime.list_models().map_err(map_brain_error)?;
+        Ok(config_options(
+            &current_model,
+            &effective_inference,
+            &models,
+        ))
+    }
 }
 
 #[async_trait::async_trait(?Send)]
@@ -171,6 +198,7 @@ impl acp::Agent for BackendAgent {
         let response = acp::NewSessionResponse::new(session_id.clone());
         #[cfg(feature = "unstable_session_model")]
         let response = response.models(self.current_model_state_for_session(session.id).await?);
+        let response = response.config_options(self.config_options_for_session(session.id).await?);
 
         Ok(response)
     }
@@ -199,6 +227,7 @@ impl acp::Agent for BackendAgent {
         let response = acp::LoadSessionResponse::new();
         #[cfg(feature = "unstable_session_model")]
         let response = response.models(self.current_model_state_for_session(session.id).await?);
+        let response = response.config_options(self.config_options_for_session(session.id).await?);
 
         Ok(response)
     }
@@ -323,6 +352,34 @@ impl acp::Agent for BackendAgent {
             .cancel_turn(session_id)
             .await
             .map_err(map_brain_error)
+    }
+
+    async fn set_session_config_option(
+        &self,
+        arguments: acp::SetSessionConfigOptionRequest,
+    ) -> Result<acp::SetSessionConfigOptionResponse, acp::Error> {
+        let session_id = parse_session_id(&arguments.session_id)?;
+        match arguments.config_id.0.as_ref() {
+            CONFIG_MODEL => {
+                self.app
+                    .runtime
+                    .set_session_model(session_id, arguments.value.0.as_ref())
+                    .await
+                    .map_err(map_brain_error)?;
+            }
+            CONFIG_THOUGHT_LEVEL => {
+                self.app
+                    .runtime
+                    .set_session_thought_level(session_id, arguments.value.0.as_ref())
+                    .await
+                    .map_err(map_brain_error)?;
+            }
+            _ => return Err(acp::Error::invalid_params()),
+        }
+
+        Ok(acp::SetSessionConfigOptionResponse::new(
+            self.config_options_for_session(session_id).await?,
+        ))
     }
 
     #[cfg(feature = "unstable_session_model")]

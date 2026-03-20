@@ -78,10 +78,14 @@ pub trait BrainRuntime: Send + Sync {
             .list()?
             .into_iter()
             .flat_map(|(provider_name, provider)| {
-                provider.info().models.into_iter().map(move |model| ProviderModelInfo {
-                    provider: provider_name.clone(),
-                    model,
-                })
+                provider
+                    .info()
+                    .models
+                    .into_iter()
+                    .map(move |model| ProviderModelInfo {
+                        provider: provider_name.clone(),
+                        model,
+                    })
             })
             .collect::<Vec<_>>();
         models.sort_by(|left, right| {
@@ -95,6 +99,40 @@ pub trait BrainRuntime: Send + Sync {
                 .then_with(|| left.model.id.cmp(right.model.id))
         });
         Ok(models)
+    }
+
+    fn current_model_for_session(
+        &self,
+        session_id: Ulid,
+    ) -> BoxFuture<'_, Result<ProviderModelInfo, BrainError>> {
+        Box::pin(async move {
+            let effective = self.effective_inference_for_session(session_id).await?;
+            let current_model_id = self
+                .current_model_id_for_session(session_id)
+                .await?
+                .ok_or_else(|| BrainError::Internal("no current model for session".into()))?;
+            let models = self.list_models()?;
+            let matches = models
+                .into_iter()
+                .filter(|model| {
+                    model.model.id == current_model_id
+                        && effective
+                            .provider
+                            .as_deref()
+                            .is_none_or(|provider| model.provider == provider)
+                })
+                .collect::<Vec<_>>();
+
+            match matches.as_slice() {
+                [] => Err(BrainError::Internal(format!(
+                    "current model is not available: {current_model_id}"
+                ))),
+                [model] => Ok(model.clone()),
+                _ => Err(BrainError::Internal(format!(
+                    "current model is ambiguous: {current_model_id}"
+                ))),
+            }
+        })
     }
 
     fn current_model_id_for_session(
@@ -134,12 +172,66 @@ pub trait BrainRuntime: Send + Sync {
 
             let mut session = self.store().sessions().get(session_id).await?;
             let mut inference = session.inference.unwrap_or_default();
+            let selected_model = self
+                .providers()
+                .get(&provider_name)
+                .ok_or_else(|| {
+                    BrainError::Internal(format!("provider not registered: {provider_name}"))
+                })?
+                .info()
+                .models
+                .into_iter()
+                .find(|model| model.id == model_id)
+                .ok_or_else(|| {
+                    BrainError::Internal(format!(
+                        "model {model_id} is not available for provider {provider_name}"
+                    ))
+                })?;
+
             inference.provider = Some(provider_name);
             inference.model = Some(model_id);
+            let keep_reasoning = match (inference.reasoning.as_deref(), selected_model.reasoning) {
+                (None, _) => true,
+                (Some(value), Some(levels)) => levels.contains(&value),
+                (Some(_), None) => false,
+            };
+            if !keep_reasoning {
+                inference.reasoning = None;
+            }
             session.inference = Some(inference);
 
             let key = session.id;
             self.store().sessions().update(key, session).await
+        })
+    }
+
+    fn set_session_thought_level(
+        &self,
+        session_id: Ulid,
+        thought_level: &str,
+    ) -> BoxFuture<'_, Result<Session, BrainError>> {
+        let thought_level = thought_level.to_owned();
+        Box::pin(async move {
+            let current_model = self.current_model_for_session(session_id).await?;
+            let supported = current_model.model.reasoning.ok_or_else(|| {
+                BrainError::Internal(format!(
+                    "model {} does not support thought level configuration",
+                    current_model.model.id
+                ))
+            })?;
+            if !supported.contains(&thought_level.as_str()) {
+                return Err(BrainError::Internal(format!(
+                    "invalid thought level {thought_level} for model {}",
+                    current_model.model.id
+                )));
+            }
+
+            let mut session = self.store().sessions().get(session_id).await?;
+            let mut inference = session.inference.unwrap_or_default();
+            inference.reasoning = Some(thought_level);
+            session.inference = Some(inference);
+
+            self.store().sessions().update(session.id, session).await
         })
     }
 }
@@ -205,17 +297,16 @@ mod tests {
         }
 
         fn subscribe(&self) -> crate::ProjectStoreEventStream {
-            Box::pin(futures::stream::iter(vec![crate::ProjectStoreEvent::Created {
-                project: Project::new(Some("dummy".into()), None, ProjectConfig::default()),
-            }]))
+            Box::pin(futures::stream::iter(vec![
+                crate::ProjectStoreEvent::Created {
+                    project: Project::new(Some("dummy".into()), None, ProjectConfig::default()),
+                },
+            ]))
         }
     }
 
     impl ProjectStore for DummyProjectStore {
-        fn find_by_root(
-            &self,
-            _root: &Path,
-        ) -> BoxFuture<'_, Result<Option<Project>, BrainError>> {
+        fn find_by_root(&self, _root: &Path) -> BoxFuture<'_, Result<Option<Project>, BrainError>> {
             Box::pin(ready(Ok(None)))
         }
     }
@@ -227,7 +318,11 @@ mod tests {
         type Record = Session;
         type Event = crate::SessionStoreEvent;
 
-        fn create(&self, _key: Ulid, session: Session) -> BoxFuture<'_, Result<Session, BrainError>> {
+        fn create(
+            &self,
+            _key: Ulid,
+            session: Session,
+        ) -> BoxFuture<'_, Result<Session, BrainError>> {
             Box::pin(ready(Ok(session)))
         }
 
@@ -247,7 +342,11 @@ mod tests {
             Box::pin(ready(Ok(vec![Session::new(Ulid::nil())])))
         }
 
-        fn update(&self, _key: Ulid, session: Session) -> BoxFuture<'_, Result<Session, BrainError>> {
+        fn update(
+            &self,
+            _key: Ulid,
+            session: Session,
+        ) -> BoxFuture<'_, Result<Session, BrainError>> {
             Box::pin(ready(Ok(session)))
         }
 
@@ -256,9 +355,11 @@ mod tests {
         }
 
         fn subscribe(&self) -> crate::SessionStoreEventStream {
-            Box::pin(futures::stream::iter(vec![crate::SessionStoreEvent::Created {
-                session: Session::new(Ulid::nil()),
-            }]))
+            Box::pin(futures::stream::iter(vec![
+                crate::SessionStoreEvent::Created {
+                    session: Session::new(Ulid::nil()),
+                },
+            ]))
         }
     }
 
@@ -412,9 +513,11 @@ mod tests {
         }
 
         fn subscribe(&self) -> crate::StoreEventStream {
-            Box::pin(futures::stream::iter(vec![crate::StoreEvent::ProjectCreated {
-                project: Project::new(Some("dummy".into()), None, ProjectConfig::default()),
-            }]))
+            Box::pin(futures::stream::iter(vec![
+                crate::StoreEvent::ProjectCreated {
+                    project: Project::new(Some("dummy".into()), None, ProjectConfig::default()),
+                },
+            ]))
         }
     }
 
@@ -441,7 +544,7 @@ mod tests {
                     id: "dummy-model",
                     name: "Dummy Model",
                     family: None,
-                    reasoning: None,
+                    reasoning: Some(&["low", "medium", "high"]),
                     tool_call: true,
                     attachment: false,
                     structured_output: None,
@@ -667,9 +770,15 @@ mod tests {
         let loops = runtime.loops().list().unwrap();
 
         assert_eq!(providers.len(), 2);
-        assert_eq!(providers[0].0, "dummy-provider");
-        assert_eq!(providers[0].1.info().name, "dummy-provider");
-        assert_eq!(providers[1].0, "older-provider");
+        assert!(providers.iter().any(|(name, provider)| {
+            name == "dummy-provider" && provider.info().name == "dummy-provider"
+        }));
+        assert!(
+            providers
+                .iter()
+                .any(|(name, provider)| name == "older-provider"
+                    && provider.info().name == "older-provider")
+        );
         assert_eq!(tools.len(), 1);
         assert_eq!(tools[0].0, "dummy-tool");
         assert_eq!(tools[0].1.definition().name, "dummy-tool");
@@ -722,6 +831,22 @@ mod tests {
         let current =
             futures::executor::block_on(runtime.current_model_id_for_session(session.id)).unwrap();
         assert_eq!(current.as_deref(), Some("dummy-model"));
+
+        let current_model =
+            futures::executor::block_on(runtime.current_model_for_session(session.id)).unwrap();
+        assert_eq!(current_model.provider, "dummy-provider");
+        assert_eq!(current_model.model.id, "dummy-model");
+
+        let updated =
+            futures::executor::block_on(runtime.set_session_thought_level(session.id, "high"))
+                .unwrap();
+        assert_eq!(
+            updated
+                .inference
+                .as_ref()
+                .and_then(|config| config.reasoning.as_deref()),
+            Some("high")
+        );
     }
 
     #[test]

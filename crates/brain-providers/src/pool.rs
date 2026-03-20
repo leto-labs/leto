@@ -5,9 +5,7 @@ use tokio::sync::RwLock;
 use ulid::Ulid;
 
 use brain_types::{
-    BrainError, CredentialEntry, CredentialHealth, SelectionContext,
-    SelectionStrategy,
-    Store,
+    BrainError, CredentialEntry, CredentialHealth, SelectionContext, SelectionStrategy, Store,
 };
 
 #[cfg(feature = "openai-oauth")]
@@ -62,7 +60,11 @@ impl CredentialPool {
             }
         }
 
-        let all = self.store.credentials().list_for_provider(provider_name).await?;
+        let all = self
+            .store
+            .credentials()
+            .list_for_provider(provider_name)
+            .await?;
         let enabled: Vec<CredentialEntry> = all.into_iter().filter(|e| e.enabled).collect();
 
         if enabled.is_empty() {
@@ -223,10 +225,7 @@ mod tests {
         Arc::new(InMemoryStore::new())
     }
 
-    fn pool(
-        store: Arc<dyn Store>,
-        strategy: Arc<dyn SelectionStrategy>,
-    ) -> CredentialPool {
+    fn pool(store: Arc<dyn Store>, strategy: Arc<dyn SelectionStrategy>) -> CredentialPool {
         CredentialPool::new(store, strategy)
     }
 
@@ -239,10 +238,7 @@ mod tests {
             .await
             .unwrap();
 
-        let p = pool(
-            s as Arc<dyn Store>,
-            Arc::new(StickyRoundRobin::new()),
-        );
+        let p = pool(s as Arc<dyn Store>, Arc::new(StickyRoundRobin::new()));
         let resolved = p.resolve("openai", None).await.unwrap();
         assert_eq!(resolved.id, "key-1");
     }
@@ -250,10 +246,7 @@ mod tests {
     #[tokio::test]
     async fn resolve_no_credentials_errors() {
         let s = store();
-        let p = pool(
-            s as Arc<dyn Store>,
-            Arc::new(StickyRoundRobin::new()),
-        );
+        let p = pool(s as Arc<dyn Store>, Arc::new(StickyRoundRobin::new()));
         let result = p.resolve("openai", None).await;
         assert!(result.is_err());
     }
@@ -261,23 +254,22 @@ mod tests {
     #[tokio::test]
     async fn session_stickiness() {
         let s = store();
-        s.credentials().create(
-            ("openai".into(), "key-1".into()),
-            CredentialEntry::api_key("key-1", "sk-111"),
-        )
+        s.credentials()
+            .create(
+                ("openai".into(), "key-1".into()),
+                CredentialEntry::api_key("key-1", "sk-111"),
+            )
             .await
             .unwrap();
-        s.credentials().create(
-            ("openai".into(), "key-2".into()),
-            CredentialEntry::api_key("key-2", "sk-222"),
-        )
+        s.credentials()
+            .create(
+                ("openai".into(), "key-2".into()),
+                CredentialEntry::api_key("key-2", "sk-222"),
+            )
             .await
             .unwrap();
 
-        let p = pool(
-            s as Arc<dyn Store>,
-            Arc::new(StickyRoundRobin::new()),
-        );
+        let p = pool(s as Arc<dyn Store>, Arc::new(StickyRoundRobin::new()));
         let sid = Ulid::new();
 
         let first = p.resolve("openai", Some(sid)).await.unwrap();
@@ -291,23 +283,22 @@ mod tests {
     #[tokio::test]
     async fn different_sessions_may_get_different_credentials() {
         let s = store();
-        s.credentials().create(
-            ("openai".into(), "key-1".into()),
-            CredentialEntry::api_key("key-1", "sk-111"),
-        )
+        s.credentials()
+            .create(
+                ("openai".into(), "key-1".into()),
+                CredentialEntry::api_key("key-1", "sk-111"),
+            )
             .await
             .unwrap();
-        s.credentials().create(
-            ("openai".into(), "key-2".into()),
-            CredentialEntry::api_key("key-2", "sk-222"),
-        )
+        s.credentials()
+            .create(
+                ("openai".into(), "key-2".into()),
+                CredentialEntry::api_key("key-2", "sk-222"),
+            )
             .await
             .unwrap();
 
-        let p = pool(
-            s as Arc<dyn Store>,
-            Arc::new(StickyRoundRobin::new()),
-        );
+        let p = pool(s as Arc<dyn Store>, Arc::new(StickyRoundRobin::new()));
 
         let a = p.resolve("openai", Some(Ulid::new())).await.unwrap();
         let b = p.resolve("openai", Some(Ulid::new())).await.unwrap();
@@ -317,23 +308,22 @@ mod tests {
     #[tokio::test]
     async fn unbind_session_clears_binding() {
         let s = store();
-        s.credentials().create(
-            ("openai".into(), "key-1".into()),
-            CredentialEntry::api_key("key-1", "sk-111"),
-        )
+        s.credentials()
+            .create(
+                ("openai".into(), "key-1".into()),
+                CredentialEntry::api_key("key-1", "sk-111"),
+            )
             .await
             .unwrap();
-        s.credentials().create(
-            ("openai".into(), "key-2".into()),
-            CredentialEntry::api_key("key-2", "sk-222"),
-        )
+        s.credentials()
+            .create(
+                ("openai".into(), "key-2".into()),
+                CredentialEntry::api_key("key-2", "sk-222"),
+            )
             .await
             .unwrap();
 
-        let p = pool(
-            s as Arc<dyn Store>,
-            Arc::new(StickyRoundRobin::new()),
-        );
+        let p = pool(s as Arc<dyn Store>, Arc::new(StickyRoundRobin::new()));
         let sid = Ulid::new();
 
         let first = p.resolve("openai", Some(sid)).await.unwrap();
@@ -362,16 +352,18 @@ mod tests {
     #[tokio::test]
     async fn fallback_always_prefers_first() {
         let s = store();
-        s.credentials().create(
-            ("openai".into(), "key-1".into()),
-            CredentialEntry::api_key("key-1", "sk-111"),
-        )
+        s.credentials()
+            .create(
+                ("openai".into(), "key-1".into()),
+                CredentialEntry::api_key("key-1", "sk-111"),
+            )
             .await
             .unwrap();
-        s.credentials().create(
-            ("openai".into(), "key-2".into()),
-            CredentialEntry::api_key("key-2", "sk-222"),
-        )
+        s.credentials()
+            .create(
+                ("openai".into(), "key-2".into()),
+                CredentialEntry::api_key("key-2", "sk-222"),
+            )
             .await
             .unwrap();
 
@@ -391,10 +383,11 @@ mod tests {
             .create(("openai".into(), disabled.id.clone()), disabled)
             .await
             .unwrap();
-        s.credentials().create(
-            ("openai".into(), "key-2".into()),
-            CredentialEntry::api_key("key-2", "sk-222"),
-        )
+        s.credentials()
+            .create(
+                ("openai".into(), "key-2".into()),
+                CredentialEntry::api_key("key-2", "sk-222"),
+            )
             .await
             .unwrap();
 

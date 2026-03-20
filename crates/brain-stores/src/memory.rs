@@ -3,8 +3,8 @@ use std::path::Path;
 use std::sync::Arc;
 
 use chrono::Utc;
-use futures::future::BoxFuture;
 use futures::StreamExt;
+use futures::future::BoxFuture;
 use tokio::sync::{RwLock, broadcast};
 use tokio_stream::wrappers::BroadcastStream;
 use ulid::Ulid;
@@ -137,15 +137,17 @@ impl Default for InMemoryStore {
 fn broadcast_stream<T: Clone + Send + 'static>(
     receiver: broadcast::Receiver<T>,
 ) -> CrudStoreEventStream<T> {
-    Box::pin(BroadcastStream::new(receiver).filter_map(|result| async move {
-        match result {
-            Ok(event) => Some(event),
-            Err(error) => {
-                tracing::warn!("store event receive error: {error}");
-                None
+    Box::pin(
+        BroadcastStream::new(receiver).filter_map(|result| async move {
+            match result {
+                Ok(event) => Some(event),
+                Err(error) => {
+                    tracing::warn!("store event receive error: {error}");
+                    None
+                }
             }
-        }
-    }))
+        }),
+    )
 }
 
 impl CrudStore for MemoryProjectStore {
@@ -168,7 +170,9 @@ impl CrudStore for MemoryProjectStore {
             }
             let mut projects = inner.projects.write().await;
             if projects.contains_key(&key) {
-                return Err(BrainError::Storage(format!("project already exists: {key}")));
+                return Err(BrainError::Storage(format!(
+                    "project already exists: {key}"
+                )));
             }
             projects.insert(key, project.clone());
             drop(projects);
@@ -301,7 +305,9 @@ impl CrudStore for MemorySessionStore {
             }
             let mut sessions = inner.sessions.write().await;
             if sessions.contains_key(&key) {
-                return Err(BrainError::Storage(format!("session already exists: {key}")));
+                return Err(BrainError::Storage(format!(
+                    "session already exists: {key}"
+                )));
             }
             sessions.insert(
                 key,
@@ -336,7 +342,8 @@ impl CrudStore for MemorySessionStore {
         let inner = Arc::clone(&self.inner);
         Box::pin(async move {
             let sessions = inner.sessions.read().await;
-            let mut list: Vec<Session> = sessions.values().map(|data| data.session.clone()).collect();
+            let mut list: Vec<Session> =
+                sessions.values().map(|data| data.session.clone()).collect();
             list.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
             Ok(list)
         })
@@ -435,7 +442,9 @@ impl CrudStore for MemoryMessageStore {
                 .get_mut(&session_id)
                 .ok_or_else(|| BrainError::Storage(format!("session not found: {session_id}")))?;
             if entry.messages.iter().any(|stored| stored.id == message_id) {
-                return Err(BrainError::Storage(format!("message already exists: {message_id}")));
+                return Err(BrainError::Storage(format!(
+                    "message already exists: {message_id}"
+                )));
             }
             entry.messages.push(message.clone());
             entry.session.updated_at = Utc::now();
@@ -521,7 +530,9 @@ impl CrudStore for MemoryMessageStore {
             let before = entry.messages.len();
             entry.messages.retain(|message| message.id != message_id);
             if entry.messages.len() == before {
-                return Err(BrainError::Storage(format!("message not found: {message_id}")));
+                return Err(BrainError::Storage(format!(
+                    "message not found: {message_id}"
+                )));
             }
             entry.session.updated_at = Utc::now();
             drop(sessions);
@@ -536,7 +547,10 @@ impl CrudStore for MemoryMessageStore {
 }
 
 impl MessageStore for MemoryMessageStore {
-    fn list_for_session(&self, session_id: Ulid) -> BoxFuture<'_, Result<Vec<Message>, BrainError>> {
+    fn list_for_session(
+        &self,
+        session_id: Ulid,
+    ) -> BoxFuture<'_, Result<Vec<Message>, BrainError>> {
         let inner = Arc::clone(&self.inner);
         Box::pin(async move {
             let sessions = inner.sessions.read().await;
@@ -592,7 +606,9 @@ impl CrudStore for MemoryCredentialStore {
                 .await
                 .get(&key)
                 .cloned()
-                .ok_or_else(|| BrainError::Storage(format!("credential not found: {}:{}", key.0, key.1)))
+                .ok_or_else(|| {
+                    BrainError::Storage(format!("credential not found: {}:{}", key.0, key.1))
+                })
         })
     }
 
@@ -743,7 +759,11 @@ mod tests {
         let store = InMemoryStore::new();
         let mut project = Project::with_defaults("repo");
         project.root = Some(std::path::PathBuf::from("/tmp/work/repo"));
-        store.projects().create(project.id, project.clone()).await.unwrap();
+        store
+            .projects()
+            .create(project.id, project.clone())
+            .await
+            .unwrap();
 
         let found = store
             .projects()
@@ -757,13 +777,25 @@ mod tests {
     async fn session_crud_and_project_listing_work() {
         let store = InMemoryStore::new();
         let project = Project::with_defaults("test");
-        store.projects().create(project.id, project.clone()).await.unwrap();
+        store
+            .projects()
+            .create(project.id, project.clone())
+            .await
+            .unwrap();
 
         let mut session = Session::new(project.id);
         let id = session.id;
         store.sessions().create(id, session.clone()).await.unwrap();
         assert_eq!(store.sessions().get(id).await.unwrap().id, id);
-        assert_eq!(store.sessions().list_for_project(project.id).await.unwrap().len(), 1);
+        assert_eq!(
+            store
+                .sessions()
+                .list_for_project(project.id)
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
 
         session.title = Some("My Chat".into());
         store.sessions().update(id, session.clone()).await.unwrap();
@@ -780,9 +812,17 @@ mod tests {
     async fn project_delete_cascades_sessions_and_emits_store_events() {
         let store = InMemoryStore::new();
         let project = Project::with_defaults("project");
-        store.projects().create(project.id, project.clone()).await.unwrap();
+        store
+            .projects()
+            .create(project.id, project.clone())
+            .await
+            .unwrap();
         let session = Session::new(project.id);
-        store.sessions().create(session.id, session.clone()).await.unwrap();
+        store
+            .sessions()
+            .create(session.id, session.clone())
+            .await
+            .unwrap();
 
         let mut events = store.subscribe();
         store.projects().delete(project.id).await.unwrap();
@@ -791,8 +831,13 @@ mod tests {
         let second = events.next().await.unwrap();
         match (first, second) {
             (
-                StoreEvent::SessionDeleted { session_id, project_id },
-                StoreEvent::ProjectDeleted { project_id: deleted_project_id },
+                StoreEvent::SessionDeleted {
+                    session_id,
+                    project_id,
+                },
+                StoreEvent::ProjectDeleted {
+                    project_id: deleted_project_id,
+                },
             ) => {
                 assert_eq!(session_id, session.id);
                 assert_eq!(project_id, project.id);
@@ -806,17 +851,33 @@ mod tests {
     async fn message_crud_uses_tuple_key() {
         let store = InMemoryStore::new();
         let project = Project::with_defaults("project");
-        store.projects().create(project.id, project.clone()).await.unwrap();
+        store
+            .projects()
+            .create(project.id, project.clone())
+            .await
+            .unwrap();
         let session = Session::new(project.id);
-        store.sessions().create(session.id, session.clone()).await.unwrap();
+        store
+            .sessions()
+            .create(session.id, session.clone())
+            .await
+            .unwrap();
 
         let first = Message::user("first");
         let second = Message::assistant("second");
         let first_key = (session.id, first.id);
         let second_key = (session.id, second.id);
 
-        store.messages().create(first_key, first.clone()).await.unwrap();
-        store.messages().create(second_key, second.clone()).await.unwrap();
+        store
+            .messages()
+            .create(first_key, first.clone())
+            .await
+            .unwrap();
+        store
+            .messages()
+            .create(second_key, second.clone())
+            .await
+            .unwrap();
 
         let listed = store.messages().list_for_session(session.id).await.unwrap();
         assert_eq!(listed.len(), 2);
@@ -826,14 +887,26 @@ mod tests {
             content: "updated".into(),
             ..first.clone()
         };
-        store.messages().update(first_key, updated.clone()).await.unwrap();
+        store
+            .messages()
+            .update(first_key, updated.clone())
+            .await
+            .unwrap();
         assert_eq!(
             store.messages().get(first_key).await.unwrap().content,
             updated.content
         );
 
         store.messages().delete(second_key).await.unwrap();
-        assert_eq!(store.messages().list_for_session(session.id).await.unwrap().len(), 1);
+        assert_eq!(
+            store
+                .messages()
+                .list_for_session(session.id)
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
     }
 
     #[tokio::test]
@@ -842,13 +915,32 @@ mod tests {
         let key = ("openai".to_owned(), "key-1".to_owned());
         let entry = api_key_entry("key-1", "sk-123");
 
-        store.credentials().create(key.clone(), entry.clone()).await.unwrap();
-        assert_eq!(store.credentials().get(key.clone()).await.unwrap().id, "key-1");
-        assert_eq!(store.credentials().list_for_provider("openai").await.unwrap().len(), 1);
+        store
+            .credentials()
+            .create(key.clone(), entry.clone())
+            .await
+            .unwrap();
+        assert_eq!(
+            store.credentials().get(key.clone()).await.unwrap().id,
+            "key-1"
+        );
+        assert_eq!(
+            store
+                .credentials()
+                .list_for_provider("openai")
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
 
         let mut updated = entry.clone();
         updated.health.record_error("test", None);
-        store.credentials().update(key.clone(), updated.clone()).await.unwrap();
+        store
+            .credentials()
+            .update(key.clone(), updated.clone())
+            .await
+            .unwrap();
         assert_eq!(
             store
                 .credentials()
@@ -884,9 +976,17 @@ mod tests {
     async fn keyed_batch_helpers_are_available() {
         let store = InMemoryStore::new();
         let project = Project::with_defaults("project");
-        store.projects().create(project.id, project.clone()).await.unwrap();
+        store
+            .projects()
+            .create(project.id, project.clone())
+            .await
+            .unwrap();
         let session = Session::new(project.id);
-        store.sessions().create(session.id, session.clone()).await.unwrap();
+        store
+            .sessions()
+            .create(session.id, session.clone())
+            .await
+            .unwrap();
 
         let first = Message::user("first");
         let second = Message::assistant("second");

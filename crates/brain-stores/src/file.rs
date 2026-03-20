@@ -2,8 +2,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use chrono::Utc;
-use futures::future::BoxFuture;
 use futures::StreamExt;
+use futures::future::BoxFuture;
 use tokio::sync::broadcast;
 use tokio_stream::wrappers::BroadcastStream;
 use ulid::Ulid;
@@ -126,7 +126,11 @@ impl FileStoreInner {
         Ok(messages)
     }
 
-    async fn write_messages(&self, session_id: Ulid, messages: &[Message]) -> Result<(), BrainError> {
+    async fn write_messages(
+        &self,
+        session_id: Ulid,
+        messages: &[Message],
+    ) -> Result<(), BrainError> {
         let path = self.messages_file(session_id);
         let mut content = String::new();
         for message in messages {
@@ -243,15 +247,17 @@ impl FileStore {
 fn broadcast_stream<T: Clone + Send + 'static>(
     receiver: broadcast::Receiver<T>,
 ) -> CrudStoreEventStream<T> {
-    Box::pin(BroadcastStream::new(receiver).filter_map(|result| async move {
-        match result {
-            Ok(event) => Some(event),
-            Err(error) => {
-                tracing::warn!("store event receive error: {error}");
-                None
+    Box::pin(
+        BroadcastStream::new(receiver).filter_map(|result| async move {
+            match result {
+                Ok(event) => Some(event),
+                Err(error) => {
+                    tracing::warn!("store event receive error: {error}");
+                    None
+                }
             }
-        }
-    }))
+        }),
+    )
 }
 
 async fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T, BrainError> {
@@ -290,7 +296,9 @@ impl CrudStore for FileProjectStore {
             }
             let path = inner.project_file(key);
             if path.exists() {
-                return Err(BrainError::Storage(format!("project already exists: {key}")));
+                return Err(BrainError::Storage(format!(
+                    "project already exists: {key}"
+                )));
             }
             write_json(&path, &project).await?;
             inner.publish_project(ProjectStoreEvent::Created {
@@ -383,7 +391,10 @@ impl CrudStore for FileProjectStore {
             }
 
             let sessions = inner.list_all_sessions().await?;
-            for session in sessions.into_iter().filter(|session| session.project_id == id) {
+            for session in sessions
+                .into_iter()
+                .filter(|session| session.project_id == id)
+            {
                 let dir = inner.session_dir(session.id);
                 if dir.exists() {
                     tokio::fs::remove_dir_all(&dir)
@@ -445,7 +456,9 @@ impl CrudStore for FileSessionStore {
             let dir = inner.session_dir(key);
             let session_path = inner.session_file(key);
             if session_path.exists() {
-                return Err(BrainError::Storage(format!("session already exists: {key}")));
+                return Err(BrainError::Storage(format!(
+                    "session already exists: {key}"
+                )));
             }
             tokio::fs::create_dir_all(&dir)
                 .await
@@ -572,11 +585,15 @@ impl CrudStore for FileMessageStore {
                 )));
             }
             if !inner.session_file(session_id).exists() {
-                return Err(BrainError::Storage(format!("session not found: {session_id}")));
+                return Err(BrainError::Storage(format!(
+                    "session not found: {session_id}"
+                )));
             }
             let mut messages = inner.load_messages(session_id).await?;
             if messages.iter().any(|stored| stored.id == message_id) {
-                return Err(BrainError::Storage(format!("message already exists: {message_id}")));
+                return Err(BrainError::Storage(format!(
+                    "message already exists: {message_id}"
+                )));
             }
             messages.push(message.clone());
             inner.write_messages(session_id, &messages).await?;
@@ -594,7 +611,9 @@ impl CrudStore for FileMessageStore {
         Box::pin(async move {
             let (session_id, message_id) = key;
             if !inner.session_file(session_id).exists() {
-                return Err(BrainError::Storage(format!("session not found: {session_id}")));
+                return Err(BrainError::Storage(format!(
+                    "session not found: {session_id}"
+                )));
             }
             inner
                 .load_messages(session_id)
@@ -632,7 +651,9 @@ impl CrudStore for FileMessageStore {
                 )));
             }
             if !inner.session_file(session_id).exists() {
-                return Err(BrainError::Storage(format!("session not found: {session_id}")));
+                return Err(BrainError::Storage(format!(
+                    "session not found: {session_id}"
+                )));
             }
             let mut messages = inner.load_messages(session_id).await?;
             let stored = messages
@@ -655,13 +676,17 @@ impl CrudStore for FileMessageStore {
         Box::pin(async move {
             let (session_id, message_id) = key;
             if !inner.session_file(session_id).exists() {
-                return Err(BrainError::Storage(format!("session not found: {session_id}")));
+                return Err(BrainError::Storage(format!(
+                    "session not found: {session_id}"
+                )));
             }
             let mut messages = inner.load_messages(session_id).await?;
             let before = messages.len();
             messages.retain(|message| message.id != message_id);
             if messages.len() == before {
-                return Err(BrainError::Storage(format!("message not found: {message_id}")));
+                return Err(BrainError::Storage(format!(
+                    "message not found: {message_id}"
+                )));
             }
             inner.write_messages(session_id, &messages).await?;
             inner.touch_session(session_id).await?;
@@ -676,7 +701,10 @@ impl CrudStore for FileMessageStore {
 }
 
 impl MessageStore for FileMessageStore {
-    fn list_for_session(&self, session_id: Ulid) -> BoxFuture<'_, Result<Vec<Message>, BrainError>> {
+    fn list_for_session(
+        &self,
+        session_id: Ulid,
+    ) -> BoxFuture<'_, Result<Vec<Message>, BrainError>> {
         let inner = Arc::clone(&self.inner);
         Box::pin(async move {
             if !inner.session_file(session_id).exists() {
@@ -743,7 +771,10 @@ impl CrudStore for FileCredentialStore {
         let credential_store = self.clone();
         Box::pin(async move {
             let credentials = credential_store.list_all().await?;
-            Ok(credentials.into_iter().map(|(_, credential)| credential).collect())
+            Ok(credentials
+                .into_iter()
+                .map(|(_, credential)| credential)
+                .collect())
         })
     }
 
@@ -986,13 +1017,25 @@ mod tests {
     async fn session_crud_and_project_listing_work() {
         let (store, _dir) = temp_store().await;
         let project = Project::with_defaults("test");
-        store.projects().create(project.id, project.clone()).await.unwrap();
+        store
+            .projects()
+            .create(project.id, project.clone())
+            .await
+            .unwrap();
 
         let mut session = Session::new(project.id);
         let id = session.id;
         store.sessions().create(id, session.clone()).await.unwrap();
         assert_eq!(store.sessions().get(id).await.unwrap().id, id);
-        assert_eq!(store.sessions().list_for_project(project.id).await.unwrap().len(), 1);
+        assert_eq!(
+            store
+                .sessions()
+                .list_for_project(project.id)
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
 
         session.title = Some("My Chat".into());
         store.sessions().update(id, session.clone()).await.unwrap();
@@ -1009,32 +1052,68 @@ mod tests {
     async fn message_crud_uses_tuple_key() {
         let (store, _dir) = temp_store().await;
         let project = Project::with_defaults("project");
-        store.projects().create(project.id, project.clone()).await.unwrap();
+        store
+            .projects()
+            .create(project.id, project.clone())
+            .await
+            .unwrap();
         let session = Session::new(project.id);
-        store.sessions().create(session.id, session.clone()).await.unwrap();
+        store
+            .sessions()
+            .create(session.id, session.clone())
+            .await
+            .unwrap();
 
         let first = Message::user("first");
         let second = Message::assistant("second");
         let first_key = (session.id, first.id);
         let second_key = (session.id, second.id);
 
-        store.messages().create(first_key, first.clone()).await.unwrap();
-        store.messages().create(second_key, second.clone()).await.unwrap();
-        assert_eq!(store.messages().list_for_session(session.id).await.unwrap().len(), 2);
+        store
+            .messages()
+            .create(first_key, first.clone())
+            .await
+            .unwrap();
+        store
+            .messages()
+            .create(second_key, second.clone())
+            .await
+            .unwrap();
+        assert_eq!(
+            store
+                .messages()
+                .list_for_session(session.id)
+                .await
+                .unwrap()
+                .len(),
+            2
+        );
         assert_eq!(store.messages().get(first_key).await.unwrap().id, first.id);
 
         let updated = Message {
             content: "updated".into(),
             ..first.clone()
         };
-        store.messages().update(first_key, updated.clone()).await.unwrap();
+        store
+            .messages()
+            .update(first_key, updated.clone())
+            .await
+            .unwrap();
         assert_eq!(
             store.messages().get(first_key).await.unwrap().content,
             updated.content
         );
 
         store.messages().delete(second_key).await.unwrap();
-        assert_eq!(store.messages().list_for_session(session.id).await.unwrap().len(), 1);
+        assert_eq!(
+            store
+                .messages()
+                .list_for_session(session.id)
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
     }
 
     #[tokio::test]
@@ -1043,13 +1122,32 @@ mod tests {
         let key = ("openai".to_owned(), "key-1".to_owned());
         let entry = api_key_entry("key-1", "sk-123");
 
-        store.credentials().create(key.clone(), entry.clone()).await.unwrap();
-        assert_eq!(store.credentials().get(key.clone()).await.unwrap().id, "key-1");
-        assert_eq!(store.credentials().list_for_provider("openai").await.unwrap().len(), 1);
+        store
+            .credentials()
+            .create(key.clone(), entry.clone())
+            .await
+            .unwrap();
+        assert_eq!(
+            store.credentials().get(key.clone()).await.unwrap().id,
+            "key-1"
+        );
+        assert_eq!(
+            store
+                .credentials()
+                .list_for_provider("openai")
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
 
         let mut updated = entry.clone();
         updated.health.record_error("test", None);
-        store.credentials().update(key.clone(), updated.clone()).await.unwrap();
+        store
+            .credentials()
+            .update(key.clone(), updated.clone())
+            .await
+            .unwrap();
         assert_eq!(
             store
                 .credentials()
@@ -1085,9 +1183,17 @@ mod tests {
     async fn project_delete_cascades_session_events() {
         let (store, _dir) = temp_store().await;
         let project = Project::with_defaults("project");
-        store.projects().create(project.id, project.clone()).await.unwrap();
+        store
+            .projects()
+            .create(project.id, project.clone())
+            .await
+            .unwrap();
         let session = Session::new(project.id);
-        store.sessions().create(session.id, session.clone()).await.unwrap();
+        store
+            .sessions()
+            .create(session.id, session.clone())
+            .await
+            .unwrap();
 
         let mut events = store.subscribe();
         store.projects().delete(project.id).await.unwrap();
@@ -1096,8 +1202,13 @@ mod tests {
         let second = events.next().await.unwrap();
         match (first, second) {
             (
-                StoreEvent::SessionDeleted { session_id, project_id },
-                StoreEvent::ProjectDeleted { project_id: deleted_project_id },
+                StoreEvent::SessionDeleted {
+                    session_id,
+                    project_id,
+                },
+                StoreEvent::ProjectDeleted {
+                    project_id: deleted_project_id,
+                },
             ) => {
                 assert_eq!(session_id, session.id);
                 assert_eq!(project_id, project.id);

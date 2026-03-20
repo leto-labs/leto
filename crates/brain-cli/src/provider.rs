@@ -8,7 +8,10 @@ pub async fn build_runtime(
     config: &ProjectConfig,
     store: Arc<dyn Store>,
 ) -> Result<Arc<dyn BrainRuntime>, BrainError> {
-    let pool = Arc::new(CredentialPool::new(store.clone(), Arc::new(Fallback::new())));
+    let pool = Arc::new(CredentialPool::new(
+        store.clone(),
+        Arc::new(Fallback::new()),
+    ));
     let (default_provider_name, providers) = discover_providers(config, pool).await;
     let runtime = Arc::new(BrainRuntimeNative::new(
         store,
@@ -42,9 +45,27 @@ async fn discover_providers(
     let model_override = config.agent.inference.model.as_deref();
     let mut providers: Vec<(String, Arc<dyn Provider>, bool)> = Vec::new();
 
-    discover_api_providers(requested_default_name, model_override, &pool, &mut providers).await;
-    discover_oauth_providers(requested_default_name, model_override, &pool, &mut providers).await;
-    discover_local_providers(requested_default_name, model_override, config, &mut providers).await;
+    discover_api_providers(
+        requested_default_name,
+        model_override,
+        &pool,
+        &mut providers,
+    )
+    .await;
+    discover_oauth_providers(
+        requested_default_name,
+        model_override,
+        &pool,
+        &mut providers,
+    )
+    .await;
+    discover_local_providers(
+        requested_default_name,
+        model_override,
+        config,
+        &mut providers,
+    )
+    .await;
 
     if providers.is_empty() {
         tracing::warn!("no providers configured — run `brain credentials add <provider> <key>`");

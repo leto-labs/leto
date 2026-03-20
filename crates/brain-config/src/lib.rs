@@ -10,6 +10,7 @@ use toml::Value;
 struct RawInferenceConfig {
     provider: Option<String>,
     model: Option<String>,
+    reasoning: Option<String>,
     max_tokens: Option<u32>,
     temperature: Option<f32>,
     #[serde(flatten)]
@@ -32,6 +33,7 @@ impl Default for RawInferenceConfig {
         Self {
             provider: None,
             model: None,
+            reasoning: None,
             max_tokens: None,
             temperature: None,
             _unknown: std::collections::BTreeMap::new(),
@@ -68,6 +70,9 @@ impl RawAgentConfig {
             }
             if let Some(model) = inference.model {
                 target.agent.inference.model = Some(model);
+            }
+            if let Some(reasoning) = inference.reasoning {
+                target.agent.inference.reasoning = Some(reasoning);
             }
             if let Some(max_tokens) = inference.max_tokens {
                 target.agent.inference.max_tokens = Some(max_tokens);

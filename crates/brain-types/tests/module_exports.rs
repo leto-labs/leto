@@ -1,10 +1,9 @@
 use brain_types::{
-    AgentLoop, BrainRuntime, CrudStore, EventStream, ProjectStore, ProjectStoreEvent, Registry,
-    RegistryHashMap, RegistryLoop, RegistryLoopHashMap, RegistryProvider,
-    RegistryProviderHashMap, RegistryTool, RegistryToolHashMap, RuntimeBusEvent,
-    RuntimeBusStream, SessionStore, SessionStoreEvent, Store, StoreEvent, StoreEventStream, Tool,
-    CredentialStore, CredentialStoreEvent, CredentialStoreKey, MessageStore, MessageStoreEvent,
-    MessageStoreKey,
+    AgentLoop, BrainRuntime, CredentialStore, CredentialStoreEvent, CredentialStoreKey, CrudStore,
+    EventStream, MessageStore, MessageStoreEvent, MessageStoreKey, ProjectStore, ProjectStoreEvent,
+    Registry, RegistryHashMap, RegistryLoop, RegistryLoopHashMap, RegistryProvider,
+    RegistryProviderHashMap, RegistryTool, RegistryToolHashMap, RuntimeBusEvent, RuntimeBusStream,
+    SessionStore, SessionStoreEvent, Store, StoreEvent, StoreEventStream, Tool,
 };
 
 #[test]

@@ -351,7 +351,11 @@ mod tests {
         let agent_loop: Arc<dyn AgentLoop> = Arc::new(SimpleLoop);
 
         let brain = Brain::new(provider, store.clone(), agent_loop, vec![]);
-        store.projects().create(project.id, project.clone()).await.unwrap();
+        store
+            .projects()
+            .create(project.id, project.clone())
+            .await
+            .unwrap();
         (brain, project, store)
     }
 
@@ -463,6 +467,7 @@ system_prompt = "config prompt"
                     inference: InferenceConfig {
                         provider: Some("openai".into()),
                         model: Some("gpt-4o-mini".into()),
+                        reasoning: Some("medium".into()),
                         max_tokens: Some(4096),
                         temperature: Some(0.7),
                     },
@@ -478,6 +483,7 @@ system_prompt = "config prompt"
                 Some(InferenceConfig {
                     provider: None,
                     model: Some("gpt-5".into()),
+                    reasoning: None,
                     max_tokens: None,
                     temperature: Some(0.2),
                 }),
@@ -491,6 +497,7 @@ system_prompt = "config prompt"
             .unwrap();
         assert_eq!(effective.provider.as_deref(), Some("openai"));
         assert_eq!(effective.model.as_deref(), Some("gpt-5"));
+        assert_eq!(effective.reasoning.as_deref(), Some("medium"));
         assert_eq!(effective.max_tokens, Some(4096));
         assert_eq!(effective.temperature, Some(0.2));
     }
@@ -695,7 +702,11 @@ system_prompt = "config prompt"
             "should emit SessionResume for switched session"
         );
 
-        let alt_messages = store.messages().list_for_session(alt_session.id).await.unwrap();
+        let alt_messages = store
+            .messages()
+            .list_for_session(alt_session.id)
+            .await
+            .unwrap();
         assert!(!alt_messages.is_empty());
         assert_eq!(alt_messages[0].role, Role::User);
         assert_eq!(alt_messages[0].content, "hello world");

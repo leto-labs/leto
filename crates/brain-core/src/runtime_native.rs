@@ -216,20 +216,82 @@ impl BrainRuntime for BrainRuntimeNative {
         &self,
         session_id: Ulid,
     ) -> BoxFuture<'_, Result<Option<String>, BrainError>> {
+        Box::pin(async move {
+            self.current_model_for_session(session_id)
+                .await
+                .map(|model| Some(model.model.id.to_owned()))
+        })
+    }
+
+    fn current_model_for_session(
+        &self,
+        session_id: Ulid,
+    ) -> BoxFuture<'_, Result<ProviderModelInfo, BrainError>> {
         let store = self.store.clone();
         let providers = self.providers.clone();
         let default_provider_name = self.default_provider_name.clone();
         Box::pin(async move {
             let config = load_agent_config_for_session(store, session_id).await?;
-            if let Some(model_id) = config.inference.model {
-                return Ok(Some(model_id));
-            }
+            let (provider_name, provider) = if let Some(provider_name) = config.inference.provider {
+                let provider = providers.get(&provider_name).ok_or_else(|| {
+                    BrainError::Internal(format!("provider not registered: {provider_name}"))
+                })?;
+                (provider_name, provider)
+            } else if let Some(model_id) = config.inference.model.as_deref() {
+                let matches = providers
+                    .list()?
+                    .into_iter()
+                    .filter_map(|(provider_name, provider)| {
+                        provider
+                            .info()
+                            .models
+                            .iter()
+                            .any(|model| model.id == model_id)
+                            .then_some((provider_name, provider))
+                    })
+                    .collect::<Vec<_>>();
+                match matches.as_slice() {
+                    [] | [_, _, ..] => {
+                        return Err(BrainError::Internal(format!(
+                            "unknown or ambiguous model: {model_id}"
+                        )));
+                    }
+                    [(provider_name, provider)] => (provider_name.clone(), provider.clone()),
+                }
+            } else {
+                let provider = providers.get(&default_provider_name).ok_or_else(|| {
+                    BrainError::Internal(format!(
+                        "provider not registered: {default_provider_name}"
+                    ))
+                })?;
+                (default_provider_name, provider)
+            };
 
-            let provider_name = config.inference.provider.unwrap_or(default_provider_name);
-            let provider = providers.get(&provider_name).ok_or_else(|| {
-                BrainError::Internal(format!("provider not registered: {provider_name}"))
-            })?;
-            Ok(provider.info().default_model)
+            let provider_info = provider.info();
+            let model_id = config
+                .inference
+                .model
+                .or(provider_info.default_model.clone())
+                .ok_or_else(|| {
+                    BrainError::Internal(format!(
+                        "provider {provider_name} does not expose a default model"
+                    ))
+                })?;
+            let model = provider_info
+                .models
+                .iter()
+                .find(|model| model.id == model_id)
+                .copied()
+                .ok_or_else(|| {
+                    BrainError::Internal(format!(
+                        "model {model_id} is not available for provider {provider_name}"
+                    ))
+                })?;
+
+            Ok(ProviderModelInfo {
+                provider: provider_name,
+                model,
+            })
         })
     }
 
@@ -249,28 +311,66 @@ impl BrainRuntime for BrainRuntimeNative {
                     provider
                         .info()
                         .models
-                        .iter()
-                        .any(|model| model.id == model_id)
-                        .then_some(provider_name)
+                        .into_iter()
+                        .find(|model| model.id == model_id)
+                        .map(|model| (provider_name, model))
                 })
                 .collect::<Vec<_>>();
 
-            let provider_name = match matches.as_slice() {
+            let (provider_name, selected_model) = match matches.as_slice() {
                 [] | [_, _, ..] => {
                     return Err(BrainError::Internal(format!(
                         "unknown or ambiguous model: {model_id}"
                     )));
                 }
-                [provider_name] => provider_name.clone(),
+                [(provider_name, selected_model)] => (provider_name.clone(), *selected_model),
             };
 
             let mut session = store.sessions().get(session_id).await?;
             let mut inference = session.inference.unwrap_or_default();
             inference.provider = Some(provider_name);
             inference.model = Some(model_id);
+            let keep_reasoning = match (inference.reasoning.as_deref(), selected_model.reasoning) {
+                (None, _) => true,
+                (Some(value), Some(levels)) => levels.contains(&value),
+                (Some(_), None) => false,
+            };
+            if !keep_reasoning {
+                inference.reasoning = None;
+            }
             session.inference = Some(inference);
 
             store.sessions().update(session.id, session).await
+        })
+    }
+
+    fn set_session_thought_level(
+        &self,
+        session_id: Ulid,
+        thought_level: &str,
+    ) -> BoxFuture<'_, Result<Session, BrainError>> {
+        let thought_level = thought_level.to_owned();
+        Box::pin(async move {
+            let current_model = self.current_model_for_session(session_id).await?;
+            let supported = current_model.model.reasoning.ok_or_else(|| {
+                BrainError::Internal(format!(
+                    "model {} does not support thought level configuration",
+                    current_model.model.id
+                ))
+            })?;
+            if !supported.contains(&thought_level.as_str()) {
+                return Err(BrainError::Internal(format!(
+                    "invalid thought level {thought_level} for model {}",
+                    current_model.model.id
+                )));
+            }
+
+            let mut session = self.store.sessions().get(session_id).await?;
+            let mut inference = session.inference.unwrap_or_default();
+            inference.reasoning = Some(thought_level);
+            session.inference = Some(inference);
+
+            self.store.sessions().update(session.id, session).await
         })
     }
 }
@@ -390,11 +490,21 @@ mod tests {
 
     struct NamedProvider {
         name: &'static str,
-        models: Vec<&'static str>,
+        models: Vec<(&'static str, Option<&'static [&'static str]>)>,
     }
 
     impl NamedProvider {
         fn new(name: &'static str, models: Vec<&'static str>) -> Self {
+            Self {
+                name,
+                models: models.into_iter().map(|model| (model, None)).collect(),
+            }
+        }
+
+        fn with_reasoning(
+            name: &'static str,
+            models: Vec<(&'static str, Option<&'static [&'static str]>)>,
+        ) -> Self {
             Self { name, models }
         }
     }
@@ -413,15 +523,18 @@ mod tests {
         fn info(&self) -> ProviderInfo {
             ProviderInfo {
                 name: self.name.into(),
-                default_model: self.models.first().map(|model| (*model).to_owned()),
+                default_model: self
+                    .models
+                    .first()
+                    .map(|(model, _reasoning)| (*model).to_owned()),
                 models: self
                     .models
                     .iter()
-                    .map(|model| ModelInfo {
+                    .map(|(model, reasoning)| ModelInfo {
                         id: model,
                         name: model,
                         family: None,
-                        reasoning: None,
+                        reasoning: *reasoning,
                         tool_call: true,
                         attachment: false,
                         structured_output: None,
@@ -659,6 +772,7 @@ mod tests {
                         inference: InferenceConfig {
                             provider: None,
                             model: Some("model-b".into()),
+                            reasoning: None,
                             max_tokens: None,
                             temperature: None,
                         },
@@ -763,6 +877,10 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(current.as_deref(), Some("model-a"));
+
+        let current_model = runtime.current_model_for_session(session.id).await.unwrap();
+        assert_eq!(current_model.provider, "default");
+        assert_eq!(current_model.model.id, "model-a");
     }
 
     #[tokio::test]
@@ -805,6 +923,85 @@ mod tests {
                 .as_ref()
                 .and_then(|cfg| cfg.model.as_deref()),
             Some("model-b")
+        );
+    }
+
+    #[tokio::test]
+    async fn set_session_thought_level_updates_session_override() {
+        let (runtime, store, project) =
+            make_runtime("default", "simple", Project::with_defaults("test")).await;
+        runtime
+            .set_provider(
+                "default",
+                Arc::new(NamedProvider::with_reasoning(
+                    "default",
+                    vec![("model-a", Some(&["low", "medium", "high"]))],
+                )),
+            )
+            .unwrap();
+        runtime
+            .set_loop("simple", Arc::new(RecordingLoop { name: "simple" }))
+            .unwrap();
+
+        let session = Session::new(project.id);
+        let session = store.sessions().create(session.id, session).await.unwrap();
+        let updated = runtime
+            .set_session_thought_level(session.id, "high")
+            .await
+            .unwrap();
+
+        assert_eq!(
+            updated
+                .inference
+                .as_ref()
+                .and_then(|cfg| cfg.reasoning.as_deref()),
+            Some("high")
+        );
+    }
+
+    #[tokio::test]
+    async fn set_session_model_clears_incompatible_thought_level() {
+        let (runtime, store, project) =
+            make_runtime("default", "simple", Project::with_defaults("test")).await;
+        runtime
+            .set_provider(
+                "provider-a",
+                Arc::new(NamedProvider::with_reasoning(
+                    "provider-a",
+                    vec![("model-a", Some(&["low", "medium", "high"]))],
+                )),
+            )
+            .unwrap();
+        runtime
+            .set_provider(
+                "provider-b",
+                Arc::new(NamedProvider::new("provider-b", vec!["model-b"])),
+            )
+            .unwrap();
+        runtime
+            .set_loop("simple", Arc::new(RecordingLoop { name: "simple" }))
+            .unwrap();
+
+        let mut session = Session::new(project.id);
+        session.inference = Some(InferenceConfig {
+            provider: Some("provider-a".into()),
+            model: Some("model-a".into()),
+            reasoning: Some("high".into()),
+            max_tokens: None,
+            temperature: None,
+        });
+        let session = store.sessions().create(session.id, session).await.unwrap();
+        let updated = runtime
+            .set_session_model(session.id, "model-b")
+            .await
+            .unwrap();
+
+        assert_eq!(
+            updated
+                .inference
+                .as_ref()
+                .and_then(|cfg| cfg.reasoning.as_deref()),
+            None
         );
     }
 
@@ -862,6 +1059,7 @@ mod tests {
                         inference: InferenceConfig {
                             provider: None,
                             model: Some("shared".into()),
+                            reasoning: None,
                             max_tokens: None,
                             temperature: None,
                         },
@@ -958,7 +1156,11 @@ mod tests {
             .unwrap();
         let _ = run_turn(&runtime, next_session.id, "hello").await;
 
-        let messages = store.messages().list_for_session(next_session.id).await.unwrap();
+        let messages = store
+            .messages()
+            .list_for_session(next_session.id)
+            .await
+            .unwrap();
         assert!(messages[1].content.contains("provider=second"));
     }
 

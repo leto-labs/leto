@@ -139,6 +139,7 @@ mod tests {
         let update = SessionUpdate::inference(InferenceConfig {
             provider: Some("openai".into()),
             model: Some("gpt-5".into()),
+            reasoning: Some("high".into()),
             max_tokens: None,
             temperature: None,
         });
@@ -147,6 +148,7 @@ mod tests {
             Some(SessionInferenceUpdate::Set(config)) => {
                 assert_eq!(config.provider.as_deref(), Some("openai"));
                 assert_eq!(config.model.as_deref(), Some("gpt-5"));
+                assert_eq!(config.reasoning.as_deref(), Some("high"));
             }
             _ => panic!("expected inference set update"),
         }

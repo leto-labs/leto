@@ -102,7 +102,11 @@ async fn cmd_chat(
         runtime.store().sessions().get(id).await?
     } else {
         let session = Session::new(project_id);
-        runtime.store().sessions().create(session.id, session).await?
+        runtime
+            .store()
+            .sessions()
+            .create(session.id, session)
+            .await?
     };
 
     loop {
@@ -159,7 +163,11 @@ async fn cmd_chat(
 }
 
 async fn cmd_sessions_list(runtime: &Arc<dyn BrainRuntime>, project_id: ProjectId) -> Result<()> {
-    let sessions = runtime.store().sessions().list_for_project(project_id).await?;
+    let sessions = runtime
+        .store()
+        .sessions()
+        .list_for_project(project_id)
+        .await?;
 
     if sessions.is_empty() {
         println!("No sessions found.");
@@ -199,7 +207,11 @@ async fn cmd_sessions_resume(
         );
     }
 
-    let messages = runtime.store().messages().list_for_session(session_id).await?;
+    let messages = runtime
+        .store()
+        .messages()
+        .list_for_session(session_id)
+        .await?;
     if !messages.is_empty() {
         println!(
             "--- Resuming session {} ({} messages) ---",

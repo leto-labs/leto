@@ -191,7 +191,11 @@ impl Provider for ProviderRouter {
         ProviderInfo {
             name: "router".into(),
             default_model: default_provider.info.default_model.clone(),
-            models: self.available_models().into_iter().map(|model| model.model).collect(),
+            models: self
+                .available_models()
+                .into_iter()
+                .map(|model| model.model)
+                .collect(),
         }
     }
 
@@ -364,6 +368,7 @@ mod tests {
             .resolve_provider_name(&InferenceConfig {
                 provider: None,
                 model: Some("special-model".into()),
+                reasoning: None,
                 max_tokens: None,
                 temperature: None,
             })
@@ -380,6 +385,7 @@ mod tests {
             .resolve_provider_name(&InferenceConfig {
                 provider: Some("missing".into()),
                 model: None,
+                reasoning: None,
                 max_tokens: None,
                 temperature: None,
             })

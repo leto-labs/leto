@@ -5,9 +5,7 @@ use futures::{Stream, future::BoxFuture};
 use serde::{Deserialize, Serialize};
 use ulid::Ulid;
 
-use crate::{
-    BrainError, CredentialEntry, CredentialHealth, Message, Project, ProjectId, Session,
-};
+use crate::{BrainError, CredentialEntry, CredentialHealth, Message, Project, ProjectId, Session};
 
 pub type CrudStoreEventStream<E> = Pin<Box<dyn Stream<Item = E> + Send>>;
 pub type StoreEventStream = CrudStoreEventStream<StoreEvent>;
@@ -21,12 +19,25 @@ pub type CredentialStoreKey = (String, String);
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum StoreEvent {
-    ProjectCreated { project: Project },
-    ProjectUpdated { project: Project },
-    ProjectDeleted { project_id: ProjectId },
-    SessionCreated { session: Session },
-    SessionUpdated { session: Session },
-    SessionDeleted { session_id: Ulid, project_id: ProjectId },
+    ProjectCreated {
+        project: Project,
+    },
+    ProjectUpdated {
+        project: Project,
+    },
+    ProjectDeleted {
+        project_id: ProjectId,
+    },
+    SessionCreated {
+        session: Session,
+    },
+    SessionUpdated {
+        session: Session,
+    },
+    SessionDeleted {
+        session_id: Ulid,
+        project_id: ProjectId,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -40,17 +51,32 @@ pub enum ProjectStoreEvent {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SessionStoreEvent {
-    Created { session: Session },
-    Updated { session: Session },
-    Deleted { session_id: Ulid, project_id: ProjectId },
+    Created {
+        session: Session,
+    },
+    Updated {
+        session: Session,
+    },
+    Deleted {
+        session_id: Ulid,
+        project_id: ProjectId,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum MessageStoreEvent {
-    Created { key: MessageStoreKey, message: Message },
-    Updated { key: MessageStoreKey, message: Message },
-    Deleted { key: MessageStoreKey },
+    Created {
+        key: MessageStoreKey,
+        message: Message,
+    },
+    Updated {
+        key: MessageStoreKey,
+        message: Message,
+    },
+    Deleted {
+        key: MessageStoreKey,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -64,7 +90,9 @@ pub enum CredentialStoreEvent {
         key: CredentialStoreKey,
         credential: CredentialEntry,
     },
-    Deleted { key: CredentialStoreKey },
+    Deleted {
+        key: CredentialStoreKey,
+    },
 }
 
 // CrudStore is the shared base for record-oriented stores. It keeps true CRUD
@@ -147,15 +175,10 @@ pub trait CrudStore: Send + Sync {
 pub trait ProjectStore:
     CrudStore<Key = ProjectId, Record = Project, Event = ProjectStoreEvent>
 {
-    fn find_by_root(
-        &self,
-        root: &Path,
-    ) -> BoxFuture<'_, Result<Option<Project>, BrainError>>;
+    fn find_by_root(&self, root: &Path) -> BoxFuture<'_, Result<Option<Project>, BrainError>>;
 }
 
-pub trait SessionStore:
-    CrudStore<Key = Ulid, Record = Session, Event = SessionStoreEvent>
-{
+pub trait SessionStore: CrudStore<Key = Ulid, Record = Session, Event = SessionStoreEvent> {
     fn list_for_project(
         &self,
         project_id: ProjectId,
@@ -165,10 +188,8 @@ pub trait SessionStore:
 pub trait MessageStore:
     CrudStore<Key = MessageStoreKey, Record = Message, Event = MessageStoreEvent>
 {
-    fn list_for_session(
-        &self,
-        session_id: Ulid,
-    ) -> BoxFuture<'_, Result<Vec<Message>, BrainError>>;
+    fn list_for_session(&self, session_id: Ulid)
+    -> BoxFuture<'_, Result<Vec<Message>, BrainError>>;
 }
 
 pub trait CredentialStore:
@@ -238,7 +259,11 @@ mod tests {
         type Record = Project;
         type Event = ProjectStoreEvent;
 
-        fn create(&self, key: ProjectId, record: Project) -> BoxFuture<'_, Result<Project, BrainError>> {
+        fn create(
+            &self,
+            key: ProjectId,
+            record: Project,
+        ) -> BoxFuture<'_, Result<Project, BrainError>> {
             self.created.lock().unwrap().push(key);
             if self.fail_create == Some(key) {
                 return Box::pin(ready(Err(BrainError::Internal("create failed".into()))));
@@ -258,7 +283,11 @@ mod tests {
             Box::pin(ready(Ok(Vec::new())))
         }
 
-        fn update(&self, key: ProjectId, record: Project) -> BoxFuture<'_, Result<Project, BrainError>> {
+        fn update(
+            &self,
+            key: ProjectId,
+            record: Project,
+        ) -> BoxFuture<'_, Result<Project, BrainError>> {
             self.updated.lock().unwrap().push(key);
             if self.fail_update == Some(key) {
                 return Box::pin(ready(Err(BrainError::Internal("update failed".into()))));
@@ -320,10 +349,7 @@ mod tests {
     }
 
     impl ProjectStore for DummyProjectStore {
-        fn find_by_root(
-            &self,
-            _root: &Path,
-        ) -> BoxFuture<'_, Result<Option<Project>, BrainError>> {
+        fn find_by_root(&self, _root: &Path) -> BoxFuture<'_, Result<Option<Project>, BrainError>> {
             Box::pin(ready(Ok(None)))
         }
     }
@@ -335,7 +361,11 @@ mod tests {
         type Record = Session;
         type Event = SessionStoreEvent;
 
-        fn create(&self, _key: Ulid, record: Session) -> BoxFuture<'_, Result<Session, BrainError>> {
+        fn create(
+            &self,
+            _key: Ulid,
+            record: Session,
+        ) -> BoxFuture<'_, Result<Session, BrainError>> {
             Box::pin(ready(Ok(record)))
         }
 
@@ -347,7 +377,11 @@ mod tests {
             Box::pin(ready(Ok(Vec::new())))
         }
 
-        fn update(&self, _key: Ulid, record: Session) -> BoxFuture<'_, Result<Session, BrainError>> {
+        fn update(
+            &self,
+            _key: Ulid,
+            record: Session,
+        ) -> BoxFuture<'_, Result<Session, BrainError>> {
             Box::pin(ready(Ok(record)))
         }
 
@@ -591,21 +625,18 @@ mod tests {
     fn session_and_project_stores_are_usable_through_composed_accessors() {
         let store = DummyStore::new();
 
-        let project =
-            futures::executor::block_on(store.projects().get(Ulid::nil())).unwrap();
+        let project = futures::executor::block_on(store.projects().get(Ulid::nil())).unwrap();
         let session = Session::new(project.id);
-        let session = futures::executor::block_on(
-            store.sessions().create(session.id, session),
-        )
-        .unwrap();
+        let session =
+            futures::executor::block_on(store.sessions().create(session.id, session)).unwrap();
         let sessions =
             futures::executor::block_on(store.sessions().list_for_project(project.id)).unwrap();
-        let messages = futures::executor::block_on(
-            store.messages().list_for_session(session.id),
-        )
-        .unwrap();
+        let messages =
+            futures::executor::block_on(store.messages().list_for_session(session.id)).unwrap();
         let credential = futures::executor::block_on(
-            store.credentials().get(("dummy-provider".into(), "dummy".into())),
+            store
+                .credentials()
+                .get(("dummy-provider".into(), "dummy".into())),
         )
         .unwrap();
 

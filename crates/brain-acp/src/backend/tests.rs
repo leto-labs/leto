@@ -50,6 +50,10 @@ async fn new_session_list_and_load_use_real_store() {
                 .new_session(acp::NewSessionRequest::new(PathBuf::from("/tmp/acp-real")))
                 .await
                 .expect("new session should succeed");
+            assert_eq!(
+                session.config_options.as_ref().map(|options| options.len()),
+                Some(1)
+            );
             #[cfg(feature = "unstable_session_model")]
             assert_eq!(
                 session
@@ -57,6 +61,14 @@ async fn new_session_list_and_load_use_real_store() {
                     .as_ref()
                     .map(|models| models.current_model_id.0.as_ref()),
                 Some("mock-echo")
+            );
+            assert_eq!(
+                session
+                    .config_options
+                    .as_ref()
+                    .and_then(|options| options.first())
+                    .map(|option| option.id.0.as_ref()),
+                Some("model")
             );
 
             connection
@@ -86,6 +98,130 @@ async fn new_session_list_and_load_use_real_store() {
             let notifications = client.take_notifications();
             let streamed = streamed_agent_text(&notifications);
             assert!(streamed.contains("hello from real backend"));
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn set_session_config_option_updates_model_and_exposes_thought_level() {
+    let local_set = tokio::task::LocalSet::new();
+    local_set
+        .run_until(async {
+            let app = build_test_app(0);
+            let (_, connection) =
+                initialized_connection(RecordingClient::default(), app.clone()).await;
+
+            let session = connection
+                .new_session(acp::NewSessionRequest::new(PathBuf::from(
+                    "/tmp/acp-config",
+                )))
+                .await
+                .expect("new session should succeed");
+
+            let response = connection
+                .set_session_config_option(acp::SetSessionConfigOptionRequest::new(
+                    session.session_id.clone(),
+                    "model",
+                    "mock-think",
+                ))
+                .await
+                .expect("set_session_config_option should succeed");
+
+            assert!(
+                response
+                    .config_options
+                    .iter()
+                    .any(|option| option.id.0.as_ref() == "thought_level")
+            );
+
+            let session_id = session
+                .session_id
+                .0
+                .parse()
+                .expect("session id should parse");
+            let stored = app
+                .runtime
+                .store()
+                .sessions()
+                .get(session_id)
+                .await
+                .expect("session should exist");
+            assert_eq!(
+                stored
+                    .inference
+                    .as_ref()
+                    .and_then(|cfg| cfg.model.as_deref()),
+                Some("mock-think")
+            );
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn set_session_config_option_persists_thought_level_override() {
+    let local_set = tokio::task::LocalSet::new();
+    local_set
+        .run_until(async {
+            let app = build_test_app(0);
+            let (_, connection) =
+                initialized_connection(RecordingClient::default(), app.clone()).await;
+
+            let session = connection
+                .new_session(acp::NewSessionRequest::new(PathBuf::from(
+                    "/tmp/acp-thought-level",
+                )))
+                .await
+                .expect("new session should succeed");
+
+            connection
+                .set_session_config_option(acp::SetSessionConfigOptionRequest::new(
+                    session.session_id.clone(),
+                    "model",
+                    "mock-think",
+                ))
+                .await
+                .expect("model config option should succeed");
+
+            let response = connection
+                .set_session_config_option(acp::SetSessionConfigOptionRequest::new(
+                    session.session_id.clone(),
+                    "thought_level",
+                    "high",
+                ))
+                .await
+                .expect("thought level config option should succeed");
+
+            let thought_level = response
+                .config_options
+                .iter()
+                .find(|option| option.id.0.as_ref() == "thought_level")
+                .expect("thought level option should be present");
+            match &thought_level.kind {
+                acp::SessionConfigKind::Select(select) => {
+                    assert_eq!(select.current_value.0.as_ref(), "high");
+                }
+                kind => panic!("unexpected config kind: {kind:?}"),
+            }
+
+            let session_id = session
+                .session_id
+                .0
+                .parse()
+                .expect("session id should parse");
+            let stored = app
+                .runtime
+                .store()
+                .sessions()
+                .get(session_id)
+                .await
+                .expect("session should exist");
+            assert_eq!(
+                stored
+                    .inference
+                    .as_ref()
+                    .and_then(|cfg| cfg.reasoning.as_deref()),
+                Some("high")
+            );
         })
         .await;
 }
