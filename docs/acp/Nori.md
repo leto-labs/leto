@@ -133,6 +133,71 @@ One important nuance: the current UX still thinks in terms of switching between
 ACP agents more than in terms of "raw arbitrary subprocess command". So the
 custom-agent path is real, but it is config-centric rather than ad hoc.
 
+## Modes And Config Gaps
+
+ACP itself now has a native session-control story for:
+
+- session modes
+- session config options
+- `session/set_config_option`
+
+The official docs are explicit:
+
+- Session modes: <https://agentclientprotocol.com/protocol/session-modes>
+- Session config options: <https://agentclientprotocol.com/protocol/session-config-options>
+- Schema: <https://agentclientprotocol.com/protocol/schema#session%2Fset-config-option>
+
+But the current Nori ACP path inspected in this repo is materially narrower
+than ACP-the-protocol.
+
+### Confirmed In The Inspected Nori Path
+
+- unstable `session/set_model` support is clearly wired through the ACP
+  connection and TUI picker flow
+- the user-visible `/model` help text already treats model and reasoning as a
+  combined UX concept
+
+Evidence:
+
+- [`repocache/tilework-tech/nori-cli/codex-rs/acp/src/connection/public_api.rs`](../../repocache/tilework-tech/nori-cli/codex-rs/acp/src/connection/public_api.rs)
+- [`repocache/tilework-tech/nori-cli/codex-rs/tui/src/chatwidget/pickers.rs`](../../repocache/tilework-tech/nori-cli/codex-rs/tui/src/chatwidget/pickers.rs)
+- [`repocache/tilework-tech/nori-cli/codex-rs/tui/src/history_cell/mod.rs`](../../repocache/tilework-tech/nori-cli/codex-rs/tui/src/history_cell/mod.rs)
+
+### Not Found In The Inspected Nori Path
+
+- a generic ACP config-option fetch/render/update path in the TUI
+- an ACP `session/set_config_option` client path comparable to the confirmed
+  `session/set_model` path
+- a clear ACP session-mode picker or mode-change UI path for external ACP
+  agents
+
+This wording is intentional. It does **not** mean those features are impossible
+to add to Nori. It means they were not found in the concrete ACP client path
+inspected here, so the docs should not overclaim current support.
+
+## What This Means For `brain`
+
+The practical architecture conclusion changed once ACP config options became
+the right protocol-native place for controls like thinking level or fast mode.
+
+If the product goal is "serious ACP-native session controls in the main TUI we
+actually want to use," then the cleaner path now looks like:
+
+- keep `brain-acp` protocol-native and runtime-clean
+- treat Nori as the strongest TUI base we have
+- add the missing ACP mode/config-option UX to Nori directly
+
+That is a better boundary than teaching `brain-acp` to emulate client-specific
+combined controls or overloading the model picker with reasoning/speed variants
+just because the current client path is narrower than the protocol.
+
+So the current documentation recommendation is:
+
+- use `acpx` for baseline ACP interoperability
+- use Nori as the main TUI reference
+- prefer a Nori fork/extension over a `brain-acp` bridge if richer ACP session
+  settings are the next product step
+
 ## Fit For `brain`
 
 `nori-cli` is the strongest current TUI candidate we have found so far for a

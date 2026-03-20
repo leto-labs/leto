@@ -158,3 +158,10 @@ After the terminal validation path is documented and runnable, richer manual
 multi-turn validation may be performed in Nori against the same local `brain
 acp` entry point. This is useful for UX confidence, but it is intentionally
 separate from the baseline `acpx` compatibility gate.
+
+One more boundary is worth keeping explicit: if the next product requirement is
+ACP-native session settings such as thought level or fast-mode controls inside
+the main TUI, that should not automatically become a reason to build a
+client-specific bridge in `brain-acp`. `acpx` remains the control-surface
+baseline, while Nori remains the strongest TUI candidate. If Nori lacks a
+generic ACP mode/config-option UX, extending the client is the cleaner fix.

@@ -1,0 +1,3 @@
+[submodule "submodules/nori-cli"]
+	path = submodules/nori-cli
+	url = git@github.com:leto-labs/nori-cli.git

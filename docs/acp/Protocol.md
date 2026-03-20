@@ -143,6 +143,25 @@ This is useful for `brain` because it gives a protocol-native place for:
 - reasoning level or verbosity choices
 - future approval policies
 
+The important practical update is that ACP config options are now the right
+session-level control surface for settings like reasoning or fast-mode style
+knobs. That does **not** mean every client already exposes them well. The
+protocol and the client UX have to be treated as separate questions.
+
+For the current repo decision-making path:
+
+- ACP-the-protocol already supports session modes and config options cleanly
+- some clients, such as Codex ACP, use that surface directly
+- the inspected Nori ACP path appears narrower and more model-centric
+- if richer ACP-native session settings matter in the main TUI, extending the
+  client is cleaner than forcing `brain-acp` to encode client-specific bridge
+  behavior
+
+See also:
+
+- [`ClientCapabilityMatrix.md`](ClientCapabilityMatrix.md)
+- [`Nori.md`](Nori.md)
+
 The protocol does not force a rich mode system immediately. An agent can start
 small and advertise more later.
 
