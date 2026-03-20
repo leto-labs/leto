@@ -127,6 +127,7 @@ first concrete implementation of `BrainRuntime`.
 - **THEN** it SHALL expose the `BrainRuntime` interface over its store and registries
 
 ### Requirement: Native Runtime Turn Resolution
+
 `BrainRuntimeNative` SHALL resolve its provider, tools, and loop directly from
 its registries rather than routing execution through `ProviderRouter`.
 
@@ -143,21 +144,13 @@ Loop resolution SHALL:
 
 Tool collection SHALL use all registered tools.
 
-#### Scenario: Turn uses default provider and loop
-- **WHEN** no explicit provider, model, or loop override is configured
-- **THEN** the runtime SHALL execute the turn with its configured default provider and default loop
+#### Scenario: Session loop helper persists an override
+- **WHEN** `set_session_loop()` updates a session to a registered loop
+- **THEN** the persisted session SHALL store that loop override
 
-#### Scenario: Turn resolves provider by model without router
-- **WHEN** a model is configured and exactly one registered provider advertises that model
-- **THEN** the runtime SHALL use that provider
-
-#### Scenario: Ambiguous model selection fails
-- **WHEN** multiple registered providers advertise the requested model
-- **THEN** the runtime SHALL emit an error rather than arbitrarily selecting one
-
-#### Scenario: Session override selects a different loop
-- **WHEN** a session has a loop override configured
-- **THEN** the runtime SHALL use the named registered loop for that turn
+#### Scenario: Invalid session loop is rejected
+- **WHEN** `set_session_loop()` is called with an unregistered loop name
+- **THEN** the runtime SHALL reject the update
 
 ### Requirement: Native Runtime Cancellation
 `BrainRuntimeNative` SHALL own active-turn cancellation for its sessions.

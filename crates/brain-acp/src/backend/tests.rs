@@ -3,7 +3,8 @@ use std::{path::PathBuf, time::Duration};
 use agent_client_protocol::{self as acp, Agent as _};
 
 use super::test_support::{
-    RecordingClient, build_test_app, initialized_connection, streamed_agent_text,
+    RecordingClient, build_test_app, build_test_app_with_loops, initialized_connection,
+    streamed_agent_text,
 };
 
 #[tokio::test(flavor = "current_thread")]
@@ -158,6 +159,36 @@ async fn set_session_config_option_updates_model_and_exposes_thought_level() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn new_session_includes_loop_config_when_multiple_loops_are_registered() {
+    let local_set = tokio::task::LocalSet::new();
+    local_set
+        .run_until(async {
+            let app = build_test_app_with_loops(0, &["planner", "simple"]);
+            let (_, connection) =
+                initialized_connection(RecordingClient::default(), app).await;
+
+            let session = connection
+                .new_session(acp::NewSessionRequest::new(PathBuf::from("/tmp/acp-loop-config")))
+                .await
+                .expect("new session should succeed");
+
+            let loop_option = session
+                .config_options
+                .as_ref()
+                .and_then(|options| options.iter().find(|option| option.id.0.as_ref() == "loop"))
+                .expect("loop option should be present");
+
+            match &loop_option.kind {
+                acp::SessionConfigKind::Select(select) => {
+                    assert_eq!(select.current_value.0.as_ref(), "simple");
+                }
+                kind => panic!("unexpected config kind: {kind:?}"),
+            }
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn set_session_config_option_persists_thought_level_override() {
     let local_set = tokio::task::LocalSet::new();
     local_set
@@ -222,6 +253,58 @@ async fn set_session_config_option_persists_thought_level_override() {
                     .and_then(|cfg| cfg.reasoning.as_deref()),
                 Some("high")
             );
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn set_session_config_option_persists_loop_override() {
+    let local_set = tokio::task::LocalSet::new();
+    local_set
+        .run_until(async {
+            let app = build_test_app_with_loops(0, &["planner", "simple"]);
+            let (_, connection) =
+                initialized_connection(RecordingClient::default(), app.clone()).await;
+
+            let session = connection
+                .new_session(acp::NewSessionRequest::new(PathBuf::from("/tmp/acp-loop")))
+                .await
+                .expect("new session should succeed");
+
+            let response = connection
+                .set_session_config_option(acp::SetSessionConfigOptionRequest::new(
+                    session.session_id.clone(),
+                    "loop",
+                    "planner",
+                ))
+                .await
+                .expect("loop config option should succeed");
+
+            let loop_option = response
+                .config_options
+                .iter()
+                .find(|option| option.id.0.as_ref() == "loop")
+                .expect("loop option should be present");
+            match &loop_option.kind {
+                acp::SessionConfigKind::Select(select) => {
+                    assert_eq!(select.current_value.0.as_ref(), "planner");
+                }
+                kind => panic!("unexpected config kind: {kind:?}"),
+            }
+
+            let session_id = session
+                .session_id
+                .0
+                .parse()
+                .expect("session id should parse");
+            let stored = app
+                .runtime
+                .store()
+                .sessions()
+                .get(session_id)
+                .await
+                .expect("session should exist");
+            assert_eq!(stored.loop_name.as_deref(), Some("planner"));
         })
         .await;
 }

@@ -212,6 +212,27 @@ impl BrainRuntime for BrainRuntimeNative {
         ))
     }
 
+    fn current_loop_name_for_session(
+        &self,
+        session_id: Ulid,
+    ) -> BoxFuture<'_, Result<Option<String>, BrainError>> {
+        let store = self.store.clone();
+        let default_loop_name = self.default_loop_name.clone();
+        Box::pin(async move {
+            let session = store.sessions().get(session_id).await?;
+            if let Some(loop_name) = session.loop_name {
+                return Ok(Some(loop_name));
+            }
+
+            let project = store.projects().get(session.project_id).await?;
+            Ok(project
+                .config
+                .agent
+                .loop_name
+                .or_else(|| Some(default_loop_name)))
+        })
+    }
+
     fn current_model_id_for_session(
         &self,
         session_id: Ulid,
@@ -957,6 +978,51 @@ mod tests {
                 .and_then(|cfg| cfg.reasoning.as_deref()),
             Some("high")
         );
+    }
+
+    #[tokio::test]
+    async fn set_session_loop_updates_session_override() {
+        let (runtime, store, project) =
+            make_runtime("default", "simple", Project::with_defaults("test")).await;
+        runtime
+            .set_provider("default", Arc::new(NamedProvider::new("default", vec!["model-a"])))
+            .unwrap();
+        runtime
+            .set_loop("simple", Arc::new(RecordingLoop { name: "simple" }))
+            .unwrap();
+        runtime
+            .set_loop(
+                "planner",
+                Arc::new(RecordingLoop { name: "planner" }),
+            )
+            .unwrap();
+
+        let session = Session::new(project.id);
+        let session = store.sessions().create(session.id, session).await.unwrap();
+        let updated = runtime.set_session_loop(session.id, "planner").await.unwrap();
+
+        assert_eq!(updated.loop_name.as_deref(), Some("planner"));
+    }
+
+    #[tokio::test]
+    async fn set_session_loop_rejects_unknown_loop() {
+        let (runtime, store, project) =
+            make_runtime("default", "simple", Project::with_defaults("test")).await;
+        runtime
+            .set_provider("default", Arc::new(NamedProvider::new("default", vec!["model-a"])))
+            .unwrap();
+        runtime
+            .set_loop("simple", Arc::new(RecordingLoop { name: "simple" }))
+            .unwrap();
+
+        let session = Session::new(project.id);
+        let session = store.sessions().create(session.id, session).await.unwrap();
+        let error = runtime
+            .set_session_loop(session.id, "missing")
+            .await
+            .expect_err("unknown loop should fail");
+
+        assert!(error.to_string().contains("loop not registered: missing"));
     }
 
     #[tokio::test]

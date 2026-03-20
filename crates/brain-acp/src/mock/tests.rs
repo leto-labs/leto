@@ -86,7 +86,7 @@ async fn new_session_returns_modes_and_config_options() {
                 session.modes.as_ref().map(|m| m.current_mode_id.0.as_ref()),
                 Some("ask")
             );
-            assert_eq!(session.config_options.as_ref().map(Vec::len), Some(2));
+            assert_eq!(session.config_options.as_ref().map(Vec::len), Some(3));
             #[cfg(feature = "unstable_session_model")]
             assert_eq!(
                 session
@@ -835,7 +835,7 @@ async fn load_session_replays_seed_history_and_state() {
                 response.modes.as_ref().map(|m| m.current_mode_id.0.as_ref()),
                 Some("ask")
             );
-            assert_eq!(response.config_options.as_ref().map(Vec::len), Some(2));
+            assert_eq!(response.config_options.as_ref().map(Vec::len), Some(3));
 
             let notifications = client.take_notifications();
             assert!(notifications.iter().any(|notification| matches!(
@@ -999,6 +999,42 @@ async fn set_session_config_option_returns_updated_values() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn set_session_config_option_updates_mock_loop() {
+    let local_set = tokio::task::LocalSet::new();
+    local_set
+        .run_until(async {
+            let (_, connection) = initialized_connection(RecordingClient::default()).await;
+            let session = connection
+                .new_session(acp::NewSessionRequest::new(PathBuf::from("/tmp/mock-loop")))
+                .await
+                .expect("new session should succeed");
+
+            let response = connection
+                .set_session_config_option(acp::SetSessionConfigOptionRequest::new(
+                    session.session_id,
+                    "loop",
+                    "planner",
+                ))
+                .await
+                .expect("set_session_config_option should succeed");
+
+            let updated = response
+                .config_options
+                .into_iter()
+                .find(|option| option.id.0.as_ref() == "loop")
+                .expect("loop option should be present");
+
+            match updated.kind {
+                acp::SessionConfigKind::Select(select) => {
+                    assert_eq!(select.current_value.0.as_ref(), "planner");
+                }
+                _ => panic!("expected select config option"),
+            }
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn ext_method_returns_mock_response() {
     let local_set = tokio::task::LocalSet::new();
     local_set
@@ -1093,7 +1129,7 @@ async fn fork_session_clones_session_state() {
                 .expect("fork should succeed");
 
             assert!(fork.session_id.0.as_ref().starts_with("mock-session-"));
-            assert_eq!(fork.config_options.as_ref().map(Vec::len), Some(2));
+            assert_eq!(fork.config_options.as_ref().map(Vec::len), Some(3));
         })
         .await;
 }
@@ -1119,7 +1155,7 @@ async fn resume_session_returns_state_without_replay() {
                 .await
                 .expect("resume should succeed");
 
-            assert_eq!(response.config_options.as_ref().map(Vec::len), Some(2));
+            assert_eq!(response.config_options.as_ref().map(Vec::len), Some(3));
             assert!(client.take_notifications().is_empty());
         })
         .await;

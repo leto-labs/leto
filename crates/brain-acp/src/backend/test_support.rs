@@ -97,6 +97,13 @@ impl acp::Client for RecordingClient {
 }
 
 pub(super) fn build_test_app(provider_delay_ms: u64) -> Arc<BackendApp> {
+    build_test_app_with_loops(provider_delay_ms, &["simple"])
+}
+
+pub(super) fn build_test_app_with_loops(
+    provider_delay_ms: u64,
+    loop_names: &[&str],
+) -> Arc<BackendApp> {
     let store: Arc<dyn Store> = Arc::new(InMemoryStore::new());
     let runtime = Arc::new(BrainRuntimeNative::new(store, "mock", "simple"));
     runtime
@@ -105,9 +112,11 @@ pub(super) fn build_test_app(provider_delay_ms: u64) -> Arc<BackendApp> {
             Arc::new(MockProvider::new().with_delay(provider_delay_ms)),
         )
         .expect("mock provider should register");
-    runtime
-        .set_loop("simple", Arc::new(SimpleLoop))
-        .expect("simple loop should register");
+    for loop_name in loop_names {
+        runtime
+            .set_loop((*loop_name).to_owned(), Arc::new(SimpleLoop))
+            .expect("loop should register");
+    }
     let runtime: Arc<dyn BrainRuntime> = runtime;
     Arc::new(BackendApp::new(runtime))
 }

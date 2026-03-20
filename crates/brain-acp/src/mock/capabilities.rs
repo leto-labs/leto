@@ -10,10 +10,14 @@ pub(super) const MODE_ARCHITECT: &str = "architect";
 pub(super) const MODE_CODE: &str = "code";
 pub(super) const CONFIG_REASONING: &str = "reasoning_level";
 pub(super) const CONFIG_APPROVAL: &str = "approval_preset";
+pub(super) const CONFIG_LOOP: &str = "loop";
+pub(super) const CATEGORY_LOOP: &str = "_loop";
 pub(super) const REASONING_STANDARD: &str = "standard";
 pub(super) const REASONING_DEEP: &str = "deep";
 pub(super) const APPROVAL_DEFAULT: &str = "default";
 pub(super) const APPROVAL_FULL: &str = "full-access";
+pub(super) const LOOP_SIMPLE: &str = "simple";
+pub(super) const LOOP_PLANNER: &str = "planner";
 pub(super) const SESSION_PAGE_SIZE: usize = 2;
 #[cfg(feature = "unstable_session_model")]
 pub(super) const MODEL_FAST: &str = "brain-mock-fast";
@@ -117,6 +121,17 @@ pub(super) fn config_options(session: &MockSession) -> Vec<acp::SessionConfigOpt
             ],
         )
         .description("Mock permission posture used only for ACP UI validation."),
+        acp::SessionConfigOption::select(
+            CONFIG_LOOP,
+            "Loop",
+            session.loop_name.clone(),
+            vec![
+                acp::SessionConfigSelectOption::new(LOOP_SIMPLE, "Simple"),
+                acp::SessionConfigSelectOption::new(LOOP_PLANNER, "Planner"),
+            ],
+        )
+        .description("Mock loop selector used to validate ACP session loop UX.")
+        .category(acp::SessionConfigOptionCategory::Other(CATEGORY_LOOP.to_owned())),
     ]
 }
 

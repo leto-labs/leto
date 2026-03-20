@@ -17,8 +17,9 @@ use serde_json::{json, value::to_raw_value};
 use tokio::sync::{mpsc, oneshot};
 
 use super::capabilities::{
-    APPROVAL_DEFAULT, APPROVAL_FULL, AUTH_METHOD_ID, CONFIG_APPROVAL, CONFIG_REASONING, MODE_ASK,
-    MODEL_DEEP, MODEL_FAST, REASONING_DEEP, REASONING_STANDARD, SESSION_PAGE_SIZE,
+    APPROVAL_DEFAULT, APPROVAL_FULL, AUTH_METHOD_ID, CONFIG_APPROVAL, CONFIG_LOOP,
+    CONFIG_REASONING, LOOP_PLANNER, LOOP_SIMPLE, MODE_ASK, MODEL_DEEP, MODEL_FAST,
+    REASONING_DEEP, REASONING_STANDARD, SESSION_PAGE_SIZE,
     available_commands_update, config_options, current_mode_update, info_update, list_info,
     model_state, session_mode_state,
 };
@@ -93,6 +94,7 @@ impl MockAgent {
                 MODE_ASK,
                 REASONING_STANDARD,
                 APPROVAL_DEFAULT,
+                LOOP_SIMPLE,
             ))),
             session_update_tx,
             client_connection: Rc::new(RefCell::new(None)),
@@ -1211,6 +1213,7 @@ impl acp::Agent for MockAgent {
                 MODE_ASK,
                 REASONING_STANDARD,
                 APPROVAL_DEFAULT,
+                LOOP_SIMPLE,
             );
             let session = state.get_session(&session_id)?.clone();
             (
@@ -1265,6 +1268,7 @@ impl acp::Agent for MockAgent {
                 MODE_ASK,
                 REASONING_STANDARD,
                 APPROVAL_DEFAULT,
+                LOOP_SIMPLE,
             )?;
             state.get_session(&arguments.session_id)?.clone()
         };
@@ -1495,6 +1499,13 @@ impl acp::Agent for MockAgent {
                         return Err(acp::Error::invalid_params());
                     }
                     session.approval_preset = value;
+                }
+                CONFIG_LOOP => {
+                    let value = arguments.value.clone();
+                    if value.0.as_ref() != LOOP_SIMPLE && value.0.as_ref() != LOOP_PLANNER {
+                        return Err(acp::Error::invalid_params());
+                    }
+                    session.loop_name = value;
                 }
                 _ => return Err(acp::Error::invalid_params()),
             }

@@ -2,6 +2,8 @@ use agent_client_protocol as acp;
 
 pub const CONFIG_MODEL: &str = "model";
 pub const CONFIG_THOUGHT_LEVEL: &str = "thought_level";
+pub const CONFIG_LOOP: &str = "loop";
+pub const CATEGORY_LOOP: &str = "_loop";
 
 pub fn initialize_response(protocol_version: acp::ProtocolVersion) -> acp::InitializeResponse {
     let capabilities = acp::AgentCapabilities::new()
@@ -47,6 +49,8 @@ pub fn config_options(
     current_model: &brain_core::ProviderModelInfo,
     effective_inference: &brain_core::InferenceConfig,
     models: &[brain_core::ProviderModelInfo],
+    current_loop_name: Option<&str>,
+    loops: &[String],
 ) -> Vec<acp::SessionConfigOption> {
     let mut provider_groups = Vec::<(String, Vec<acp::SessionConfigSelectOption>)>::new();
     for model in models {
@@ -98,6 +102,27 @@ pub fn config_options(
             )
             .description("Controls how much reasoning effort the current model should use.")
             .category(acp::SessionConfigOptionCategory::ThoughtLevel),
+        );
+    }
+
+    if loops.len() > 1 {
+        let current_value = current_loop_name
+            .filter(|value| loops.iter().any(|loop_name| loop_name == value))
+            .map(str::to_owned)
+            .unwrap_or_else(|| loops[0].clone());
+        config_options.push(
+            acp::SessionConfigOption::select(
+                CONFIG_LOOP,
+                "Loop",
+                current_value,
+                loops.iter()
+                    .map(|loop_name| {
+                        acp::SessionConfigSelectOption::new(loop_name.clone(), title_case_words(loop_name))
+                    })
+                    .collect::<Vec<_>>(),
+            )
+            .description("Selects the registered agent loop used for this session.")
+            .category(acp::SessionConfigOptionCategory::Other(CATEGORY_LOOP.to_owned())),
         );
     }
 
@@ -193,10 +218,34 @@ mod tests {
                 temperature: None,
             },
             &models,
+            Some("planner"),
+            &["planner".into(), "simple".into()],
         );
 
-        assert_eq!(options.len(), 2);
+        assert_eq!(options.len(), 3);
         assert_eq!(options[0].id.0.as_ref(), CONFIG_MODEL);
         assert_eq!(options[1].id.0.as_ref(), CONFIG_THOUGHT_LEVEL);
+        assert_eq!(options[2].id.0.as_ref(), CONFIG_LOOP);
+    }
+
+    #[test]
+    fn config_options_omit_loop_when_only_one_loop_is_registered() {
+        let current_model = model("openai", "gpt-5.4", "GPT-5.4", None);
+        let options = config_options(
+            &current_model,
+            &brain_core::InferenceConfig {
+                provider: Some("openai".into()),
+                model: Some("gpt-5.4".into()),
+                reasoning: None,
+                max_tokens: None,
+                temperature: None,
+            },
+            std::slice::from_ref(&current_model),
+            Some("simple"),
+            &["simple".into()],
+        );
+
+        assert_eq!(options.len(), 1);
+        assert_eq!(options[0].id.0.as_ref(), CONFIG_MODEL);
     }
 }

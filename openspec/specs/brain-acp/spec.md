@@ -29,21 +29,22 @@ The backend SHALL:
 The real `brain-acp` backend SHALL expose ACP `configOptions` for session
 settings.
 
-The first real surface SHALL include:
+The real surface SHALL include:
 
 - `model`
 - `thought_level`
+- `loop` when more than one loop is registered
 
 The backend SHALL include those config options on both `session/new` and
 `session/load`.
 
-#### Scenario: New session includes config options
-- **WHEN** ACP creates a new real backend session
-- **THEN** the response SHALL include ACP `configOptions`
+#### Scenario: Real backend omits loop config when no alternative exists
+- **WHEN** ACP creates or loads a real backend session with only one registered loop
+- **THEN** the response SHALL omit the `loop` config option
 
-#### Scenario: Loaded session includes config options
-- **WHEN** ACP loads a real backend session
-- **THEN** the response SHALL include ACP `configOptions`
+#### Scenario: Real backend exposes loop config when multiple loops are registered
+- **WHEN** ACP creates or loads a real backend session with multiple registered loops
+- **THEN** the response SHALL include a `loop` config option
 
 ### Requirement: Real Backend Supports Session Config Mutation
 
@@ -53,16 +54,12 @@ The backend SHALL:
 
 - accept `model` updates
 - accept `thought_level` updates when supported by the effective model
+- accept `loop` updates when the named loop is registered
 - return the full current config-option snapshot after each update
 
-#### Scenario: Model update returns full config options
-- **WHEN** ACP sets the real backend session `model`
-- **THEN** the backend SHALL persist the session inference update
-- **AND** return the full current `configOptions`
-
-#### Scenario: Thought-level update returns full config options
-- **WHEN** ACP sets the real backend session `thought_level`
-- **THEN** the backend SHALL persist the session inference update
+#### Scenario: Loop update returns full config options
+- **WHEN** ACP sets the real backend session `loop`
+- **THEN** the backend SHALL persist the session loop override
 - **AND** return the full current `configOptions`
 
 ### Requirement: Real Backend Groups Model Options By Provider

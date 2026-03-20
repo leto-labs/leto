@@ -9,7 +9,7 @@ use super::app::BackendApp;
 #[cfg(feature = "unstable_session_model")]
 use super::capabilities::session_model_state;
 use super::capabilities::{
-    CONFIG_MODEL, CONFIG_THOUGHT_LEVEL, config_options, initialize_response, list_info,
+    CONFIG_LOOP, CONFIG_MODEL, CONFIG_THOUGHT_LEVEL, config_options, initialize_response, list_info,
     session_info_update,
 };
 use super::errors::{internal_error, map_brain_error};
@@ -148,11 +148,29 @@ impl BackendAgent {
             .effective_inference_for_session(session_id)
             .await
             .map_err(map_brain_error)?;
+        let current_loop_name = self
+            .app
+            .runtime
+            .current_loop_name_for_session(session_id)
+            .await
+            .map_err(map_brain_error)?;
         let models = self.app.runtime.list_models().map_err(map_brain_error)?;
+        let mut loops = self
+            .app
+            .runtime
+            .loops()
+            .list()
+            .map_err(map_brain_error)?
+            .into_iter()
+            .map(|(name, _)| name)
+            .collect::<Vec<_>>();
+        loops.sort();
         Ok(config_options(
             &current_model,
             &effective_inference,
             &models,
+            current_loop_name.as_deref(),
+            &loops,
         ))
     }
 }
@@ -371,6 +389,13 @@ impl acp::Agent for BackendAgent {
                 self.app
                     .runtime
                     .set_session_thought_level(session_id, arguments.value.0.as_ref())
+                    .await
+                    .map_err(map_brain_error)?;
+            }
+            CONFIG_LOOP => {
+                self.app
+                    .runtime
+                    .set_session_loop(session_id, arguments.value.0.as_ref())
                     .await
                     .map_err(map_brain_error)?;
             }

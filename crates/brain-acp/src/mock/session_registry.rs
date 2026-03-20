@@ -46,13 +46,19 @@ pub(super) struct MockSession {
     pub(super) mode_id: acp::SessionModeId,
     pub(super) reasoning_level: acp::SessionConfigValueId,
     pub(super) approval_preset: acp::SessionConfigValueId,
+    pub(super) loop_name: acp::SessionConfigValueId,
     #[cfg(feature = "unstable_session_model")]
     pub(super) model_id: acp::ModelId,
     pub(super) closed: bool,
 }
 
 impl MockSession {
-    pub(super) fn seeded(mode_ask: &str, reasoning_standard: &str, approval_default: &str) -> Self {
+    pub(super) fn seeded(
+        mode_ask: &str,
+        reasoning_standard: &str,
+        approval_default: &str,
+        loop_simple: &str,
+    ) -> Self {
         Self {
             cwd: PathBuf::from("/mock/seeded"),
             title: "Seeded Mock Session".to_owned(),
@@ -66,6 +72,7 @@ impl MockSession {
             mode_id: acp::SessionModeId::new(mode_ask),
             reasoning_level: acp::SessionConfigValueId::new(reasoning_standard),
             approval_preset: acp::SessionConfigValueId::new(approval_default),
+            loop_name: acp::SessionConfigValueId::new(loop_simple),
             #[cfg(feature = "unstable_session_model")]
             model_id: acp::ModelId::new("brain-mock-fast"),
             closed: false,
@@ -78,8 +85,15 @@ impl MockSession {
         mode_ask: &str,
         reasoning_standard: &str,
         approval_default: &str,
+        loop_simple: &str,
     ) -> Self {
-        let mut session = Self::new(cwd, mode_ask, reasoning_standard, approval_default);
+        let mut session = Self::new(
+            cwd,
+            mode_ask,
+            reasoning_standard,
+            approval_default,
+            loop_simple,
+        );
         session.title = format!("Restored Mock Session: {}", session_id.0.as_ref());
         session.history.push(MockMessage::agent(
             "This mock session was reconstructed to satisfy an external ACP client load request.",
@@ -92,6 +106,7 @@ impl MockSession {
         mode_ask: &str,
         reasoning_standard: &str,
         approval_default: &str,
+        loop_simple: &str,
     ) -> Self {
         let default_title = cwd
             .file_name()
@@ -107,6 +122,7 @@ impl MockSession {
             mode_id: acp::SessionModeId::new(mode_ask),
             reasoning_level: acp::SessionConfigValueId::new(reasoning_standard),
             approval_preset: acp::SessionConfigValueId::new(approval_default),
+            loop_name: acp::SessionConfigValueId::new(loop_simple),
             #[cfg(feature = "unstable_session_model")]
             model_id: acp::ModelId::new("brain-mock-fast"),
             closed: false,
@@ -122,11 +138,16 @@ pub(super) struct MockState {
 }
 
 impl MockState {
-    pub(super) fn seeded(mode_ask: &str, reasoning_standard: &str, approval_default: &str) -> Self {
+    pub(super) fn seeded(
+        mode_ask: &str,
+        reasoning_standard: &str,
+        approval_default: &str,
+        loop_simple: &str,
+    ) -> Self {
         let mut sessions = HashMap::new();
         sessions.insert(
             acp::SessionId::new(SEEDED_SESSION_ID),
-            MockSession::seeded(mode_ask, reasoning_standard, approval_default),
+            MockSession::seeded(mode_ask, reasoning_standard, approval_default, loop_simple),
         );
 
         Self {
@@ -143,6 +164,7 @@ impl MockState {
         mode_ask: &str,
         reasoning_standard: &str,
         approval_default: &str,
+        loop_simple: &str,
     ) -> acp::SessionId {
         let session_id = acp::SessionId::new(format!("mock-session-{}", self.next_session_index));
         self.next_session_index += 1;
@@ -153,6 +175,7 @@ impl MockState {
                 mode_ask,
                 reasoning_standard,
                 approval_default,
+                loop_simple,
             ),
         );
         session_id
@@ -202,6 +225,7 @@ impl MockState {
         mode_ask: &str,
         reasoning_standard: &str,
         approval_default: &str,
+        loop_simple: &str,
     ) -> Result<(), acp::Error> {
         if self.sessions.contains_key(session_id) {
             return Ok(());
@@ -228,6 +252,7 @@ impl MockState {
                 mode_ask,
                 reasoning_standard,
                 approval_default,
+                loop_simple,
             ),
         );
         Ok(())

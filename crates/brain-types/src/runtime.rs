@@ -72,6 +72,21 @@ pub trait BrainRuntime: Send + Sync {
         session_id: Ulid,
     ) -> BoxFuture<'_, Result<AgentConfig, BrainError>>;
 
+    fn current_loop_name_for_session(
+        &self,
+        session_id: Ulid,
+    ) -> BoxFuture<'_, Result<Option<String>, BrainError>> {
+        Box::pin(async move {
+            let session = self.store().sessions().get(session_id).await?;
+            if let Some(loop_name) = session.loop_name {
+                return Ok(Some(loop_name));
+            }
+
+            let project = self.store().projects().get(session.project_id).await?;
+            Ok(project.config.agent.loop_name)
+        })
+    }
+
     fn list_models(&self) -> Result<Vec<ProviderModelInfo>, BrainError> {
         let mut models = self
             .providers()
@@ -231,6 +246,25 @@ pub trait BrainRuntime: Send + Sync {
             inference.reasoning = Some(thought_level);
             session.inference = Some(inference);
 
+            self.store().sessions().update(session.id, session).await
+        })
+    }
+
+    fn set_session_loop(
+        &self,
+        session_id: Ulid,
+        loop_name: &str,
+    ) -> BoxFuture<'_, Result<Session, BrainError>> {
+        let loop_name = loop_name.to_owned();
+        Box::pin(async move {
+            if self.loops().get(&loop_name).is_none() {
+                return Err(BrainError::Internal(format!(
+                    "loop not registered: {loop_name}"
+                )));
+            }
+
+            let mut session = self.store().sessions().get(session_id).await?;
+            session.loop_name = Some(loop_name);
             self.store().sessions().update(session.id, session).await
         })
     }
@@ -837,6 +871,10 @@ mod tests {
         assert_eq!(current_model.provider, "dummy-provider");
         assert_eq!(current_model.model.id, "dummy-model");
 
+        let current_loop =
+            futures::executor::block_on(runtime.current_loop_name_for_session(session.id)).unwrap();
+        assert_eq!(current_loop.as_deref(), None);
+
         let updated =
             futures::executor::block_on(runtime.set_session_thought_level(session.id, "high"))
                 .unwrap();
@@ -847,6 +885,24 @@ mod tests {
                 .and_then(|config| config.reasoning.as_deref()),
             Some("high")
         );
+
+        let updated =
+            futures::executor::block_on(runtime.set_session_loop(session.id, "dummy-loop"))
+                .unwrap();
+        assert_eq!(updated.loop_name.as_deref(), Some("dummy-loop"));
+    }
+
+    #[test]
+    fn trait_level_loop_helper_rejects_unknown_loop() {
+        let runtime = DummyRuntime;
+        let session = Session::new(Ulid::nil());
+        let session =
+            futures::executor::block_on(runtime.store().sessions().create(session.id, session))
+                .unwrap();
+
+        let error = futures::executor::block_on(runtime.set_session_loop(session.id, "missing"))
+            .expect_err("unknown loop should fail");
+        assert!(error.to_string().contains("loop not registered: missing"));
     }
 
     #[test]
