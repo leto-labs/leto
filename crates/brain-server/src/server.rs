@@ -1,13 +1,14 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use chrono::Utc;
 use futures::StreamExt;
 use futures::future::BoxFuture;
 use tokio::sync::{RwLock, broadcast};
 use tokio_util::sync::CancellationToken;
 use ulid::Ulid;
 
-use brain_core::Brain;
+use brain_core::{Brain, OpenAiConfigPreset};
 use brain_types::*;
 
 use crate::api::BrainApi;
@@ -46,15 +47,15 @@ impl BrainApi for BrainServer {
     // -- Project management --
 
     fn create_project(&self, project: Project) -> BoxFuture<'_, Result<Project, BrainError>> {
-        Box::pin(async move { self.inner.brain.store.project_create(project).await })
+        Box::pin(async move { self.inner.brain.store.projects().create(project.id, project).await })
     }
 
     fn list_projects(&self) -> BoxFuture<'_, Result<Vec<Project>, BrainError>> {
-        Box::pin(async move { self.inner.brain.store.project_list().await })
+        Box::pin(async move { self.inner.brain.store.projects().list().await })
     }
 
     fn get_project(&self, id: ProjectId) -> BoxFuture<'_, Result<Project, BrainError>> {
-        Box::pin(async move { self.inner.brain.store.project_get(id).await })
+        Box::pin(async move { self.inner.brain.store.projects().get(id).await })
     }
 
     fn update_project(
@@ -62,28 +63,42 @@ impl BrainApi for BrainServer {
         id: ProjectId,
         update: ProjectUpdate,
     ) -> BoxFuture<'_, Result<(), BrainError>> {
-        Box::pin(async move { self.inner.brain.store.project_update(id, update).await })
+        Box::pin(async move {
+            let mut project = self.inner.brain.store.projects().get(id).await?;
+            if let Some(name) = update.name {
+                project.name = Some(name);
+            }
+            if let Some(config) = update.config {
+                project.config = config;
+            }
+            project.updated_at = Utc::now();
+            self.inner.brain.store.projects().update(id, project).await?;
+            Ok(())
+        })
     }
 
     fn delete_project(&self, id: ProjectId) -> BoxFuture<'_, Result<(), BrainError>> {
-        Box::pin(async move { self.inner.brain.store.project_delete(id).await })
+        Box::pin(async move { self.inner.brain.store.projects().delete(id).await })
     }
 
     // -- Session management --
 
     fn create_session(&self, project_id: ProjectId) -> BoxFuture<'_, Result<Session, BrainError>> {
-        Box::pin(async move { self.inner.brain.store.session_create(project_id).await })
+        Box::pin(async move {
+            let session = Session::new(project_id);
+            self.inner.brain.store.sessions().create(session.id, session).await
+        })
     }
 
     fn list_sessions(
         &self,
         project_id: ProjectId,
     ) -> BoxFuture<'_, Result<Vec<Session>, BrainError>> {
-        Box::pin(async move { self.inner.brain.store.session_list(project_id).await })
+        Box::pin(async move { self.inner.brain.store.sessions().list_for_project(project_id).await })
     }
 
     fn get_session(&self, id: Ulid) -> BoxFuture<'_, Result<Session, BrainError>> {
-        Box::pin(async move { self.inner.brain.store.session_get(id).await })
+        Box::pin(async move { self.inner.brain.store.sessions().get(id).await })
     }
 
     fn update_session(
@@ -91,17 +106,37 @@ impl BrainApi for BrainServer {
         id: Ulid,
         update: SessionUpdate,
     ) -> BoxFuture<'_, Result<(), BrainError>> {
-        Box::pin(async move { self.inner.brain.store.session_update(id, update).await })
+        Box::pin(async move {
+            let mut session = self.inner.brain.store.sessions().get(id).await?;
+            if let Some(title) = update.title {
+                session.title = Some(title);
+            }
+            if let Some(inference) = update.inference {
+                match inference {
+                    SessionInferenceUpdate::Set(config) => session.inference = Some(config),
+                    SessionInferenceUpdate::Clear => session.inference = None,
+                }
+            }
+            if let Some(loop_name) = update.loop_name {
+                match loop_name {
+                    SessionLoopUpdate::Set(loop_name) => session.loop_name = Some(loop_name),
+                    SessionLoopUpdate::Clear => session.loop_name = None,
+                }
+            }
+            session.updated_at = Utc::now();
+            self.inner.brain.store.sessions().update(id, session).await?;
+            Ok(())
+        })
     }
 
     fn delete_session(&self, id: Ulid) -> BoxFuture<'_, Result<(), BrainError>> {
-        Box::pin(async move { self.inner.brain.store.session_delete(id).await })
+        Box::pin(async move { self.inner.brain.store.sessions().delete(id).await })
     }
 
     // -- Message history --
 
     fn list_messages(&self, session_id: Ulid) -> BoxFuture<'_, Result<Vec<Message>, BrainError>> {
-        Box::pin(async move { self.inner.brain.store.message_list(session_id).await })
+        Box::pin(async move { self.inner.brain.store.messages().list_for_session(session_id).await })
     }
 
     // -- Turn management --
@@ -191,7 +226,23 @@ impl BrainApi for BrainServer {
     fn list_credentials(
         &self,
     ) -> BoxFuture<'_, Result<Vec<(String, CredentialEntry)>, BrainError>> {
-        Box::pin(async move { self.inner.brain.store.credential_list().await })
+        Box::pin(async move {
+            let mut credentials = Vec::new();
+            for preset in OpenAiConfigPreset::ALL {
+                let provider_name = preset.name.to_owned();
+                for entry in self
+                    .inner
+                    .brain
+                    .store
+                    .credentials()
+                    .list_for_provider(preset.name)
+                    .await?
+                {
+                    credentials.push((provider_name.clone(), entry));
+                }
+            }
+            Ok(credentials)
+        })
     }
 
     fn get_credentials(
@@ -199,7 +250,7 @@ impl BrainApi for BrainServer {
         provider_name: &str,
     ) -> BoxFuture<'_, Result<Vec<CredentialEntry>, BrainError>> {
         let name = provider_name.to_owned();
-        Box::pin(async move { self.inner.brain.store.credential_load_all(&name).await })
+        Box::pin(async move { self.inner.brain.store.credentials().list_for_provider(&name).await })
     }
 
     fn save_credential(
@@ -208,7 +259,28 @@ impl BrainApi for BrainServer {
         entry: CredentialEntry,
     ) -> BoxFuture<'_, Result<(), BrainError>> {
         let name = provider_name.to_owned();
-        Box::pin(async move { self.inner.brain.store.credential_save(&name, &entry).await })
+        Box::pin(async move {
+            let key = (name, entry.id.clone());
+            match self.inner.brain.store.credentials().get(key.clone()).await {
+                Ok(_) => {
+                    self.inner
+                        .brain
+                        .store
+                        .credentials()
+                        .update(key, entry)
+                        .await?;
+                }
+                Err(_) => {
+                    self.inner
+                        .brain
+                        .store
+                        .credentials()
+                        .create(key, entry)
+                        .await?;
+                }
+            }
+            Ok(())
+        })
     }
 
     fn delete_credential(
@@ -218,7 +290,7 @@ impl BrainApi for BrainServer {
     ) -> BoxFuture<'_, Result<(), BrainError>> {
         let name = provider_name.to_owned();
         let cid = credential_id.to_owned();
-        Box::pin(async move { self.inner.brain.store.credential_delete(&name, &cid).await })
+        Box::pin(async move { self.inner.brain.store.credentials().delete((name, cid)).await })
     }
 
     // -- Events & status --
@@ -238,11 +310,11 @@ impl BrainApi for BrainServer {
                 .collect();
             let active = inner.active_turns.read().await;
             let active_turn_ids: Vec<Ulid> = active.keys().copied().collect();
-            let projects = inner.brain.store.project_list().await?;
+            let projects = inner.brain.store.projects().list().await?;
 
             let mut total_sessions = 0usize;
             for p in &projects {
-                let sessions = inner.brain.store.session_list(p.id).await?;
+                let sessions = inner.brain.store.sessions().list_for_project(p.id).await?;
                 total_sessions += sessions.len();
             }
 

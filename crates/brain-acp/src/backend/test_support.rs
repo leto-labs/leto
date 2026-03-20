@@ -5,7 +5,9 @@ use tokio::io::split;
 use tokio::sync::mpsc;
 use tokio_util::compat::{TokioAsyncReadCompatExt as _, TokioAsyncWriteCompatExt as _};
 
-use brain_core::{Brain, InMemoryStore, MockProvider, ProviderRouter, SimpleLoop, Store};
+use brain_core::{
+    BrainRuntime, BrainRuntimeNative, InMemoryStore, MockProvider, SimpleLoop, Store,
+};
 
 use super::agent::BackendAgent;
 use super::app::BackendApp;
@@ -96,13 +98,18 @@ impl acp::Client for RecordingClient {
 
 pub(super) fn build_test_app(provider_delay_ms: u64) -> Arc<BackendApp> {
     let store: Arc<dyn Store> = Arc::new(InMemoryStore::new());
-    let router = Arc::new(ProviderRouter::new(
-        "mock",
-        Arc::new(MockProvider::new().with_delay(provider_delay_ms)),
-    ));
-    let provider: Arc<dyn brain_core::Provider> = router.clone();
-    let brain = Brain::new(provider, store, Arc::new(SimpleLoop), vec![]);
-    Arc::new(BackendApp::new(brain, router))
+    let runtime = Arc::new(BrainRuntimeNative::new(store, "mock", "simple"));
+    runtime
+        .set_provider(
+            "mock",
+            Arc::new(MockProvider::new().with_delay(provider_delay_ms)),
+        )
+        .expect("mock provider should register");
+    runtime
+        .set_loop("simple", Arc::new(SimpleLoop))
+        .expect("simple loop should register");
+    let runtime: Arc<dyn BrainRuntime> = runtime;
+    Arc::new(BackendApp::new(runtime))
 }
 
 pub(super) fn start_test_connection(

@@ -9,11 +9,9 @@ members = [
     "crates/brain-transports",
     "crates/brain-core",
     "crates/brain-acp",
-    "crates/brain-server",
-    "crates/brain-config",
     "crates/brain-cli",
+    "crates/brain-config",
     "tools/provider-preset-gen",
-    "examples/server",
 ]
 
 [workspace.package]
@@ -85,7 +83,6 @@ brain-transports = { path = "crates/brain-transports" }
 brain-tools = { path = "crates/brain-tools" }
 brain-core = { path = "crates/brain-core" }
 brain-acp = { path = "crates/brain-acp" }
-brain-server = { path = "crates/brain-server" }
 brain-config = { path = "crates/brain-config" }
 
 [profile.release]

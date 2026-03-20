@@ -6,6 +6,7 @@ use ulid::Ulid;
 pub struct AgentConfig {
     pub max_iterations: u32,
     pub system_prompt: Option<String>,
+    pub loop_name: Option<String>,
     pub inference: InferenceConfig,
 }
 
@@ -14,6 +15,7 @@ impl Default for AgentConfig {
         Self {
             max_iterations: 20,
             system_prompt: None,
+            loop_name: None,
             inference: InferenceConfig::default(),
         }
     }
@@ -79,6 +81,7 @@ mod tests {
         let cfg = AgentConfig::default();
         assert_eq!(cfg.max_iterations, 20);
         assert!(cfg.system_prompt.is_none());
+        assert!(cfg.loop_name.is_none());
         assert!(cfg.inference.model.is_none());
     }
 
@@ -123,6 +126,7 @@ mod tests {
         let cfg = AgentConfig {
             max_iterations: 10,
             system_prompt: Some("You are helpful.".into()),
+            loop_name: Some("simple".into()),
             inference: InferenceConfig {
                 provider: Some("openai".into()),
                 model: Some("gpt-4".into()),
@@ -137,6 +141,7 @@ mod tests {
             deserialized.system_prompt.as_deref(),
             Some("You are helpful.")
         );
+        assert_eq!(deserialized.loop_name.as_deref(), Some("simple"));
         assert_eq!(deserialized.inference.model.as_deref(), Some("gpt-4"));
     }
 

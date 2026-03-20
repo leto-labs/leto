@@ -28,11 +28,28 @@ pub struct OpenAiOAuthProvider {
     provider_name: String,
     api_base_url: String,
     default_model: String,
-    models: Vec<ProviderModelInfo>,
+    models: Vec<ModelInfo>,
     client: reqwest::Client,
 }
 
 impl OpenAiOAuthProvider {
+    async fn persist_credential(
+        store: &dyn CredentialStore,
+        provider_name: &str,
+        entry: &CredentialEntry,
+    ) -> Result<(), BrainError> {
+        let key = (provider_name.to_owned(), entry.id.clone());
+        match store.get(key.clone()).await {
+            Ok(_) => {
+                store.update(key, entry.clone()).await?;
+            }
+            Err(_) => {
+                store.create(key, entry.clone()).await?;
+            }
+        }
+        Ok(())
+    }
+
     /// Create from existing OAuth credentials and a credential store (legacy mode).
     pub fn new(
         creds: OAuthCredentials,
@@ -49,7 +66,7 @@ impl OpenAiOAuthProvider {
             provider_name,
             api_base_url: preset.api_base_url.to_owned(),
             default_model: preset.default_model.to_owned(),
-            models: preset.models.iter().map(ProviderModelInfo::from).collect(),
+            models: preset.models.to_vec(),
             client: reqwest::Client::new(),
         }
     }
@@ -61,7 +78,7 @@ impl OpenAiOAuthProvider {
             provider_name: preset.name.to_owned(),
             api_base_url: preset.api_base_url.to_owned(),
             default_model: preset.default_model.to_owned(),
-            models: preset.models.iter().map(ProviderModelInfo::from).collect(),
+            models: preset.models.to_vec(),
             client: reqwest::Client::new(),
         }
     }
@@ -109,7 +126,7 @@ impl OpenAiOAuthProvider {
         store: Arc<dyn CredentialStore>,
         preset: &OpenAiOAuthPreset,
     ) -> Result<Option<Self>, BrainError> {
-        let entries = store.credential_load_all(preset.name).await?;
+        let entries = store.list_for_provider(preset.name).await?;
         for entry in entries {
             if let ProviderCredential::OAuth(creds) = entry.credential {
                 return Ok(Some(Self::new(creds, store, preset)));
@@ -146,7 +163,7 @@ impl OpenAiOAuthProvider {
                 if needs_refresh {
                     let new_creds = refresh::refresh_token(&self.client, &snapshot).await?;
                     let entry = CredentialEntry::oauth(new_creds.clone());
-                    store.credential_save(provider_name, &entry).await?;
+                    Self::persist_credential(&**store, provider_name, &entry).await?;
 
                     let token = new_creds.access_token.clone();
                     let account_id = new_creds.account_id.clone();
@@ -270,7 +287,7 @@ impl OAuthFlow {
 
         let creds = browser_flow::run(&client, &flow_config, on_prompt).await?;
         let entry = CredentialEntry::oauth(creds);
-        store.credential_save(preset.name, &entry).await?;
+        OpenAiOAuthProvider::persist_credential(store, preset.name, &entry).await?;
         Ok(entry)
     }
 
@@ -300,7 +317,7 @@ impl OAuthFlow {
         )
         .await?;
         let entry = CredentialEntry::oauth(creds);
-        store.credential_save(preset.name, &entry).await?;
+        OpenAiOAuthProvider::persist_credential(store, preset.name, &entry).await?;
         Ok(entry)
     }
 }

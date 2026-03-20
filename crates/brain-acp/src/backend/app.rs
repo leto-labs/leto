@@ -6,13 +6,12 @@ use brain_core::*;
 use super::errors::internal_error;
 
 pub struct BackendApp {
-    pub brain: Brain,
-    pub router: Arc<ProviderRouter>,
+    pub runtime: Arc<dyn BrainRuntime>,
 }
 
 impl BackendApp {
-    pub fn new(brain: Brain, router: Arc<ProviderRouter>) -> Self {
-        Self { brain, router }
+    pub fn new(runtime: Arc<dyn BrainRuntime>) -> Self {
+        Self { runtime }
     }
 }
 
@@ -21,16 +20,35 @@ pub async fn build_default_app() -> Result<BackendApp, acp::Error> {
         Arc::new(FileStore::new(brain_home()).await.map_err(internal_error)?);
 
     let pool = Arc::new(CredentialPool::new(
-        store.clone() as Arc<dyn CredentialStore>,
+        store.clone(),
         Arc::new(Fallback::new()),
     ));
-    let router = build_provider_router(pool).await;
-    let provider: Arc<dyn Provider> = router.clone();
-    let brain = Brain::new(provider, store, Arc::new(SimpleLoop), native_tools());
-    Ok(BackendApp::new(brain, router))
+    let (default_provider_name, providers) = discover_providers(pool).await;
+    let runtime = Arc::new(BrainRuntimeNative::new(
+        store,
+        default_provider_name,
+        "simple",
+    ));
+    for (provider_name, provider) in providers {
+        runtime
+            .set_provider(provider_name, provider)
+            .map_err(internal_error)?;
+    }
+    runtime
+        .set_loop("simple", Arc::new(SimpleLoop))
+        .map_err(internal_error)?;
+    for tool in native_tools() {
+        let name = tool.definition().name.clone();
+        runtime.set_tool(name, tool).map_err(internal_error)?;
+    }
+
+    let runtime: Arc<dyn BrainRuntime> = runtime;
+    Ok(BackendApp::new(runtime))
 }
 
-async fn build_provider_router(pool: Arc<CredentialPool>) -> Arc<ProviderRouter> {
+async fn discover_providers(
+    pool: Arc<CredentialPool>,
+) -> (String, Vec<(String, Arc<dyn Provider>)>) {
     let mut providers: Vec<(String, Arc<dyn Provider>, bool)> = Vec::new();
 
     discover_api_providers("openai", None, &pool, &mut providers).await;
@@ -39,10 +57,13 @@ async fn build_provider_router(pool: Arc<CredentialPool>) -> Arc<ProviderRouter>
 
     if providers.is_empty() {
         tracing::warn!("no providers configured — falling back to MockProvider for ACP backend");
-        return Arc::new(ProviderRouter::new(
-            "mock",
-            Arc::new(MockProvider::new().with_delay(30)),
-        ));
+        return (
+            "mock".to_owned(),
+            vec![(
+                "mock".to_owned(),
+                Arc::new(MockProvider::new().with_delay(30)),
+            )],
+        );
     }
 
     let default_name = providers
@@ -57,12 +78,14 @@ async fn build_provider_router(pool: Arc<CredentialPool>) -> Arc<ProviderRouter>
         .or(providers.first())
         .map(|(_, provider, _)| provider.clone())
         .expect("providers should not be empty");
-
-    let mut router = ProviderRouter::new(default_name, default);
-    for (provider_name, provider, _) in &providers {
-        router = router.add_provider(provider_name.clone(), provider.clone());
+    let mut registered = vec![(default_name.clone(), default)];
+    for (provider_name, provider, _) in providers {
+        if provider_name == default_name {
+            continue;
+        }
+        registered.push((provider_name, provider));
     }
-    Arc::new(router)
+    (default_name, registered)
 }
 
 async fn discover_api_providers(

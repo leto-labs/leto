@@ -141,12 +141,27 @@ impl Provider for LlamaCppProvider {
         let models = self
             .configs
             .keys()
-            .map(|name| ProviderModelInfo {
-                id: name.clone(),
-                name: name.clone(),
-                provider: None,
-                reasoning: false,
-                tool_call: false,
+            .map(|name| {
+                let leaked_name: &'static str = Box::leak(name.clone().into_boxed_str());
+                ModelInfo {
+                    id: leaked_name,
+                    name: leaked_name,
+                    family: None,
+                    reasoning: None,
+                    tool_call: false,
+                    attachment: false,
+                    structured_output: None,
+                    temperature: None,
+                    knowledge: None,
+                    release_date: None,
+                    last_updated: None,
+                    open_weights: None,
+                    input_modalities: &["text"],
+                    output_modalities: &["text"],
+                    cost: None,
+                    limit: None,
+                    status: None,
+                }
             })
             .collect();
         ProviderInfo {

@@ -3,6 +3,7 @@ use std::sync::Arc;
 use agent_client_protocol as acp;
 use futures::StreamExt;
 use tokio::sync::{mpsc, oneshot};
+use tokio_util::sync::CancellationToken;
 
 use super::app::BackendApp;
 #[cfg(feature = "unstable_session_model")]
@@ -12,14 +13,11 @@ use super::errors::{internal_error, map_brain_error};
 use super::event_mapper::{EventMapper, MappedEvent};
 use super::history_replay::replay_updates;
 use super::ids::{parse_session_id, session_id_from_ulid};
-use super::project_resolver::resolve_project;
-use super::session_registry::SessionRegistry;
 
 pub(super) type NotificationEnvelope = (acp::SessionNotification, oneshot::Sender<()>);
 
 pub(super) struct BackendAgent {
     app: Arc<BackendApp>,
-    sessions: SessionRegistry,
     session_update_tx: mpsc::UnboundedSender<NotificationEnvelope>,
 }
 
@@ -30,7 +28,6 @@ impl BackendAgent {
     ) -> Self {
         Self {
             app,
-            sessions: SessionRegistry::new(),
             session_update_tx,
         }
     }
@@ -86,27 +83,50 @@ impl BackendAgent {
         }
     }
 
+    async fn resolve_project(
+        &self,
+        cwd: &std::path::Path,
+    ) -> Result<brain_core::Project, acp::Error> {
+        self.app
+            .runtime
+            .resolve_or_create_project(cwd.to_path_buf())
+            .await
+            .map_err(map_brain_error)
+    }
+
+    async fn load_project_session(
+        &self,
+        project_id: brain_core::ProjectId,
+        session_id: ulid::Ulid,
+    ) -> Result<brain_core::Session, acp::Error> {
+        let session = self
+            .app
+            .runtime
+            .store()
+            .sessions()
+            .get(session_id)
+            .await
+            .map_err(map_brain_error)?;
+        if session.project_id != project_id {
+            return Err(acp::Error::invalid_params());
+        }
+        Ok(session)
+    }
+
     #[cfg(feature = "unstable_session_model")]
     async fn current_model_state_for_session(
         &self,
         session_id: ulid::Ulid,
     ) -> Result<acp::SessionModelState, acp::Error> {
-        let effective_inference = self
-            .app
-            .brain
-            .effective_inference_for_session(session_id)
-            .await
-            .map_err(map_brain_error)?;
         let current_model = self
             .app
-            .router
-            .current_model_id(&effective_inference)
-            .map_err(|_| acp::Error::invalid_params())?
+            .runtime
+            .current_model_id_for_session(session_id)
+            .await
+            .map_err(map_brain_error)?
             .ok_or_else(acp::Error::invalid_params)?;
-        Ok(session_model_state(
-            current_model,
-            &self.app.router.available_models(),
-        ))
+        let models = self.app.runtime.list_models().map_err(map_brain_error)?;
+        Ok(session_model_state(current_model, &models))
     }
 }
 
@@ -130,11 +150,16 @@ impl acp::Agent for BackendAgent {
         &self,
         arguments: acp::NewSessionRequest,
     ) -> Result<acp::NewSessionResponse, acp::Error> {
-        let project = resolve_project(&self.app.brain, &arguments.cwd).await?;
+        let project = self.resolve_project(&arguments.cwd).await?;
+        let session = brain_core::Session::new(project.id);
         let session = self
-            .sessions
-            .create_session(&self.app.brain, &project)
-            .await?;
+            .app
+            .runtime
+            .store()
+            .sessions()
+            .create(session.id, session)
+            .await
+            .map_err(map_brain_error)?;
         let session_id = session_id_from_ulid(session.id);
 
         self.emit(
@@ -155,16 +180,14 @@ impl acp::Agent for BackendAgent {
         arguments: acp::LoadSessionRequest,
     ) -> Result<acp::LoadSessionResponse, acp::Error> {
         let session_id = parse_session_id(&arguments.session_id)?;
-        let project = resolve_project(&self.app.brain, &arguments.cwd).await?;
-        let session = self
-            .sessions
-            .load_session(&self.app.brain, &project, session_id)
-            .await?;
+        let project = self.resolve_project(&arguments.cwd).await?;
+        let session = self.load_project_session(project.id, session_id).await?;
         let messages = self
             .app
-            .brain
-            .store
-            .message_list(session.id)
+            .runtime
+            .store()
+            .messages()
+            .list_for_session(session.id)
             .await
             .map_err(map_brain_error)?;
 
@@ -187,24 +210,46 @@ impl acp::Agent for BackendAgent {
         let mut items = Vec::new();
 
         if let Some(cwd) = arguments.cwd {
-            let project = resolve_project(&self.app.brain, &cwd).await?;
+            let project = self.resolve_project(&cwd).await?;
             let cwd = project
                 .root
                 .clone()
                 .ok_or_else(acp::Error::internal_error)?;
             for session in self
-                .sessions
-                .list_sessions_for_project(&self.app.brain, project.id)
-                .await?
+                .app
+                .runtime
+                .store()
+                .sessions()
+                .list_for_project(project.id)
+                .await
+                .map_err(map_brain_error)?
             {
                 items.push(list_info(&session, cwd.clone()));
             }
         } else {
-            for (project, session) in self.sessions.list_all_sessions(&self.app.brain).await? {
+            let projects = self
+                .app
+                .runtime
+                .store()
+                .projects()
+                .list()
+                .await
+                .map_err(map_brain_error)?;
+            for project in projects {
                 let Some(cwd) = project.root.clone() else {
                     continue;
                 };
-                items.push(list_info(&session, cwd));
+                for session in self
+                    .app
+                    .runtime
+                    .store()
+                    .sessions()
+                    .list_for_project(project.id)
+                    .await
+                    .map_err(map_brain_error)?
+                {
+                    items.push(list_info(&session, cwd.clone()));
+                }
             }
         }
 
@@ -216,30 +261,26 @@ impl acp::Agent for BackendAgent {
         arguments: acp::PromptRequest,
     ) -> Result<acp::PromptResponse, acp::Error> {
         let session_id = parse_session_id(&arguments.session_id)?;
-        let cancel = self.sessions.start_turn(session_id).await?;
         let stop_reason = async {
             let session = self
                 .app
-                .brain
-                .store
-                .session_get(session_id)
+                .runtime
+                .store()
+                .sessions()
+                .get(session_id)
                 .await
                 .map_err(map_brain_error)?;
             let prompt_text = Self::prompt_text(&arguments.prompt);
 
             if session.title.is_none() {
                 let title = Self::session_title_from_prompt(&prompt_text);
+                let mut updated_session = session.clone();
+                updated_session.title = Some(title.clone());
                 self.app
-                    .brain
-                    .store
-                    .session_update(session.id, brain_core::SessionUpdate::title(title.clone()))
-                    .await
-                    .map_err(map_brain_error)?;
-                let updated_session = self
-                    .app
-                    .brain
-                    .store
-                    .session_get(session.id)
+                    .runtime
+                    .store()
+                    .sessions()
+                    .update(updated_session.id, updated_session.clone())
                     .await
                     .map_err(map_brain_error)?;
                 self.emit(
@@ -249,10 +290,10 @@ impl acp::Agent for BackendAgent {
                 .await?;
             }
 
-            let mut stream = self
-                .app
-                .brain
-                .turn(session.id, &prompt_text, cancel.clone());
+            let mut stream =
+                self.app
+                    .runtime
+                    .turn(session.id, &prompt_text, CancellationToken::new());
             let mut mapper = EventMapper::new();
 
             while let Some(event) = stream.next().await {
@@ -272,14 +313,16 @@ impl acp::Agent for BackendAgent {
         }
         .await;
 
-        self.sessions.finish_turn(session_id).await;
         stop_reason.map(acp::PromptResponse::new)
     }
 
     async fn cancel(&self, arguments: acp::CancelNotification) -> Result<(), acp::Error> {
         let session_id = parse_session_id(&arguments.session_id)?;
-        self.sessions.cancel_turn(session_id).await;
-        Ok(())
+        self.app
+            .runtime
+            .cancel_turn(session_id)
+            .await
+            .map_err(map_brain_error)
     }
 
     #[cfg(feature = "unstable_session_model")]
@@ -288,25 +331,9 @@ impl acp::Agent for BackendAgent {
         arguments: acp::SetSessionModelRequest,
     ) -> Result<acp::SetSessionModelResponse, acp::Error> {
         let session_id = parse_session_id(&arguments.session_id)?;
-        let resolved = self
-            .app
-            .router
-            .resolve_model(arguments.model_id.0.as_ref())
-            .map_err(|_| acp::Error::invalid_params())?;
-        let session = self
-            .app
-            .brain
-            .store
-            .session_get(session_id)
-            .await
-            .map_err(map_brain_error)?;
-        let mut inference = session.inference.unwrap_or_default();
-        inference.provider = Some(resolved.provider);
-        inference.model = Some(resolved.model.id);
-
         self.app
-            .brain
-            .update_session_inference(session_id, Some(inference))
+            .runtime
+            .set_session_model(session_id, arguments.model_id.0.as_ref())
             .await
             .map_err(map_brain_error)?;
 

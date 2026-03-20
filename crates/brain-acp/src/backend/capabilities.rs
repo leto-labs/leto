@@ -33,16 +33,8 @@ pub fn session_model_state(
         models
             .iter()
             .map(|model| {
-                let description = model
-                    .provider
-                    .as_ref()
-                    .map(|provider| format!("Provider: {provider}"));
-                let info = acp::ModelInfo::new(model.id.clone(), model.name.clone());
-                if let Some(description) = description {
-                    info.description(description)
-                } else {
-                    info
-                }
+                acp::ModelInfo::new(model.model.id, model.model.name)
+                    .description(format!("Provider: {}", model.provider))
             })
             .collect(),
     )

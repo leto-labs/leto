@@ -21,6 +21,7 @@ struct RawInferenceConfig {
 struct RawAgentConfig {
     max_iterations: Option<u32>,
     system_prompt: Option<String>,
+    loop_name: Option<String>,
     inference: Option<RawInferenceConfig>,
     #[serde(flatten)]
     _unknown: std::collections::BTreeMap<String, Value>,
@@ -43,6 +44,7 @@ impl Default for RawAgentConfig {
         Self {
             max_iterations: None,
             system_prompt: None,
+            loop_name: None,
             inference: None,
             _unknown: std::collections::BTreeMap::new(),
         }
@@ -56,6 +58,9 @@ impl RawAgentConfig {
         }
         if let Some(prompt) = self.system_prompt {
             target.agent.system_prompt = Some(prompt);
+        }
+        if let Some(loop_name) = self.loop_name {
+            target.agent.loop_name = Some(loop_name);
         }
         if let Some(inference) = self.inference {
             if let Some(provider) = inference.provider {

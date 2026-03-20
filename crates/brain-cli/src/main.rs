@@ -6,10 +6,10 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use clap::Parser;
 use futures::StreamExt;
+use tokio_util::sync::CancellationToken;
 use ulid::Ulid;
 
 use brain_core::*;
-use brain_server::{BrainApi, BrainServer};
 use brain_stores::brain_home;
 
 use commands::{Cli, Commands, CredentialsAction, SessionsAction};
@@ -38,23 +38,9 @@ async fn main() -> Result<()> {
             .context("failed to initialize FileStore")?,
     );
 
-    let pool = Arc::new(CredentialPool::new(
-        store.clone() as Arc<dyn CredentialStore>,
-        Arc::new(Fallback::new()),
-    ));
-
-    let provider = provider::build_provider(&config, pool).await;
-    let tools = native_tools();
-    let brain = Brain::new(provider, store, Arc::new(SimpleLoop), tools);
-    let server = BrainServer::new(brain);
-    let client = server.client();
-
-    let project_name = cwd
-        .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "brain".to_owned());
-
-    let project = find_or_create_project(&client, &project_name, &cwd, config).await?;
+    let runtime = provider::build_runtime(&config, store)
+        .await
+        .context("failed to initialize embedded BrainRuntime")?;
 
     match command {
         Some(Commands::Acp) => unreachable!("ACP command is handled before runtime initialization"),
@@ -63,20 +49,32 @@ async fn main() -> Result<()> {
                 provider,
                 api_key,
                 id,
-            } => cmd_credentials_add(&client, &provider, &api_key, &id).await,
+            } => cmd_credentials_add(&runtime, &provider, &api_key, &id).await,
             CredentialsAction::Login { provider, device } => {
-                cmd_credentials_login(&client, &provider, device).await
+                cmd_credentials_login(&runtime, &provider, device).await
             }
-            CredentialsAction::List => cmd_credentials_list(&client).await,
+            CredentialsAction::List => cmd_credentials_list(&runtime).await,
             CredentialsAction::Remove { provider, id } => {
-                cmd_credentials_remove(&client, &provider, &id).await
+                cmd_credentials_remove(&runtime, &provider, &id).await
             }
         },
-        Some(Commands::Sessions { action }) => match action {
-            SessionsAction::List => cmd_sessions_list(&client, project.id).await,
-            SessionsAction::Resume { id } => cmd_sessions_resume(&client, &project, &id).await,
-        },
-        None => cmd_chat(&client, project.id, None).await,
+        Some(Commands::Sessions { action }) => {
+            let project = runtime
+                .resolve_or_create_project(cwd.clone())
+                .await
+                .context("failed to resolve project")?;
+            match action {
+                SessionsAction::List => cmd_sessions_list(&runtime, project.id).await,
+                SessionsAction::Resume { id } => cmd_sessions_resume(&runtime, &project, &id).await,
+            }
+        }
+        None => {
+            let project = runtime
+                .resolve_or_create_project(cwd)
+                .await
+                .context("failed to resolve project")?;
+            cmd_chat(&runtime, project.id, None).await
+        }
     }
 }
 
@@ -95,31 +93,16 @@ fn resolve_config(cwd: &std::path::Path) -> ProjectConfig {
     config
 }
 
-async fn find_or_create_project(
-    client: &Arc<dyn BrainApi>,
-    name: &str,
-    root: &std::path::Path,
-    config: ProjectConfig,
-) -> Result<Project> {
-    let projects = client.list_projects().await?;
-    if let Some(existing) = projects.iter().find(|p| p.name.as_deref() == Some(name)) {
-        return Ok(existing.clone());
-    }
-
-    let project = Project::new(Some(name.to_owned()), Some(root.to_owned()), config);
-    let project = client.create_project(project).await?;
-    Ok(project)
-}
-
 async fn cmd_chat(
-    client: &Arc<dyn BrainApi>,
+    runtime: &Arc<dyn BrainRuntime>,
     project_id: ProjectId,
     resume_session: Option<Ulid>,
 ) -> Result<()> {
     let session = if let Some(id) = resume_session {
-        client.get_session(id).await?
+        runtime.store().sessions().get(id).await?
     } else {
-        client.create_session(project_id).await?
+        let session = Session::new(project_id);
+        runtime.store().sessions().create(session.id, session).await?
     };
 
     loop {
@@ -145,7 +128,8 @@ async fn cmd_chat(
             break;
         }
 
-        let mut stream = client.send_message_stream(session.id, input).await?;
+        let cancel = CancellationToken::new();
+        let mut stream = runtime.turn(session.id, input, cancel);
 
         while let Some(event) = stream.next().await {
             match &event {
@@ -174,8 +158,8 @@ async fn cmd_chat(
     Ok(())
 }
 
-async fn cmd_sessions_list(client: &Arc<dyn BrainApi>, project_id: ProjectId) -> Result<()> {
-    let sessions = client.list_sessions(project_id).await?;
+async fn cmd_sessions_list(runtime: &Arc<dyn BrainRuntime>, project_id: ProjectId) -> Result<()> {
+    let sessions = runtime.store().sessions().list_for_project(project_id).await?;
 
     if sessions.is_empty() {
         println!("No sessions found.");
@@ -192,7 +176,7 @@ async fn cmd_sessions_list(client: &Arc<dyn BrainApi>, project_id: ProjectId) ->
 }
 
 async fn cmd_sessions_resume(
-    client: &Arc<dyn BrainApi>,
+    runtime: &Arc<dyn BrainRuntime>,
     project: &Project,
     id_str: &str,
 ) -> Result<()> {
@@ -200,8 +184,10 @@ async fn cmd_sessions_resume(
         .parse()
         .context("invalid session ID (expected a ULID)")?;
 
-    let session = client
-        .get_session(session_id)
+    let session = runtime
+        .store()
+        .sessions()
+        .get(session_id)
         .await
         .map_err(|e| anyhow::anyhow!("session not found: {e}"))?;
 
@@ -213,7 +199,7 @@ async fn cmd_sessions_resume(
         );
     }
 
-    let messages = client.list_messages(session_id).await?;
+    let messages = runtime.store().messages().list_for_session(session_id).await?;
     if !messages.is_empty() {
         println!(
             "--- Resuming session {} ({} messages) ---",
@@ -222,23 +208,33 @@ async fn cmd_sessions_resume(
         );
     }
 
-    cmd_chat(client, project.id, Some(session_id)).await
+    cmd_chat(runtime, project.id, Some(session_id)).await
 }
 
 async fn cmd_credentials_add(
-    client: &Arc<dyn BrainApi>,
+    runtime: &Arc<dyn BrainRuntime>,
     provider: &str,
     api_key: &str,
     id: &str,
 ) -> Result<()> {
     let entry = CredentialEntry::api_key(id, api_key);
-    client.save_credential(provider, entry).await?;
+    save_credential(runtime, provider, entry).await?;
     println!("Saved credential '{id}' for provider '{provider}'.");
     Ok(())
 }
 
-async fn cmd_credentials_list(client: &Arc<dyn BrainApi>) -> Result<()> {
-    let credentials = client.list_credentials().await?;
+async fn cmd_credentials_list(runtime: &Arc<dyn BrainRuntime>) -> Result<()> {
+    let mut credentials = Vec::new();
+    for (provider_name, _) in runtime.providers().list()? {
+        for entry in runtime
+            .store()
+            .credentials()
+            .list_for_provider(&provider_name)
+            .await?
+        {
+            credentials.push((provider_name.clone(), entry));
+        }
+    }
 
     if credentials.is_empty() {
         println!("No credentials stored.");
@@ -266,7 +262,7 @@ async fn cmd_credentials_list(client: &Arc<dyn BrainApi>) -> Result<()> {
 }
 
 async fn cmd_credentials_login(
-    client: &Arc<dyn BrainApi>,
+    runtime: &Arc<dyn BrainRuntime>,
     provider: &str,
     device: bool,
 ) -> Result<()> {
@@ -281,10 +277,10 @@ async fn cmd_credentials_login(
 
         let entry = if device {
             println!("Starting device code flow...\n");
-            oauth_device_flow(client, preset).await?
+            oauth_device_flow(runtime, preset).await?
         } else {
             println!("Starting browser login flow...\n");
-            oauth_browser_flow(client, preset).await?
+            oauth_browser_flow(runtime, preset).await?
         };
 
         println!(
@@ -296,14 +292,14 @@ async fn cmd_credentials_login(
 
     #[cfg(not(feature = "openai-oauth"))]
     {
-        let _ = (client, provider, device);
+        let _ = (runtime, provider, device);
         anyhow::bail!("OAuth support not compiled in. Rebuild with --features openai-oauth");
     }
 }
 
 #[cfg(feature = "openai-oauth")]
 async fn oauth_device_flow(
-    client: &Arc<dyn BrainApi>,
+    runtime: &Arc<dyn BrainRuntime>,
     preset: &brain_core::OpenAiOAuthPreset,
 ) -> Result<CredentialEntry> {
     use brain_core::device_flow::{self, DeviceFlowConfig};
@@ -330,13 +326,13 @@ async fn oauth_device_flow(
     .await?;
 
     let entry = CredentialEntry::oauth(creds);
-    client.save_credential(preset.name, entry.clone()).await?;
+    save_credential(runtime, preset.name, entry.clone()).await?;
     Ok(entry)
 }
 
 #[cfg(feature = "openai-oauth")]
 async fn oauth_browser_flow(
-    client: &Arc<dyn BrainApi>,
+    runtime: &Arc<dyn BrainRuntime>,
     preset: &brain_core::OpenAiOAuthPreset,
 ) -> Result<CredentialEntry> {
     use brain_core::browser_flow::{self, BrowserFlowConfig};
@@ -359,16 +355,37 @@ async fn oauth_browser_flow(
     .await?;
 
     let entry = CredentialEntry::oauth(creds);
-    client.save_credential(preset.name, entry.clone()).await?;
+    save_credential(runtime, preset.name, entry.clone()).await?;
     Ok(entry)
 }
 
 async fn cmd_credentials_remove(
-    client: &Arc<dyn BrainApi>,
+    runtime: &Arc<dyn BrainRuntime>,
     provider: &str,
     id: &str,
 ) -> Result<()> {
-    client.delete_credential(provider, id).await?;
+    runtime
+        .store()
+        .credentials()
+        .delete((provider.to_owned(), id.to_owned()))
+        .await?;
     println!("Removed credential '{id}' from provider '{provider}'.");
+    Ok(())
+}
+
+async fn save_credential(
+    runtime: &Arc<dyn BrainRuntime>,
+    provider: &str,
+    entry: CredentialEntry,
+) -> Result<()> {
+    let key = (provider.to_owned(), entry.id.clone());
+    match runtime.store().credentials().get(key.clone()).await {
+        Ok(_) => {
+            runtime.store().credentials().update(key, entry).await?;
+        }
+        Err(_) => {
+            runtime.store().credentials().create(key, entry).await?;
+        }
+    }
     Ok(())
 }

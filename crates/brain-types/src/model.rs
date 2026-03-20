@@ -1,3 +1,5 @@
+use serde::Serialize;
+
 /// Metadata for an AI model, closely mirroring the [models.dev](https://models.dev) schema.
 ///
 /// All fields use `&'static str` / `&'static [...]` so instances can live in
@@ -7,7 +9,7 @@
 /// (listing supported effort levels) rather than a plain `bool`. `None` means the
 /// model has no reasoning capability; `Some(&["low", "medium", "high"])` lists the
 /// effort levels it accepts, enabling runtime clamping.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize)]
 pub struct ModelInfo {
     pub id: &'static str,
     pub name: &'static str,
@@ -31,7 +33,7 @@ pub struct ModelInfo {
 }
 
 /// Per-million-token pricing in USD.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize)]
 pub struct ModelCost {
     pub input: f64,
     pub output: f64,
@@ -43,7 +45,7 @@ pub struct ModelCost {
 }
 
 /// Token limits.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize)]
 pub struct ModelLimit {
     pub context: u64,
     pub input: Option<u64>,

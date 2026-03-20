@@ -1,62 +1,28 @@
 # Tasks: add-brain-cli
 
-## Implementation Checklist
+## Implemented
 
-### Crate setup
-- [x] Create `crates/brain-cli/` with Cargo.toml (binary crate)
-- [x] Add to workspace members in root Cargo.toml
-- [x] Configure feature gates: openai-oauth (default), mistralrs, llamacpp
-- [x] Add clap dependency for CLI parsing
+- [x] Create `crates/brain-cli/` as a workspace binary crate
+- [x] Remove `examples/cli-echo/` and `examples/cli-local/` from the workspace
+- [x] Bootstrap an embedded `BrainRuntimeNative` for CLI use
+- [x] Make the CLI depend on `Arc<dyn BrainRuntime>` rather than `BrainServer` / `BrainApi`
+- [x] Resolve project roots through `runtime.resolve_or_create_project(...)`
+- [x] Run interactive chat through `runtime.turn(...)`
+- [x] Use `runtime.store()` for session, message, and credential CRUD
+- [x] Discover providers from stored credentials, optional OAuth credentials, feature-gated local backends, and mock fallback
+- [x] Use global `FileStore` rooted at `brain_home()`
+- [x] Implement `brain credentials add`
+- [x] Implement `brain credentials login`
+- [x] Implement `brain credentials list`
+- [x] Implement `brain credentials remove`
+- [x] Implement `brain sessions list`
+- [x] Implement `brain sessions resume <id>`
+- [x] Implement `brain acp` as a stdio compatibility alias into `brain-acp`
+- [x] Validate with `cargo test --workspace`
 
-### Unified provider builder
-- [x] Implement `build_provider()` that combines API + local + OAuth providers
-- [x] Auto-discover API providers from stored credentials via CredentialPool
-- [x] Auto-discover API providers from config file
-- [ ] Conditionally include local providers when features enabled
-- [x] Conditionally include OAuth provider when tokens exist
-- [x] Route all through ProviderRouter with configurable default
-- [x] Fall back to MockProvider when nothing is available
+## Deferred
 
-### Config integration
-- [x] Use `brain_config::resolve_fs_config(cwd)` for project config discovery
-- [x] Global `~/.brain/config.toml` as base config layer
-- [x] Support AGENTS.md as system prompt
-
-### Session persistence
-- [x] Default to FileStore rooted at `brain_home()` (~/.brain/)
-- [x] Support session listing (brain sessions list)
-- [x] Support session resumption (brain sessions resume <id>)
-
-### CLI subcommands
-- [x] Default command: interactive chat entrypoint (brain)
-- [x] brain credentials login openai-oauth — OAuth browser flow (feature-gated)
-- [x] brain credentials login openai-oauth --device — OAuth device flow for headless
-- [x] brain credentials add <provider> <api-key> — store API key
-- [x] brain credentials list — list stored credentials
-- [x] brain credentials remove <provider> <id> — remove credential
-- [x] brain sessions list — show past sessions with titles and dates
-- [x] brain sessions resume <id> — resume an existing session
-- [ ] brain acp — start ACP JSON-RPC server on stdin/stdout (feature-gated on acp)
-- [ ] brain serve --port <port> — start HTTP REST + SSE server (feature-gated on http)
-- [ ] brain attach <url> — attach the interactive frontend to a remote server
-
-### BrainServer integration
-- [x] Bootstrap BrainServer at startup
-- [x] Use `server.client()` (Arc<dyn BrainApi>) for all CLI operations
-- [x] Find-or-create project based on cwd
-- [ ] Coordinate default `brain` interactive mode with the TUI implementation tracked in `add-tui-transport`
-
-### Remove examples
-- [x] Remove examples/cli-echo/ directory
-- [x] Remove examples/cli-local/ directory
-- [x] Remove both from workspace Cargo.toml members
-- [ ] Update README to reference brain-cli instead of examples
-
-### Tests
-- [x] Test: credential-driven provider selection
-- [x] Test: config-driven provider selection
-- [ ] Test: session list/resume with FileStore
-- [x] Test: graceful fallback when no providers available
-- [ ] Test: `serve` mode starts the HTTP/SSE server cleanly
-- [ ] Test: `attach` mode routes through the remote `BrainApi` client path
-- [ ] Coordinate deep interactive frontend validation with `add-tui-transport`
+- [ ] Add a remote-runtime client mode once server work is redesigned around `BrainRuntime`
+- [ ] Add `brain serve` on top of that remote-runtime/server path
+- [ ] Add `brain attach <url>` on top of that remote-runtime/server path
+- [ ] Add deeper interactive frontend work tracked outside this runtime-first CLI change

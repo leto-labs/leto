@@ -1,32 +1,58 @@
 # brain-cli Delta Spec
 
 ## Note
-The `brain-cli` crate is implemented and present in the workspace at `crates/brain-cli/`.
+The `brain-cli` crate is implemented and present in the workspace at
+`crates/brain-cli/`.
 
 ## ADDED Requirements
 
 ### Requirement: Unified Binary
-The system SHALL provide a `brain-cli` binary crate that replaces both `cli-echo` and `cli-local`. It SHALL be a single entry point for all interactive brain usage, combining cloud API providers, local inference providers, and OAuth subscription providers into one binary with feature gates.
+The system SHALL provide a `brain-cli` binary crate that replaces both
+`cli-echo` and `cli-local`. It SHALL be the single user-facing local CLI entry
+point for interactive chat, session management, and credential management.
 
 #### Scenario: Cloud provider usage
 - **WHEN** `brain` is run with stored API credentials for an OpenAI-compatible provider
 - **THEN** it SHALL use those credentials for interactive chat
 
 #### Scenario: Local provider usage
-- **WHEN** `brain` is compiled with `--features llamacpp` and a local model is configured
+- **WHEN** `brain-cli` is built with a local backend feature and a local model is configured
 - **THEN** it SHALL use the local provider for interactive chat
 
 #### Scenario: No providers available
-- **WHEN** no credentials are stored, no OAuth tokens exist, and no local features enabled
-- **THEN** it SHALL fall back to MockProvider with a clear message
+- **WHEN** no credentials are stored, no OAuth tokens exist, and no local features are enabled
+- **THEN** it SHALL fall back to `MockProvider` with a clear message
 
-#### Scenario: Interactive frontend host
-- **WHEN** interactive `brain` usage is launched
-- **THEN** `brain-cli` SHALL act as the host binary for the frontend defined by `add-tui-transport`
-- **AND** it SHALL use `BrainServer` / `BrainApi` as the engine boundary
+### Requirement: Embedded Runtime Bootstrap
+The `brain-cli` SHALL bootstrap an embedded `BrainRuntimeNative` once at
+startup and then operate through `Arc<dyn BrainRuntime>`.
+
+It SHALL:
+
+- resolve or create the current project through `runtime.resolve_or_create_project(...)`
+- run turns through `runtime.turn(...)`
+- use `runtime.store()` for session, message, and credential CRUD
+
+#### Scenario: Interactive chat runs through BrainRuntime
+- **WHEN** `brain` is run with no subcommand
+- **THEN** it SHALL create or load a session through the runtime-backed store
+- **AND** execute each prompt through `BrainRuntime::turn(...)`
+
+#### Scenario: Session commands use runtime-backed store access
+- **WHEN** `brain sessions list` or `brain sessions resume <id>` is run
+- **THEN** the CLI SHALL operate through `runtime.store()`
 
 ### Requirement: Credential-Driven Provider Discovery
-The `brain-cli` SHALL NOT read API keys from environment variables. Instead, providers are discovered from stored credentials (`CredentialStore`) and project config. The `build_provider()` function resolves credentials from a `CredentialPool` that wraps the store.
+The `brain-cli` SHALL NOT read provider API keys directly from environment
+variables during runtime bootstrap. Instead, providers are discovered from
+stored credentials plus project/global config.
+
+The provider bootstrap SHALL include:
+
+1. API-key providers discovered from stored credentials
+2. OAuth providers discovered from stored OAuth credentials when enabled
+3. Local providers when feature-enabled
+4. `MockProvider` as fallback
 
 #### Scenario: Config-driven startup
 - **WHEN** `.agents/config.toml` exists in the project
@@ -34,101 +60,81 @@ The `brain-cli` SHALL NOT read API keys from environment variables. Instead, pro
 
 #### Scenario: Global config layer
 - **WHEN** `~/.brain/config.toml` exists
-- **THEN** its settings SHALL be applied as a base layer (project config overrides on conflicts)
-
-#### Scenario: No config fallback
-- **WHEN** no `.agents/config.toml` or global `config.toml` exists
-- **THEN** `brain-cli` SHALL discover providers from stored credentials and sensible defaults
+- **THEN** its settings SHALL be applied as a base layer
 
 #### Scenario: AGENTS.md as system prompt
 - **WHEN** `.agents/AGENTS.md` exists at the project root
 - **THEN** its content SHALL be used as part of the system prompt
 
-### Requirement: Thin Client Over BrainServer
-The `brain-cli` SHALL bootstrap a `BrainServer` once at startup and use `server.client()` (`Arc<dyn BrainApi>`) for all subsequent operations. The CLI is a thin client — it does not access `FileStore`, `Brain`, or `CredentialPool` directly after initialization.
-
-#### Scenario: All operations via BrainApi
-- **WHEN** any CLI command is executed
-- **THEN** it SHALL operate through the `BrainApi` trait (project CRUD, session CRUD, credential CRUD, message streaming)
-
-### Requirement: Unified Provider Builder
-The binary SHALL build a `ProviderRouter` that combines all available provider sources:
-1. API providers discovered from stored credentials via `CredentialPool`
-2. Local providers when feature-enabled (mistralrs, llamacpp)
-3. OAuth providers when stored OAuth tokens exist (openai-oauth)
-4. MockProvider as fallback
-
-#### Scenario: OAuth provider auto-loaded
-- **WHEN** stored OAuth tokens exist for OpenAI
-- **THEN** the router SHALL include `OpenAiOAuthProvider` alongside any API-key providers
-
 ### Requirement: Global Storage
-The binary SHALL use `FileStore` rooted at `brain_home()` (`~/.brain/` by default, overridable via `$BRAIN_HOME`) for all persistence — projects, sessions, messages, and credentials. This is a global store shared across all projects.
+The binary SHALL use `FileStore` rooted at `brain_home()` (`~/.brain/` by
+default) for projects, sessions, messages, and credentials.
 
 #### Scenario: Sessions persist
 - **WHEN** a conversation happens and the process exits
-- **THEN** the session SHALL be recoverable on next run via `brain sessions resume`
+- **THEN** the session SHALL be recoverable on the next run via `brain sessions resume`
 
 #### Scenario: Global store location
 - **WHEN** `brain` starts
-- **THEN** it SHALL use `brain_home()` as the `FileStore` root (not a project-local `.agents/` directory)
+- **THEN** it SHALL use `brain_home()` as the `FileStore` root
 
-### Requirement: CLI Subcommands
-The binary SHALL use `clap` for argument parsing and support the following subcommands:
+### Requirement: CLI Commands
+The binary SHALL use `clap` for argument parsing and support the currently
+implemented command surface:
 
-- (default) — start the interactive frontend for the current project
-- `credentials add <provider> <api-key>` — store an API key credential
-- `credentials login <provider>` — run OAuth browser flow (or `--device` for device code flow)
-- `credentials list` — list all stored credentials
-- `credentials remove <provider> <id>` — remove a stored credential
-- `sessions list` — list past sessions with ID, title, and date
-- `sessions resume <id>` — resume an existing session by ID
-- `serve` — start HTTP REST + SSE server
-- `attach <url>` — connect the interactive frontend to a remote server
-
-#### Scenario: Interactive chat
-- **WHEN** `brain` is run with no subcommand
-- **THEN** it SHALL start the interactive frontend (new local session by default)
+- default interactive chat (`brain`)
+- `credentials add <provider> <api-key>`
+- `credentials login <provider>`
+- `credentials list`
+- `credentials remove <provider> <id>`
+- `sessions list`
+- `sessions resume <id>`
+- `acp`
 
 #### Scenario: Login flow
 - **WHEN** `brain credentials login openai-oauth` is run
-- **THEN** it SHALL start the OpenAI OAuth browser flow and store tokens on success
+- **THEN** it SHALL start the OpenAI OAuth flow and store tokens on success
 
 #### Scenario: Session listing
 - **WHEN** `brain sessions list` is run
-- **THEN** it SHALL print all stored sessions with their IDs, titles, and timestamps
+- **THEN** it SHALL print stored sessions with their IDs, titles, and timestamps
 
 #### Scenario: Session resume
 - **WHEN** `brain sessions resume <ULID>` is run
-- **THEN** it SHALL load the session history and start an interactive chat continuing that session
+- **THEN** it SHALL load the session history and continue that session
 
-#### Scenario: Serve mode
-- **WHEN** `brain serve` is run
-- **THEN** it SHALL start the HTTP REST + SSE server without requiring the interactive frontend
-
-#### Scenario: Attach mode
-- **WHEN** `brain attach <url>` is run
-- **THEN** it SHALL connect the interactive frontend to the remote `BrainApi` endpoint at that URL
+#### Scenario: ACP alias
+- **WHEN** `brain acp` is run
+- **THEN** it SHALL start the ACP stdio compatibility path exposed by `brain-acp`
 
 ### Requirement: Feature Gates
 The binary SHALL support the following feature gates:
-- `tui` (default) — TUI interactive frontend
-- `openai-oauth` (default) — OpenAI OAuth/subscription provider + credentials login commands
+
+- `openai-oauth` (default) — OpenAI OAuth/subscription provider and login command
 - `mistralrs` — mistral.rs local inference
 - `llamacpp` — llama.cpp local inference
 
 #### Scenario: Minimal build
 - **WHEN** compiled with `--no-default-features`
-- **THEN** only MockProvider SHALL be available
+- **THEN** only the non-OAuth provider set and mock fallback SHALL be available
 
 #### Scenario: Full build
-- **WHEN** compiled with `--features tui,openai-oauth,mistralrs,llamacpp`
-- **THEN** all provider types and the TUI frontend SHALL be available
+- **WHEN** compiled with `--features openai-oauth,mistralrs,llamacpp`
+- **THEN** all supported provider types SHALL be available
 
-### Requirement: Remove Example Binaries
-The `cli-echo` and `cli-local` directories under `examples/` SHALL be removed from the workspace. Their functionality is fully subsumed by `brain-cli`. The workspace `Cargo.toml` SHALL no longer list them as members.
+### Requirement: Example Binaries Removed
+The `cli-echo` and `cli-local` directories under `examples/` SHALL be removed
+from the workspace. Their functionality is subsumed by `brain-cli`.
 
 #### Scenario: Examples removed
 - **WHEN** the workspace is built
 - **THEN** `cli-echo` and `cli-local` SHALL not be present as build targets
-- **AND** `brain-cli` SHALL be the only user-facing binary crate (the `server-example` remains as a developer example)
+- **AND** `brain-cli` SHALL be the user-facing local binary crate
+
+### Requirement: Remote Modes Deferred
+Remote CLI modes SHALL NOT be part of the current implementation.
+
+#### Scenario: Serve and attach remain future work
+- **WHEN** evaluating the implemented `brain-cli`
+- **THEN** `brain serve` and `brain attach` SHALL be treated as deferred work
+- **AND** their design SHALL follow the future remote `BrainRuntime` path rather than `BrainApi`

@@ -5,8 +5,6 @@ mod errors;
 mod event_mapper;
 mod history_replay;
 mod ids;
-mod project_resolver;
-mod session_registry;
 mod stdio;
 
 #[cfg(test)]

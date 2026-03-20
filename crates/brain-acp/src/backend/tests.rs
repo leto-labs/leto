@@ -119,9 +119,10 @@ async fn set_session_model_persists_real_session_inference() {
                 .parse()
                 .expect("session id should parse");
             let stored = app
-                .brain
-                .store
-                .session_get(session_id)
+                .runtime
+                .store()
+                .sessions()
+                .get(session_id)
                 .await
                 .expect("session should exist");
 

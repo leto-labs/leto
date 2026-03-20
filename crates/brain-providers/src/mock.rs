@@ -31,12 +31,24 @@ impl Provider for MockProvider {
         ProviderInfo {
             name: "mock".into(),
             default_model: Some("mock-echo".into()),
-            models: vec![ProviderModelInfo {
-                id: "mock-echo".into(),
-                name: "Mock Echo".into(),
-                provider: None,
-                reasoning: false,
+            models: vec![ModelInfo {
+                id: "mock-echo",
+                name: "Mock Echo",
+                family: None,
+                reasoning: None,
                 tool_call: true,
+                attachment: false,
+                structured_output: None,
+                temperature: None,
+                knowledge: None,
+                release_date: None,
+                last_updated: None,
+                open_weights: None,
+                input_modalities: &["text"],
+                output_modalities: &["text"],
+                cost: None,
+                limit: None,
+                status: None,
             }],
         }
     }

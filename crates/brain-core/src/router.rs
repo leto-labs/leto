@@ -40,13 +40,10 @@ impl ProviderRouter {
     }
 
     fn insert_provider(&mut self, name: String, provider: Arc<dyn Provider>) {
-        let mut info = provider.info();
-        for model in &mut info.models {
-            model.provider = Some(name.clone());
-        }
+        let info = provider.info();
 
         for model in &info.models {
-            let model_id = model.id.clone();
+            let model_id = model.id.to_owned();
             if let Some(existing) = self.model_routes.get(&model_id) {
                 if existing != &name {
                     self.model_routes.remove(&model_id);
@@ -89,10 +86,13 @@ impl ProviderRouter {
             };
 
             for model in &provider.info.models {
-                if self.ambiguous_models.contains(&model.id) || !seen.insert(model.id.clone()) {
+                if self.ambiguous_models.contains(model.id) || !seen.insert(model.id.to_owned()) {
                     continue;
                 }
-                models.push(model.clone());
+                models.push(ProviderModelInfo {
+                    provider: provider_name.clone(),
+                    model: *model,
+                });
             }
         }
 
@@ -113,7 +113,7 @@ impl ProviderRouter {
             .models
             .iter()
             .find(|model| model.id == model_id)
-            .cloned()
+            .copied()
             .ok_or_else(|| BrainError::Internal(format!("model metadata not found: {model_id}")))?;
 
         Ok(ResolvedModel {
@@ -178,7 +178,7 @@ impl ProviderRouter {
 
 pub struct ResolvedModel {
     pub provider: String,
-    pub model: ProviderModelInfo,
+    pub model: ModelInfo,
 }
 
 impl Provider for ProviderRouter {
@@ -191,7 +191,7 @@ impl Provider for ProviderRouter {
         ProviderInfo {
             name: "router".into(),
             default_model: default_provider.info.default_model.clone(),
-            models: self.available_models(),
+            models: self.available_models().into_iter().map(|model| model.model).collect(),
         }
     }
 
@@ -236,12 +236,24 @@ mod tests {
             ProviderInfo {
                 name: self.name.into(),
                 default_model: Some(self.model.into()),
-                models: vec![ProviderModelInfo {
-                    id: self.model.into(),
-                    name: self.model.into(),
-                    provider: None,
-                    reasoning: false,
+                models: vec![ModelInfo {
+                    id: self.model,
+                    name: self.model,
+                    family: None,
+                    reasoning: None,
                     tool_call: true,
+                    attachment: false,
+                    structured_output: None,
+                    temperature: None,
+                    knowledge: None,
+                    release_date: None,
+                    last_updated: None,
+                    open_weights: None,
+                    input_modalities: &["text"],
+                    output_modalities: &["text"],
+                    cost: None,
+                    limit: None,
+                    status: None,
                 }],
             }
         }
@@ -287,12 +299,24 @@ mod tests {
                 models: self
                     .models
                     .iter()
-                    .map(|model| ProviderModelInfo {
-                        id: (*model).into(),
-                        name: (*model).into(),
-                        provider: None,
-                        reasoning: false,
+                    .map(|model| ModelInfo {
+                        id: model,
+                        name: model,
+                        family: None,
+                        reasoning: None,
                         tool_call: true,
+                        attachment: false,
+                        structured_output: None,
+                        temperature: None,
+                        knowledge: None,
+                        release_date: None,
+                        last_updated: None,
+                        open_weights: None,
+                        input_modalities: &["text"],
+                        output_modalities: &["text"],
+                        cost: None,
+                        limit: None,
+                        status: None,
                     })
                     .collect(),
             }
@@ -392,7 +416,7 @@ mod tests {
         let models = router
             .available_models()
             .into_iter()
-            .map(|model| model.id)
+            .map(|model| model.model.id)
             .collect::<Vec<_>>();
 
         assert_eq!(

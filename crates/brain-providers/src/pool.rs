@@ -5,8 +5,9 @@ use tokio::sync::RwLock;
 use ulid::Ulid;
 
 use brain_types::{
-    BrainError, CredentialEntry, CredentialHealth, CredentialStore, SelectionContext,
+    BrainError, CredentialEntry, CredentialHealth, SelectionContext,
     SelectionStrategy,
+    Store,
 };
 
 #[cfg(feature = "openai-oauth")]
@@ -15,7 +16,7 @@ use brain_types::ProviderCredential;
 /// Runtime credential resolver with session stickiness, health tracking,
 /// and automatic OAuth token refresh.
 pub struct CredentialPool {
-    store: Arc<dyn CredentialStore>,
+    store: Arc<dyn Store>,
     strategy: Arc<dyn SelectionStrategy>,
     #[cfg(feature = "openai-oauth")]
     client: reqwest::Client,
@@ -24,7 +25,7 @@ pub struct CredentialPool {
 }
 
 impl CredentialPool {
-    pub fn new(store: Arc<dyn CredentialStore>, strategy: Arc<dyn SelectionStrategy>) -> Self {
+    pub fn new(store: Arc<dyn Store>, strategy: Arc<dyn SelectionStrategy>) -> Self {
         Self {
             store,
             strategy,
@@ -36,7 +37,7 @@ impl CredentialPool {
 
     #[cfg(feature = "openai-oauth")]
     pub fn with_client(
-        store: Arc<dyn CredentialStore>,
+        store: Arc<dyn Store>,
         strategy: Arc<dyn SelectionStrategy>,
         client: reqwest::Client,
     ) -> Self {
@@ -61,7 +62,7 @@ impl CredentialPool {
             }
         }
 
-        let all = self.store.credential_load_all(provider_name).await?;
+        let all = self.store.credentials().list_for_provider(provider_name).await?;
         let enabled: Vec<CredentialEntry> = all.into_iter().filter(|e| e.enabled).collect();
 
         if enabled.is_empty() {
@@ -100,7 +101,8 @@ impl CredentialPool {
         health.record_ok();
         let _ = self
             .store
-            .credential_update_health(provider_name, credential_id, &health)
+            .credentials()
+            .update_health(provider_name, credential_id, &health)
             .await;
     }
 
@@ -117,7 +119,8 @@ impl CredentialPool {
         health.record_error(message, code);
         let _ = self
             .store
-            .credential_update_health(provider_name, credential_id, &health)
+            .credentials()
+            .update_health(provider_name, credential_id, &health)
             .await;
 
         self.unbind_credential(provider_name, credential_id).await;
@@ -128,13 +131,22 @@ impl CredentialPool {
         self.session_bindings.write().await.remove(&session_id);
     }
 
-    /// Convenience wrapper around `store.credential_save`.
+    /// Convenience wrapper around keyed create-or-update persistence.
     pub async fn add(
         &self,
         provider_name: &str,
         entry: &CredentialEntry,
     ) -> Result<(), BrainError> {
-        self.store.credential_save(provider_name, entry).await
+        let key = (provider_name.to_owned(), entry.id.clone());
+        match self.store.credentials().get(key.clone()).await {
+            Ok(_) => {
+                self.store.credentials().update(key, entry.clone()).await?;
+            }
+            Err(_) => {
+                self.store.credentials().create(key, entry.clone()).await?;
+            }
+        }
+        Ok(())
     }
 
     async fn try_bound(
@@ -150,7 +162,8 @@ impl CredentialPool {
         drop(bindings);
 
         if let Some(cid) = cred_id {
-            if let Some(entry) = self.store.credential_load(provider_name, &cid).await? {
+            let key = (provider_name.to_owned(), cid.clone());
+            if let Ok(entry) = self.store.credentials().get(key).await {
                 if entry.enabled && entry.health.is_healthy() {
                     let entry = self.maybe_refresh_oauth(provider_name, entry).await?;
                     return Ok(Some(entry));
@@ -189,7 +202,8 @@ impl CredentialPool {
             if creds.needs_refresh() {
                 let refreshed = crate::oauth::refresh::refresh_token(&self.client, creds).await?;
                 entry.credential = ProviderCredential::OAuth(refreshed);
-                self.store.credential_save(provider_name, &entry).await?;
+                let key = (provider_name.to_owned(), entry.id.clone());
+                self.store.credentials().update(key, entry.clone()).await?;
             }
         }
         #[cfg(not(feature = "openai-oauth"))]
@@ -210,7 +224,7 @@ mod tests {
     }
 
     fn pool(
-        store: Arc<dyn CredentialStore>,
+        store: Arc<dyn Store>,
         strategy: Arc<dyn SelectionStrategy>,
     ) -> CredentialPool {
         CredentialPool::new(store, strategy)
@@ -220,10 +234,13 @@ mod tests {
     async fn resolve_single_credential() {
         let s = store();
         let entry = CredentialEntry::api_key("key-1", "sk-123");
-        s.credential_save("openai", &entry).await.unwrap();
+        s.credentials()
+            .create(("openai".into(), entry.id.clone()), entry)
+            .await
+            .unwrap();
 
         let p = pool(
-            s as Arc<dyn CredentialStore>,
+            s as Arc<dyn Store>,
             Arc::new(StickyRoundRobin::new()),
         );
         let resolved = p.resolve("openai", None).await.unwrap();
@@ -234,7 +251,7 @@ mod tests {
     async fn resolve_no_credentials_errors() {
         let s = store();
         let p = pool(
-            s as Arc<dyn CredentialStore>,
+            s as Arc<dyn Store>,
             Arc::new(StickyRoundRobin::new()),
         );
         let result = p.resolve("openai", None).await;
@@ -244,15 +261,21 @@ mod tests {
     #[tokio::test]
     async fn session_stickiness() {
         let s = store();
-        s.credential_save("openai", &CredentialEntry::api_key("key-1", "sk-111"))
+        s.credentials().create(
+            ("openai".into(), "key-1".into()),
+            CredentialEntry::api_key("key-1", "sk-111"),
+        )
             .await
             .unwrap();
-        s.credential_save("openai", &CredentialEntry::api_key("key-2", "sk-222"))
+        s.credentials().create(
+            ("openai".into(), "key-2".into()),
+            CredentialEntry::api_key("key-2", "sk-222"),
+        )
             .await
             .unwrap();
 
         let p = pool(
-            s as Arc<dyn CredentialStore>,
+            s as Arc<dyn Store>,
             Arc::new(StickyRoundRobin::new()),
         );
         let sid = Ulid::new();
@@ -268,15 +291,21 @@ mod tests {
     #[tokio::test]
     async fn different_sessions_may_get_different_credentials() {
         let s = store();
-        s.credential_save("openai", &CredentialEntry::api_key("key-1", "sk-111"))
+        s.credentials().create(
+            ("openai".into(), "key-1".into()),
+            CredentialEntry::api_key("key-1", "sk-111"),
+        )
             .await
             .unwrap();
-        s.credential_save("openai", &CredentialEntry::api_key("key-2", "sk-222"))
+        s.credentials().create(
+            ("openai".into(), "key-2".into()),
+            CredentialEntry::api_key("key-2", "sk-222"),
+        )
             .await
             .unwrap();
 
         let p = pool(
-            s as Arc<dyn CredentialStore>,
+            s as Arc<dyn Store>,
             Arc::new(StickyRoundRobin::new()),
         );
 
@@ -288,15 +317,21 @@ mod tests {
     #[tokio::test]
     async fn unbind_session_clears_binding() {
         let s = store();
-        s.credential_save("openai", &CredentialEntry::api_key("key-1", "sk-111"))
+        s.credentials().create(
+            ("openai".into(), "key-1".into()),
+            CredentialEntry::api_key("key-1", "sk-111"),
+        )
             .await
             .unwrap();
-        s.credential_save("openai", &CredentialEntry::api_key("key-2", "sk-222"))
+        s.credentials().create(
+            ("openai".into(), "key-2".into()),
+            CredentialEntry::api_key("key-2", "sk-222"),
+        )
             .await
             .unwrap();
 
         let p = pool(
-            s as Arc<dyn CredentialStore>,
+            s as Arc<dyn Store>,
             Arc::new(StickyRoundRobin::new()),
         );
         let sid = Ulid::new();
@@ -314,7 +349,7 @@ mod tests {
     #[tokio::test]
     async fn add_credential_makes_it_available() {
         let s = store();
-        let p = pool(s as Arc<dyn CredentialStore>, Arc::new(Fallback::new()));
+        let p = pool(s as Arc<dyn Store>, Arc::new(Fallback::new()));
 
         p.add("openai", &CredentialEntry::api_key("new-key", "sk-new"))
             .await
@@ -327,14 +362,20 @@ mod tests {
     #[tokio::test]
     async fn fallback_always_prefers_first() {
         let s = store();
-        s.credential_save("openai", &CredentialEntry::api_key("key-1", "sk-111"))
+        s.credentials().create(
+            ("openai".into(), "key-1".into()),
+            CredentialEntry::api_key("key-1", "sk-111"),
+        )
             .await
             .unwrap();
-        s.credential_save("openai", &CredentialEntry::api_key("key-2", "sk-222"))
+        s.credentials().create(
+            ("openai".into(), "key-2".into()),
+            CredentialEntry::api_key("key-2", "sk-222"),
+        )
             .await
             .unwrap();
 
-        let p = pool(s as Arc<dyn CredentialStore>, Arc::new(Fallback::new()));
+        let p = pool(s as Arc<dyn Store>, Arc::new(Fallback::new()));
 
         let a = p.resolve("openai", None).await.unwrap();
         let b = p.resolve("openai", None).await.unwrap();
@@ -346,12 +387,18 @@ mod tests {
         let s = store();
         let mut disabled = CredentialEntry::api_key("key-1", "sk-111");
         disabled.enabled = false;
-        s.credential_save("openai", &disabled).await.unwrap();
-        s.credential_save("openai", &CredentialEntry::api_key("key-2", "sk-222"))
+        s.credentials()
+            .create(("openai".into(), disabled.id.clone()), disabled)
+            .await
+            .unwrap();
+        s.credentials().create(
+            ("openai".into(), "key-2".into()),
+            CredentialEntry::api_key("key-2", "sk-222"),
+        )
             .await
             .unwrap();
 
-        let p = pool(s as Arc<dyn CredentialStore>, Arc::new(Fallback::new()));
+        let p = pool(s as Arc<dyn Store>, Arc::new(Fallback::new()));
         let resolved = p.resolve("openai", None).await.unwrap();
         assert_eq!(resolved.id, "key-2");
     }

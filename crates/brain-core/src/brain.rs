@@ -1,3 +1,4 @@
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use futures::StreamExt;
@@ -39,25 +40,25 @@ impl Brain {
         let (tx, rx) = tokio::sync::mpsc::channel::<Event>(256);
 
         tokio::spawn(async move {
-            if let Err(e) = turn_inner(
-                store,
-                provider,
-                agent_loop,
-                tools,
-                cancel,
-                session_id,
-                user_msg,
-                tx.clone(),
-            )
-            .await
-            {
-                let _ = tx
-                    .send(Event::Error {
-                        code: e.code(),
-                        message: e.to_string(),
-                        recoverable: e.recoverable(),
-                    })
-                    .await;
+            let result = async {
+                let config = load_agent_config_for_session(store.clone(), session_id).await?;
+                run_turn_with_config(
+                    store,
+                    provider,
+                    agent_loop,
+                    tools,
+                    config,
+                    cancel,
+                    session_id,
+                    user_msg,
+                    tx.clone(),
+                )
+                .await
+            }
+            .await;
+
+            if let Err(e) = result {
+                send_error_event(tx, e).await;
             }
         });
 
@@ -75,7 +76,7 @@ impl Brain {
         resume_session: Option<Ulid>,
     ) -> Result<(), BrainError> {
         let mut session_id = if let Some(id) = resume_session {
-            let session = self.store.session_get(id).await?;
+            let session = self.store.sessions().get(id).await?;
             if session.project_id != project.id {
                 return Err(BrainError::Storage(format!(
                     "session {id} does not belong to project {}",
@@ -88,7 +89,8 @@ impl Brain {
                 .await?;
             id
         } else {
-            let session = self.store.session_create(project.id).await?;
+            let session = Session::new(project.id);
+            let session = self.store.sessions().create(session.id, session).await?;
             tracing::info!(session_id = %session.id, "session started");
             transport
                 .send(Event::SessionStart {
@@ -112,7 +114,7 @@ impl Brain {
                     continue;
                 }
                 Some(InputEvent::SwitchSession(target)) => {
-                    let target_session = self.store.session_get(target).await?;
+                    let target_session = self.store.sessions().get(target).await?;
                     if target_session.project_id != project.id {
                         return Err(BrainError::Storage(format!(
                             "session {target} does not belong to project {}",
@@ -144,11 +146,12 @@ impl Brain {
     }
 
     pub async fn create_session(&self, project_id: ProjectId) -> Result<Session, BrainError> {
-        self.store.session_create(project_id).await
+        let session = Session::new(project_id);
+        self.store.sessions().create(session.id, session).await
     }
 
     pub async fn list_sessions(&self, project_id: ProjectId) -> Result<Vec<Session>, BrainError> {
-        self.store.session_list(project_id).await
+        self.store.sessions().list_for_project(project_id).await
     }
 
     pub async fn update_session_inference(
@@ -156,74 +159,48 @@ impl Brain {
         session_id: Ulid,
         inference: Option<InferenceConfig>,
     ) -> Result<Session, BrainError> {
-        let normalized = inference.filter(|config| !config.is_empty());
-        let update = match normalized {
-            Some(config) => SessionUpdate::inference(config),
-            None => SessionUpdate::clear_inference(),
-        };
-
-        self.store.session_update(session_id, update).await?;
-        self.store.session_get(session_id).await
+        let mut session = self.store.sessions().get(session_id).await?;
+        session.inference = inference.filter(|config| !config.is_empty());
+        self.store.sessions().update(session.id, session).await
     }
 
     pub async fn effective_inference_for_session(
         &self,
         session_id: Ulid,
     ) -> Result<InferenceConfig, BrainError> {
-        let session = self.store.session_get(session_id).await?;
-        let project = self.store.project_get(session.project_id).await?;
-        Ok(resolve_effective_inference(
-            &project.config.agent.inference,
-            session.inference.as_ref(),
-        ))
+        let session = self.store.sessions().get(session_id).await?;
+        let project = self.store.projects().get(session.project_id).await?;
+        Ok(resolve_effective_agent_config(&project.config.agent, &session).inference)
     }
 
     pub async fn effective_agent_config_for_session(
         &self,
         session_id: Ulid,
     ) -> Result<AgentConfig, BrainError> {
-        let session = self.store.session_get(session_id).await?;
-        let project = self.store.project_get(session.project_id).await?;
-        let mut config = project.config.agent.clone();
-        config.inference = resolve_effective_inference(
-            &project.config.agent.inference,
-            session.inference.as_ref(),
-        );
-        Ok(config)
+        load_agent_config_for_session(self.store.clone(), session_id).await
     }
 
     pub async fn resolve_or_create_project(
         &self,
         root: std::path::PathBuf,
     ) -> Result<Project, BrainError> {
-        let normalized_root = normalize_project_root(&root);
-        if let Some(project) = self.store.project_find_by_root(&normalized_root).await? {
-            return Ok(project);
-        }
-
-        let name = normalized_root
-            .file_name()
-            .and_then(|segment| segment.to_str())
-            .map(ToOwned::to_owned)
-            .unwrap_or_else(|| "brain".to_owned());
-        let project = Project::new(Some(name), Some(normalized_root), ProjectConfig::default());
-        self.store.project_create(project).await
+        resolve_or_create_project_with_store(self.store.clone(), root).await
     }
 }
 
 #[allow(clippy::too_many_arguments)]
-async fn turn_inner(
+pub(crate) async fn run_turn_with_config(
     store: Arc<dyn Store>,
     provider: Arc<dyn Provider>,
     agent_loop: Arc<dyn AgentLoop>,
     tools: Vec<Arc<dyn Tool>>,
+    config: AgentConfig,
     cancel: CancellationToken,
     session_id: Ulid,
     user_msg: Message,
     tx: tokio::sync::mpsc::Sender<Event>,
 ) -> Result<(), BrainError> {
-    let config = load_agent_config_for_session(store.clone(), session_id).await?;
-    let mut history = store.message_list(session_id).await?;
+    let mut history = store.messages().list_for_session(session_id).await?;
     history.push(user_msg.clone());
 
     let mut inner_stream =
@@ -246,12 +223,26 @@ async fn turn_inner(
         let _ = tx.send(event).await;
     }
 
-    store.message_append(session_id, &new_messages).await?;
+    let keyed_messages = new_messages
+        .into_iter()
+        .map(|message| ((session_id, message.id), message))
+        .collect();
+    store.messages().create_many(keyed_messages).await?;
 
     Ok(())
 }
 
-fn resolve_effective_inference(
+pub(crate) async fn send_error_event(tx: tokio::sync::mpsc::Sender<Event>, error: BrainError) {
+    let _ = tx
+        .send(Event::Error {
+            code: error.code(),
+            message: error.to_string(),
+            recoverable: error.recoverable(),
+        })
+        .await;
+}
+
+pub(crate) fn resolve_effective_inference(
     defaults: &InferenceConfig,
     session_inference: Option<&InferenceConfig>,
 ) -> InferenceConfig {
@@ -261,16 +252,86 @@ fn resolve_effective_inference(
     }
 }
 
-async fn load_agent_config_for_session(
+pub(crate) fn resolve_effective_agent_config(
+    defaults: &AgentConfig,
+    session: &Session,
+) -> AgentConfig {
+    let mut config = defaults.clone();
+    config.inference = resolve_effective_inference(&defaults.inference, session.inference.as_ref());
+    config.loop_name = session
+        .loop_name
+        .clone()
+        .or_else(|| defaults.loop_name.clone());
+    config
+}
+
+pub(crate) async fn load_agent_config_for_session(
     store: Arc<dyn Store>,
     session_id: Ulid,
 ) -> Result<AgentConfig, BrainError> {
-    let session = store.session_get(session_id).await?;
-    let project = store.project_get(session.project_id).await?;
-    let mut config = project.config.agent.clone();
-    config.inference =
-        resolve_effective_inference(&project.config.agent.inference, session.inference.as_ref());
-    Ok(config)
+    let session = store.sessions().get(session_id).await?;
+    let project = store.projects().get(session.project_id).await?;
+    Ok(resolve_effective_agent_config(
+        &project.config.agent,
+        &session,
+    ))
+}
+
+pub(crate) async fn resolve_or_create_project_with_store(
+    store: Arc<dyn Store>,
+    root: PathBuf,
+) -> Result<Project, BrainError> {
+    resolve_or_create_project_with_store_status(store, root)
+        .await
+        .map(|(project, _)| project)
+}
+
+pub(crate) async fn resolve_or_create_project_with_store_status(
+    store: Arc<dyn Store>,
+    root: PathBuf,
+) -> Result<(Project, bool), BrainError> {
+    let normalized_root = normalize_project_root(&root);
+    if let Some(project) = store.projects().find_by_root(&normalized_root).await? {
+        return Ok((project, false));
+    }
+
+    let name = normalized_root
+        .file_name()
+        .and_then(|segment| segment.to_str())
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| "brain".to_owned());
+    let config = resolve_project_config(&normalized_root);
+    let project = Project::new(Some(name), Some(normalized_root), config);
+    let project_id = project.id;
+    store
+        .projects()
+        .create(project_id, project)
+        .await
+        .map(|project| (project, true))
+}
+
+fn resolve_project_config(root: &Path) -> ProjectConfig {
+    let global_config = brain_stores::brain_home().join("config.toml");
+    resolve_project_config_with_global(root, Some(global_config))
+}
+
+fn resolve_project_config_with_global(
+    root: &Path,
+    global_config: Option<PathBuf>,
+) -> ProjectConfig {
+    let mut config = brain_config::resolve_fs_config_with_global(root, global_config.as_deref())
+        .unwrap_or_else(|error| {
+            tracing::warn!("config resolution failed, using defaults: {error}");
+            ProjectConfig::default()
+        });
+
+    if config.agent.system_prompt.is_none()
+        && let Ok(Some(agents_md)) = brain_config::load_root_agents_md(root)
+    {
+        config.agent.system_prompt = Some(agents_md);
+    }
+
+    config
 }
 
 #[cfg(test)]
@@ -280,6 +341,8 @@ mod tests {
     use brain_providers::MockProvider;
     use brain_stores::InMemoryStore;
     use futures::future::BoxFuture;
+    use std::fs;
+    use tempfile::tempdir;
 
     async fn make_brain() -> (Brain, Project, Arc<InMemoryStore>) {
         let project = Project::with_defaults("test");
@@ -288,7 +351,7 @@ mod tests {
         let agent_loop: Arc<dyn AgentLoop> = Arc::new(SimpleLoop);
 
         let brain = Brain::new(provider, store.clone(), agent_loop, vec![]);
-        store.project_create(project.clone()).await.unwrap();
+        store.projects().create(project.id, project.clone()).await.unwrap();
         (brain, project, store)
     }
 
@@ -320,7 +383,7 @@ mod tests {
             ProjectConfig::default(),
         );
         let id = project.id;
-        store.project_create(project).await.unwrap();
+        store.projects().create(project.id, project).await.unwrap();
 
         let resolved = brain
             .resolve_or_create_project("/tmp/work/./repo".into())
@@ -340,6 +403,48 @@ mod tests {
         assert_eq!(project.name.as_deref(), Some("new-project"));
     }
 
+    #[test]
+    fn resolve_project_config_loads_project_file_and_root_agents() {
+        let dir = tempdir().unwrap();
+        let agents_dir = dir.path().join(".agents");
+        fs::create_dir_all(&agents_dir).unwrap();
+        fs::write(
+            agents_dir.join("config.toml"),
+            r#"
+[agent]
+max_iterations = 7
+[agent.inference]
+provider = "mock"
+"#,
+        )
+        .unwrap();
+        fs::write(agents_dir.join("AGENTS.md"), "root prompt").unwrap();
+
+        let config = resolve_project_config_with_global(dir.path(), None);
+        assert_eq!(config.agent.max_iterations, 7);
+        assert_eq!(config.agent.inference.provider.as_deref(), Some("mock"));
+        assert_eq!(config.agent.system_prompt.as_deref(), Some("root prompt"));
+    }
+
+    #[test]
+    fn resolve_project_config_preserves_explicit_prompt_over_agents_md() {
+        let dir = tempdir().unwrap();
+        let agents_dir = dir.path().join(".agents");
+        fs::create_dir_all(&agents_dir).unwrap();
+        fs::write(
+            agents_dir.join("config.toml"),
+            r#"
+[agent]
+system_prompt = "config prompt"
+"#,
+        )
+        .unwrap();
+        fs::write(agents_dir.join("AGENTS.md"), "root prompt").unwrap();
+
+        let config = resolve_project_config_with_global(dir.path(), None);
+        assert_eq!(config.agent.system_prompt.as_deref(), Some("config prompt"));
+    }
+
     #[tokio::test]
     async fn effective_inference_merges_project_defaults_with_session_overrides() {
         let provider: Arc<dyn Provider> = Arc::new(MockProvider::new());
@@ -354,6 +459,7 @@ mod tests {
                 agent: AgentConfig {
                     max_iterations: 20,
                     system_prompt: None,
+                    loop_name: None,
                     inference: InferenceConfig {
                         provider: Some("openai".into()),
                         model: Some("gpt-4o-mini".into()),
@@ -363,7 +469,7 @@ mod tests {
                 },
             },
         );
-        let project = store.project_create(project).await.unwrap();
+        let project = store.projects().create(project.id, project).await.unwrap();
 
         let session = brain.create_session(project.id).await.unwrap();
         brain
@@ -417,7 +523,7 @@ mod tests {
         assert!(saw_message_done);
         assert!(saw_turn_done);
 
-        let messages = store.message_list(session.id).await.unwrap();
+        let messages = store.messages().list_for_session(session.id).await.unwrap();
         assert_eq!(messages.len(), 2);
         assert_eq!(messages[0].role, Role::User);
         assert_eq!(messages[0].content, "hello world");
@@ -437,7 +543,7 @@ mod tests {
         let mut events = brain.turn(session.id, "second", CancellationToken::new());
         while events.next().await.is_some() {}
 
-        let messages = store.message_list(session.id).await.unwrap();
+        let messages = store.messages().list_for_session(session.id).await.unwrap();
         assert_eq!(messages.len(), 4);
     }
 
@@ -589,7 +695,7 @@ mod tests {
             "should emit SessionResume for switched session"
         );
 
-        let alt_messages = store.message_list(alt_session.id).await.unwrap();
+        let alt_messages = store.messages().list_for_session(alt_session.id).await.unwrap();
         assert!(!alt_messages.is_empty());
         assert_eq!(alt_messages[0].role, Role::User);
         assert_eq!(alt_messages[0].content, "hello world");
@@ -653,7 +759,7 @@ mod tests {
             "should complete the turn"
         );
 
-        let messages = store.message_list(session.id).await.unwrap();
+        let messages = store.messages().list_for_session(session.id).await.unwrap();
         assert!(!messages.is_empty());
         assert_eq!(messages[0].role, Role::User);
         assert_eq!(messages[0].content, "resumed hello");
@@ -683,8 +789,10 @@ mod tests {
         }
 
         let (brain, project, store) = make_brain().await;
+        let other_project = Project::with_defaults("other");
         let other_project = store
-            .project_create(Project::with_defaults("other"))
+            .projects()
+            .create(other_project.id, other_project)
             .await
             .unwrap();
         let other_session = brain.create_session(other_project.id).await.unwrap();

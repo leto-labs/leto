@@ -374,6 +374,7 @@ mod tests {
         AgentConfig {
             max_iterations: 10,
             system_prompt: None,
+            loop_name: None,
             inference: InferenceConfig::default(),
         }
     }
@@ -452,6 +453,7 @@ mod tests {
         let config = AgentConfig {
             max_iterations: 5,
             system_prompt: Some("Be helpful".into()),
+            loop_name: None,
             inference: InferenceConfig::default(),
         };
 
@@ -553,6 +555,7 @@ mod tests {
         let config = AgentConfig {
             max_iterations: 2,
             system_prompt: None,
+            loop_name: None,
             inference: InferenceConfig::default(),
         };
 

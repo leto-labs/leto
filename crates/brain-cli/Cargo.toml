@@ -17,13 +17,13 @@ llamacpp = ["brain-core/llamacpp", "brain-acp/llamacpp"]
 brain-core = { workspace = true }
 brain-acp = { workspace = true }
 brain-config = { workspace = true }
-brain-server = { workspace = true }
 brain-stores = { workspace = true }
 anyhow = { workspace = true }
 clap = { workspace = true }
 futures = { workspace = true }
 reqwest = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "io-util"] }
+tokio-util = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 ulid = { workspace = true }
