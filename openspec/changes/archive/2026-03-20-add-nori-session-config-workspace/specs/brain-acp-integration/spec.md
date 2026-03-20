@@ -35,13 +35,35 @@ The planned first branch SHALL:
 - support ACP `configOptions`
 - support `session/set_config_option`
 - handle session config refreshes from ACP updates
-- defer ACP session modes from the initial implementation scope
+- keep ACP session modes out of the initial implementation scope
 
 #### Scenario: Maintainer reviews initial ACP client scope
 
 - **WHEN** the scoped Nori ACP work is reviewed in this repository
 - **THEN** session config options SHALL be the first planned feature area
 - **AND** ACP session modes SHALL remain deferred from that initial branch
+
+### Requirement: Nori Fork Development Uses The Existing Source Workflow
+
+The primary development loop for the Nori fork SHALL use the existing
+`codex-rs` source workflow instead of introducing a new tracked packaging or
+vendor-based dev path.
+
+The planned local workflow SHALL:
+
+- use `just nori` or `cargo run --bin nori --` as the primary executable path
+- preserve upstream's architecture where the native Rust binary is the real
+  application and the npm package is a thin distribution wrapper
+- treat vendored binaries and `dist/` output as packaging-only artifacts rather
+  than routine tracked development assets
+
+#### Scenario: Contributor iterates on ACP session-config changes
+
+- **WHEN** a contributor is developing or manually testing the Nori fork
+- **THEN** the primary executable path SHALL be the native Rust binary from
+  `codex-rs`
+- **AND** the workflow SHALL not require committing generated `vendor/`,
+  `dist/`, or tarball artifacts
 
 ### Requirement: Planned Nori Session Settings Stay Generic
 
@@ -53,7 +75,7 @@ The planned first implementation SHALL:
 - support select-style ACP session config options
 - use option metadata supplied by the ACP agent
 - avoid hardcoding `brain`-specific option identifiers
-- use a dedicated session-settings surface instead of changing `/model` or
+- use a dedicated `/session-config` surface instead of changing `/model` or
   reusing `/config`
 
 #### Scenario: ACP agent exposes configurable session options

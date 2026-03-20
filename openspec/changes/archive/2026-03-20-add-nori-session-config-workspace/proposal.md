@@ -19,11 +19,8 @@ The current research points to a clear split:
 That makes a client-side extension path cleaner than adding a `brain-acp`
 bridge that invents custom behavior for one agent.
 
-The repo therefore needs two things before any Nori implementation starts:
-
-- a checked-out fork workspace that can be used for local development and
-  cross-testing
-- an approved scope that keeps the first client change small and protocol-native
+This change therefore establishes the fork workspace and implements the scoped
+first ACP client extension directly in that workspace.
 
 ## What
 
@@ -35,13 +32,18 @@ This change will:
   `feat/add-session-config`
 - define a new OpenSpec capability for ACP client integration planning
 - scope the first Nori-side ACP work to generic session config options only
-- defer ACP session modes from the initial branch
-- recommend a dedicated session-settings UX surface rather than overloading
+- keep ACP session modes out of the initial branch
+- add a dedicated `/session-config` UX surface rather than overloading
   `/model` or `/config`
+- use the existing `codex-rs` source workflow (`just nori` / `cargo run`) as
+  the primary development loop for the fork
 
 ## Impact
 
 - Added capability: `brain-acp-integration`
 - Repository workspace gains `submodules/nori-cli`
-- No runtime code changes in `brain-acp` or the Nori fork are included in this
-  change
+- The Nori fork workspace now contains the initial ACP session-config
+  implementation on `feat/add-session-config`
+- Local development stays aligned with upstream architecture by using the
+  native Rust binary as the primary dev loop and leaving npm packaging as a
+  later smoke-test concern

@@ -198,6 +198,35 @@ So the current documentation recommendation is:
 - prefer a Nori fork/extension over a `brain-acp` bridge if richer ACP session
   settings are the next product step
 
+## Local Fork Workflow
+
+For the current fork-based ACP work, the primary local development loop should
+use Nori's existing Rust workflow in `codex-rs`:
+
+- `just nori`
+- `cargo run --bin nori --`
+
+That is still consistent with upstream architecture. In Nori, the native Rust
+binary is the real application, while the npm package is a thin launcher that
+wraps vendored platform binaries. In the local fork:
+
+- `vendor/` is a packaging concern for the npm wrapper, not a source artifact
+- `dist/` is temporary packaging output, not a routine development input
+- neither should be treated as part of the tracked day-to-day dev loop
+
+This matters because the current ACP session-config work changes the Rust TUI
+and ACP layers, not the npm launcher or release assembly logic. So the cleanest
+way to mimic upstream architecture while keeping the patch small is:
+
+- develop against the native binary from source
+- reserve package-shape validation for a later smoke test
+
+Relevant upstream architecture references in the fork:
+
+- [`submodules/nori-cli/codex-rs/justfile`](../../submodules/nori-cli/codex-rs/justfile)
+- [`submodules/nori-cli/nori-cli/bin/nori.js`](../../submodules/nori-cli/nori-cli/bin/nori.js)
+- [`submodules/nori-cli/.github/workflows/nori-release.yml`](../../submodules/nori-cli/.github/workflows/nori-release.yml)
+
 ## Fit For `brain`
 
 `nori-cli` is the strongest current TUI candidate we have found so far for a
