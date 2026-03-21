@@ -471,6 +471,7 @@ system_prompt = "config prompt"
                         max_tokens: Some(4096),
                         temperature: Some(0.7),
                     },
+                    ..AgentConfig::default()
                 },
             },
         );

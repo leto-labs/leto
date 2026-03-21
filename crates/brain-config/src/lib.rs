@@ -23,6 +23,11 @@ struct RawAgentConfig {
     max_iterations: Option<u32>,
     system_prompt: Option<String>,
     loop_name: Option<String>,
+    doom_loop_threshold: Option<u32>,
+    doom_loop_strategy: Option<brain_types::DoomLoopStrategy>,
+    compaction_threshold: Option<Option<f32>>,
+    compaction_model: Option<String>,
+    max_retries: Option<u32>,
     inference: Option<RawInferenceConfig>,
     #[serde(flatten)]
     _unknown: std::collections::BTreeMap<String, Value>,
@@ -47,6 +52,11 @@ impl Default for RawAgentConfig {
             max_iterations: None,
             system_prompt: None,
             loop_name: None,
+            doom_loop_threshold: None,
+            doom_loop_strategy: None,
+            compaction_threshold: None,
+            compaction_model: None,
+            max_retries: None,
             inference: None,
             _unknown: std::collections::BTreeMap::new(),
         }
@@ -63,6 +73,21 @@ impl RawAgentConfig {
         }
         if let Some(loop_name) = self.loop_name {
             target.agent.loop_name = Some(loop_name);
+        }
+        if let Some(doom_loop_threshold) = self.doom_loop_threshold {
+            target.agent.doom_loop_threshold = doom_loop_threshold;
+        }
+        if let Some(doom_loop_strategy) = self.doom_loop_strategy {
+            target.agent.doom_loop_strategy = doom_loop_strategy;
+        }
+        if let Some(compaction_threshold) = self.compaction_threshold {
+            target.agent.compaction_threshold = compaction_threshold;
+        }
+        if let Some(compaction_model) = self.compaction_model {
+            target.agent.compaction_model = Some(compaction_model);
+        }
+        if let Some(max_retries) = self.max_retries {
+            target.agent.max_retries = max_retries;
         }
         if let Some(inference) = self.inference {
             if let Some(provider) = inference.provider {

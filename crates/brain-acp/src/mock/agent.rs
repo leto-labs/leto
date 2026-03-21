@@ -18,10 +18,9 @@ use tokio::sync::{mpsc, oneshot};
 
 use super::capabilities::{
     APPROVAL_DEFAULT, APPROVAL_FULL, AUTH_METHOD_ID, CONFIG_APPROVAL, CONFIG_LOOP,
-    CONFIG_REASONING, LOOP_PLANNER, LOOP_SIMPLE, MODE_ASK, MODEL_DEEP, MODEL_FAST,
-    REASONING_DEEP, REASONING_STANDARD, SESSION_PAGE_SIZE,
-    available_commands_update, config_options, current_mode_update, info_update, list_info,
-    model_state, session_mode_state,
+    CONFIG_REASONING, LOOP_PLANNER, LOOP_SIMPLE, MODE_ASK, MODEL_DEEP, MODEL_FAST, REASONING_DEEP,
+    REASONING_STANDARD, SESSION_PAGE_SIZE, available_commands_update, config_options,
+    current_mode_update, info_update, list_info, model_state, session_mode_state,
 };
 use super::session_registry::{MessageRole, MockMessage, MockSession, MockState};
 

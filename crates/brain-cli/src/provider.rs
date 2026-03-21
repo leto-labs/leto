@@ -23,6 +23,7 @@ pub async fn build_runtime(
         runtime.set_provider(provider_name, provider)?;
     }
     runtime.set_loop("simple", Arc::new(SimpleLoop))?;
+    runtime.set_loop("robust", Arc::new(RobustLoop))?;
     for tool in native_tools() {
         let name = tool.definition().name.clone();
         runtime.set_tool(name, tool)?;

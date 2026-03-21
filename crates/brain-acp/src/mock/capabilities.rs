@@ -131,7 +131,9 @@ pub(super) fn config_options(session: &MockSession) -> Vec<acp::SessionConfigOpt
             ],
         )
         .description("Mock loop selector used to validate ACP session loop UX.")
-        .category(acp::SessionConfigOptionCategory::Other(CATEGORY_LOOP.to_owned())),
+        .category(acp::SessionConfigOptionCategory::Other(
+            CATEGORY_LOOP.to_owned(),
+        )),
     ]
 }
 

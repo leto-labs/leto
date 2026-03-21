@@ -164,11 +164,12 @@ async fn new_session_includes_loop_config_when_multiple_loops_are_registered() {
     local_set
         .run_until(async {
             let app = build_test_app_with_loops(0, &["planner", "simple"]);
-            let (_, connection) =
-                initialized_connection(RecordingClient::default(), app).await;
+            let (_, connection) = initialized_connection(RecordingClient::default(), app).await;
 
             let session = connection
-                .new_session(acp::NewSessionRequest::new(PathBuf::from("/tmp/acp-loop-config")))
+                .new_session(acp::NewSessionRequest::new(PathBuf::from(
+                    "/tmp/acp-loop-config",
+                )))
                 .await
                 .expect("new session should succeed");
 

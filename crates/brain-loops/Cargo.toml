@@ -7,7 +7,7 @@ version.workspace = true
 brain-types = { workspace = true }
 futures = { workspace = true }
 ulid = { workspace = true }
-tokio = { workspace = true, features = ["sync", "rt"] }
+tokio = { workspace = true, features = ["sync", "rt", "time"] }
 tokio-util = { workspace = true }
 tokio-stream = { workspace = true }
 serde_json = { workspace = true }

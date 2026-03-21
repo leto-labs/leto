@@ -9,8 +9,8 @@ use super::app::BackendApp;
 #[cfg(feature = "unstable_session_model")]
 use super::capabilities::session_model_state;
 use super::capabilities::{
-    CONFIG_LOOP, CONFIG_MODEL, CONFIG_THOUGHT_LEVEL, config_options, initialize_response, list_info,
-    session_info_update,
+    CONFIG_LOOP, CONFIG_MODEL, CONFIG_THOUGHT_LEVEL, config_options, initialize_response,
+    list_info, session_info_update,
 };
 use super::errors::{internal_error, map_brain_error};
 use super::event_mapper::{EventMapper, MappedEvent};

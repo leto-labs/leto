@@ -376,6 +376,7 @@ mod tests {
             system_prompt: None,
             loop_name: None,
             inference: InferenceConfig::default(),
+            ..AgentConfig::default()
         }
     }
 
@@ -455,6 +456,7 @@ mod tests {
             system_prompt: Some("Be helpful".into()),
             loop_name: None,
             inference: InferenceConfig::default(),
+            ..AgentConfig::default()
         };
 
         let mut stream = SimpleLoop.run(
@@ -557,6 +559,7 @@ mod tests {
             system_prompt: None,
             loop_name: None,
             inference: InferenceConfig::default(),
+            ..AgentConfig::default()
         };
 
         let mut stream = SimpleLoop.run(

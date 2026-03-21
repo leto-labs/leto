@@ -86,6 +86,13 @@
     "enabled": true
   },
   {
+    "name": "attractor",
+    "url": "https://github.com/strongdm/attractor",
+    "tag": "main",
+    "notes": "Graph-driven orchestration layer with companion specs for coding-agent loops and unified LLM clients. Start with coding-agent-loop-spec.md for provider-aligned tool contracts, especially OpenAI apply_patch in V4A format, then attractor-spec.md and unified-llm-spec.md for orchestration concerns similar to Gastown.",
+    "enabled": true
+  },
+  {
     "name": "llama_cpp-rs",
     "url": "https://github.com/edgenai/llama_cpp-rs",
     "tag": "main",

@@ -2,11 +2,25 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use ulid::Ulid;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum DoomLoopStrategy {
+    #[default]
+    Steer,
+    Error,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct AgentConfig {
     pub max_iterations: u32,
     pub system_prompt: Option<String>,
     pub loop_name: Option<String>,
+    pub doom_loop_threshold: u32,
+    pub doom_loop_strategy: DoomLoopStrategy,
+    pub compaction_threshold: Option<f32>,
+    pub compaction_model: Option<String>,
+    pub max_retries: u32,
     pub inference: InferenceConfig,
 }
 
@@ -16,12 +30,18 @@ impl Default for AgentConfig {
             max_iterations: 20,
             system_prompt: None,
             loop_name: None,
+            doom_loop_threshold: 3,
+            doom_loop_strategy: DoomLoopStrategy::Steer,
+            compaction_threshold: Some(0.8),
+            compaction_model: None,
+            max_retries: 3,
             inference: InferenceConfig::default(),
         }
     }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct InferenceConfig {
     pub provider: Option<String>,
     pub model: Option<String>,
@@ -89,6 +109,11 @@ mod tests {
         assert_eq!(cfg.max_iterations, 20);
         assert!(cfg.system_prompt.is_none());
         assert!(cfg.loop_name.is_none());
+        assert_eq!(cfg.doom_loop_threshold, 3);
+        assert_eq!(cfg.doom_loop_strategy, DoomLoopStrategy::Steer);
+        assert_eq!(cfg.compaction_threshold, Some(0.8));
+        assert!(cfg.compaction_model.is_none());
+        assert_eq!(cfg.max_retries, 3);
         assert!(cfg.inference.model.is_none());
     }
 
@@ -138,6 +163,11 @@ mod tests {
             max_iterations: 10,
             system_prompt: Some("You are helpful.".into()),
             loop_name: Some("simple".into()),
+            doom_loop_threshold: 4,
+            doom_loop_strategy: DoomLoopStrategy::Error,
+            compaction_threshold: Some(0.9),
+            compaction_model: Some("gpt-5-mini".into()),
+            max_retries: 5,
             inference: InferenceConfig {
                 provider: Some("openai".into()),
                 model: Some("gpt-4".into()),
@@ -154,8 +184,34 @@ mod tests {
             Some("You are helpful.")
         );
         assert_eq!(deserialized.loop_name.as_deref(), Some("simple"));
+        assert_eq!(deserialized.doom_loop_threshold, 4);
+        assert_eq!(deserialized.doom_loop_strategy, DoomLoopStrategy::Error);
+        assert_eq!(deserialized.compaction_threshold, Some(0.9));
+        assert_eq!(deserialized.compaction_model.as_deref(), Some("gpt-5-mini"));
+        assert_eq!(deserialized.max_retries, 5);
         assert_eq!(deserialized.inference.model.as_deref(), Some("gpt-4"));
         assert_eq!(deserialized.inference.reasoning.as_deref(), Some("low"));
+    }
+
+    #[test]
+    fn agent_config_uses_defaults_for_missing_hardening_fields() {
+        let cfg: AgentConfig = serde_json::from_str(
+            r#"{
+                "max_iterations": 7,
+                "inference": {
+                    "model": "gpt-5"
+                }
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(cfg.max_iterations, 7);
+        assert_eq!(cfg.doom_loop_threshold, 3);
+        assert_eq!(cfg.doom_loop_strategy, DoomLoopStrategy::Steer);
+        assert_eq!(cfg.compaction_threshold, Some(0.8));
+        assert!(cfg.compaction_model.is_none());
+        assert_eq!(cfg.max_retries, 3);
+        assert_eq!(cfg.inference.model.as_deref(), Some("gpt-5"));
     }
 
     #[test]

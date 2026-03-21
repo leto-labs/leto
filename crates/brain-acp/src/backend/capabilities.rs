@@ -115,14 +115,20 @@ pub fn config_options(
                 CONFIG_LOOP,
                 "Loop",
                 current_value,
-                loops.iter()
+                loops
+                    .iter()
                     .map(|loop_name| {
-                        acp::SessionConfigSelectOption::new(loop_name.clone(), title_case_words(loop_name))
+                        acp::SessionConfigSelectOption::new(
+                            loop_name.clone(),
+                            title_case_words(loop_name),
+                        )
                     })
                     .collect::<Vec<_>>(),
             )
             .description("Selects the registered agent loop used for this session.")
-            .category(acp::SessionConfigOptionCategory::Other(CATEGORY_LOOP.to_owned())),
+            .category(acp::SessionConfigOptionCategory::Other(
+                CATEGORY_LOOP.to_owned(),
+            )),
         );
     }
 

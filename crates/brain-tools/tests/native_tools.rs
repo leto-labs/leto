@@ -253,16 +253,18 @@ async fn grep_with_include_filter() {
 }
 
 #[tokio::test]
-async fn native_tools_returns_all_seven() {
+async fn native_tools_returns_all_nine() {
     let tools = native_tools();
-    assert_eq!(tools.len(), 7);
+    assert_eq!(tools.len(), 9);
 
     let names: Vec<String> = tools.iter().map(|t| t.definition().name).collect();
     assert!(names.contains(&"echo".to_string()));
     assert!(names.contains(&"file_read".to_string()));
     assert!(names.contains(&"file_write".to_string()));
     assert!(names.contains(&"file_edit".to_string()));
+    assert!(names.contains(&"apply_patch".to_string()));
     assert!(names.contains(&"shell".to_string()));
+    assert!(names.contains(&"list_directory".to_string()));
     assert!(names.contains(&"glob_search".to_string()));
     assert!(names.contains(&"grep".to_string()));
 }

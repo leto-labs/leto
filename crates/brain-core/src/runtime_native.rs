@@ -797,6 +797,7 @@ mod tests {
                             max_tokens: None,
                             temperature: None,
                         },
+                        ..AgentConfig::default()
                     },
                 },
             ),
@@ -840,6 +841,7 @@ mod tests {
                         system_prompt: None,
                         loop_name: Some("default-loop".into()),
                         inference: InferenceConfig::default(),
+                        ..AgentConfig::default()
                     },
                 },
             ),
@@ -985,21 +987,24 @@ mod tests {
         let (runtime, store, project) =
             make_runtime("default", "simple", Project::with_defaults("test")).await;
         runtime
-            .set_provider("default", Arc::new(NamedProvider::new("default", vec!["model-a"])))
+            .set_provider(
+                "default",
+                Arc::new(NamedProvider::new("default", vec!["model-a"])),
+            )
             .unwrap();
         runtime
             .set_loop("simple", Arc::new(RecordingLoop { name: "simple" }))
             .unwrap();
         runtime
-            .set_loop(
-                "planner",
-                Arc::new(RecordingLoop { name: "planner" }),
-            )
+            .set_loop("planner", Arc::new(RecordingLoop { name: "planner" }))
             .unwrap();
 
         let session = Session::new(project.id);
         let session = store.sessions().create(session.id, session).await.unwrap();
-        let updated = runtime.set_session_loop(session.id, "planner").await.unwrap();
+        let updated = runtime
+            .set_session_loop(session.id, "planner")
+            .await
+            .unwrap();
 
         assert_eq!(updated.loop_name.as_deref(), Some("planner"));
     }
@@ -1009,7 +1014,10 @@ mod tests {
         let (runtime, store, project) =
             make_runtime("default", "simple", Project::with_defaults("test")).await;
         runtime
-            .set_provider("default", Arc::new(NamedProvider::new("default", vec!["model-a"])))
+            .set_provider(
+                "default",
+                Arc::new(NamedProvider::new("default", vec!["model-a"])),
+            )
             .unwrap();
         runtime
             .set_loop("simple", Arc::new(RecordingLoop { name: "simple" }))
@@ -1129,6 +1137,7 @@ mod tests {
                             max_tokens: None,
                             temperature: None,
                         },
+                        ..AgentConfig::default()
                     },
                 },
             ),
