@@ -76,10 +76,17 @@ This research concentrates on the dimensions that matter most for `brain`:
   cost-aware, multi-benchmark, and explicitly aimed at reproducible agent
   comparisons.
 - Harbor should be treated as the practical operational harness for the first
-  baseline workflow: install it externally, run one tightly bounded built-in
-  `hello-world@1.0` baseline, then run the repo-local ACP bridge against
-  `codex-acp` and `brain-acp` on `hello-world@1.0` before attempting broader
-  comparisons.
+  benchmark workflow: it now uses five reference surfaces in this repo
+  (`codex`, `mini-swe-agent`, `terminus-2`, `codex-acp`, `brain-acp`) through
+  the dedicated runner script `scripts/harbor-run.sh` and the thin
+  `just harbor-run <agent> <dataset> [task-name]` wrapper. The current common
+  checkpoint ladder is `hello-world@1.0`, `regex-log`, `chess-best-move`, and
+  `sqlite-with-gcov`, but the runner itself accepts arbitrary Harbor
+  dataset/task combinations. Built-in `codex` is the stable baseline,
+  `codex-acp` is the main repo-local ACP comparison path, `mini-swe-agent` and
+  `terminus-2` are useful built-in comparison surfaces, and `brain-acp` is now
+  real but still treated as a bounded validation path rather than the first
+  stable real comparison baseline.
 - Harbor's `ATIF` is the strongest current candidate for a reusable trace
   interchange format because it is designed for debugging, visualization, SFT,
   and RL rather than only one benchmark leaderboard.

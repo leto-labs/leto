@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
-import os
 import shlex
 import tempfile
 import uuid
@@ -11,7 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from acp import PROTOCOL_VERSION, RequestError, connect_to_agent, text_block
+from acp import RequestError
 from acp.interfaces import Client
 from acp.schema import (
     AgentMessageChunk,
@@ -19,12 +18,10 @@ from acp.schema import (
     AgentThoughtChunk,
     AllowedOutcome,
     AvailableCommandsUpdate,
-    ClientCapabilities,
     CreateTerminalResponse,
     CurrentModeUpdate,
     DeniedOutcome,
     EnvVariable,
-    FileSystemCapability,
     KillTerminalCommandResponse,
     PermissionOption,
     ReadTextFileResponse,
@@ -39,9 +36,7 @@ from acp.schema import (
     WaitForTerminalExitResponse,
     WriteTextFileResponse,
 )
-from harbor.agents.base import BaseAgent
 from harbor.environments.base import BaseEnvironment, ExecResult
-from harbor.models.agent.context import AgentContext
 
 
 def _jsonable(value: Any) -> Any:
@@ -351,153 +346,4 @@ class HarborAcpClient(Client):
         return KillTerminalCommandResponse()
 
 
-class AcpAgent(BaseAgent):
-    @staticmethod
-    def name() -> str:
-        return "acp-bridge"
-
-    def __init__(
-        self,
-        logs_dir: Path,
-        model_name: str | None = None,
-        backend_command: str | None = None,
-        backend_args: str | None = None,
-        backend_cwd: str | None = None,
-        session_cwd: str = "/app",
-        permission_mode: str = "allow_once",
-        enable_terminal: bool = True,
-        enable_filesystem: bool = True,
-        extra_env: dict[str, str] | None = None,
-        **kwargs: Any,
-    ) -> None:
-        super().__init__(logs_dir=logs_dir, model_name=model_name, **kwargs)
-        self.backend_command = backend_command
-        self.backend_args = backend_args or ""
-        self.backend_cwd = backend_cwd
-        self.session_cwd = session_cwd
-        self.permission_mode = permission_mode
-        self.enable_terminal = enable_terminal
-        self.enable_filesystem = enable_filesystem
-        self.extra_env = extra_env or {}
-
-    def version(self) -> str:
-        return "0.1.0"
-
-    async def setup(self, environment: BaseEnvironment) -> None:
-        del environment
-
-    def _resolved_backend_argv(self) -> list[str]:
-        if not self.backend_command:
-            raise RuntimeError("backend_command is required for AcpAgent")
-
-        argv = [self.backend_command, *shlex.split(self.backend_args)]
-        if Path(self.backend_command).name == "codex-acp" and self.model_name:
-            if "model=" not in self.backend_args:
-                model = self.model_name.split("/", 1)[-1]
-                argv.extend(["-c", f'model="{model}"'])
-        return argv
-
-    async def run(
-        self,
-        instruction: str,
-        environment: BaseEnvironment,
-        context: AgentContext,
-    ) -> None:
-        argv = self._resolved_backend_argv()
-        env = os.environ.copy()
-        env.update(self.extra_env)
-
-        bridge_log = self.logs_dir / "bridge.json"
-        stderr_path = self.logs_dir / "backend-stderr.txt"
-        stderr_handle = stderr_path.open("w", encoding="utf-8")
-        client = HarborAcpClient(
-            environment=environment,
-            logs_dir=self.logs_dir,
-            logger=self.logger,
-            session_cwd=self.session_cwd,
-            permission_mode=self.permission_mode,
-            enable_terminal=self.enable_terminal,
-        )
-        proc: asyncio.subprocess.Process | None = None
-        conn = None
-
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                *argv,
-                cwd=self.backend_cwd,
-                env=env,
-                stdin=asyncio.subprocess.PIPE,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=stderr_handle,
-            )
-            if proc.stdin is None or proc.stdout is None:
-                raise RuntimeError("ACP backend did not expose stdio pipes")
-
-            conn = connect_to_agent(client, proc.stdin, proc.stdout)
-            init_response = await conn.initialize(
-                protocol_version=PROTOCOL_VERSION,
-                client_capabilities=ClientCapabilities(
-                    fs=FileSystemCapability(
-                        readTextFile=self.enable_filesystem,
-                        writeTextFile=self.enable_filesystem,
-                    ),
-                    terminal=self.enable_terminal,
-                ),
-            )
-            session = await conn.new_session(
-                cwd=self.session_cwd,
-                mcp_servers=[],
-            )
-            prompt_response = await conn.prompt(
-                prompt=[text_block(instruction)],
-                session_id=session.session_id,
-            )
-
-            if prompt_response.usage is not None:
-                usage = prompt_response.usage
-                context.n_input_tokens = usage.input_tokens
-                context.n_output_tokens = usage.output_tokens
-                context.n_cache_tokens = usage.cached_read_tokens
-
-            context.metadata = {
-                "backend_command": argv[0],
-                "backend_args": argv[1:],
-                "stop_reason": prompt_response.stop_reason,
-                "session_id": session.session_id,
-                "agent_info": _jsonable(init_response.agent_info)
-                if init_response.agent_info
-                else None,
-            }
-
-            bridge_log.write_text(
-                json.dumps(
-                    {
-                        "argv": argv,
-                        "session_cwd": self.session_cwd,
-                        "initialize": _jsonable(init_response),
-                        "new_session": _jsonable(session),
-                        "prompt_response": _jsonable(prompt_response),
-                        "assistant_text": client.assistant_text(),
-                        "thought_text": client.thought_text(),
-                    },
-                    indent=2,
-                    ensure_ascii=False,
-                )
-                + "\n",
-                encoding="utf-8",
-            )
-        finally:
-            if conn is not None:
-                with contextlib.suppress(Exception):
-                    await conn.close()
-
-            if proc is not None and proc.returncode is None:
-                proc.terminate()
-                with contextlib.suppress(Exception):
-                    await asyncio.wait_for(proc.wait(), timeout=5)
-                if proc.returncode is None:
-                    proc.kill()
-                    with contextlib.suppress(Exception):
-                        await proc.wait()
-
-            stderr_handle.close()
+__all__ = ["HarborAcpClient", "_jsonable"]

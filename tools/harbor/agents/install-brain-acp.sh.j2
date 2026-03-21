@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# BaseAcpAgent uploads the host brain-acp binary into this in-container staging
+# path by calling Harbor environment.upload_file(...). This is a copied file
+# inside the container, not a bind mount and not the original host binary.
+install -Dm755 "{{ staged_backend_path }}" /usr/local/bin/brain-acp
+
+install -d "{{ brain_home }}"
+
+# AcpBrainAgent uploads only the host ~/.brain/credentials directory through
+# Harbor environment.upload_dir(...). The staged directory is an in-container
+# copy used to populate a fresh BRAIN_HOME for the run.
+if [[ -d "{{ staged_credentials_dir }}" ]]; then
+  rm -rf "{{ brain_home }}/credentials"
+  cp -R "{{ staged_credentials_dir }}" "{{ brain_home }}/credentials"
+fi
+
+# AcpBrainAgent uploads host ~/.brain/config.toml, when present, through Harbor
+# environment.upload_file(...). The staged file is a copied in-container file,
+# not a live host path.
+if [[ -f "{{ staged_config_path }}" ]]; then
+  install -Dm644 "{{ staged_config_path }}" "{{ brain_home }}/config.toml"
+fi
+
+test -x /usr/local/bin/brain-acp

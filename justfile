@@ -62,13 +62,9 @@ harbor-install:
 harbor-datasets:
     harbor datasets list
 
-# Run one tightly bounded built-in Harbor hello-world baseline
-harbor-builtin-hello-world:
-    ./scripts/harbor-builtin-hello-world.sh
-
-# Run the repo-local Harbor ACP bridge against hello-world with an ACP backend
-harbor-acp-hello-world:
-    ./scripts/harbor-acp-hello-world.sh
+# Run one Harbor agent against one Harbor dataset and optional task name.
+harbor-run agent dataset task_name='':
+    bash ./scripts/harbor-run.sh {{agent}} {{dataset}} '{{task_name}}'
 
 # Browse Harbor job trajectories in the built-in web viewer
 harbor-view-jobs:
