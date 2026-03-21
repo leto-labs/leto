@@ -1,6 +1,7 @@
 use std::{cell::RefCell, rc::Rc, sync::Arc};
 
 use agent_client_protocol::{self as acp, Agent as _};
+use brain_tools::{AcpClientHandle, AcpClientRequest};
 use tokio::io::split;
 use tokio::sync::mpsc;
 use tokio_util::compat::{TokioAsyncReadCompatExt as _, TokioAsyncWriteCompatExt as _};
@@ -11,6 +12,7 @@ use brain_core::{
 
 use super::agent::BackendAgent;
 use super::app::BackendApp;
+use super::client_bridge::spawn_client_request_forwarder;
 use super::stdio::spawn_notification_forwarder;
 
 #[derive(Clone, Default)]
@@ -130,7 +132,12 @@ pub(super) fn start_test_connection(
     let (agent_read, agent_write) = split(agent_stream);
 
     let (session_update_tx, session_update_rx) = mpsc::unbounded_channel();
-    let agent = BackendAgent::new(app, session_update_tx);
+    let (client_request_tx, client_request_rx) = mpsc::unbounded_channel::<AcpClientRequest>();
+    let agent = BackendAgent::new(
+        app,
+        session_update_tx,
+        AcpClientHandle::new(client_request_tx),
+    );
 
     let (client_conn, client_io) = acp::ClientSideConnection::new(
         client,
@@ -152,6 +159,7 @@ pub(super) fn start_test_connection(
     let client_conn = Rc::new(client_conn);
     let agent_conn = Rc::new(agent_conn);
 
+    spawn_client_request_forwarder(client_request_rx, agent_conn.clone());
     spawn_notification_forwarder(session_update_rx, agent_conn);
 
     tokio::task::spawn_local(async move {

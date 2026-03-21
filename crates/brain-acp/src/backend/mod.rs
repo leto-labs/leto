@@ -1,6 +1,7 @@
 mod agent;
 mod app;
 mod capabilities;
+mod client_bridge;
 mod errors;
 mod event_mapper;
 mod history_replay;

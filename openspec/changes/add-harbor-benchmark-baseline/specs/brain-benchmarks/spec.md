@@ -56,17 +56,20 @@ custom Harbor tasks, but it SHALL NOT be the primary benchmark workflow.
 - **THEN** they SHALL find a local Harbor task template in the repo
 - **AND** the main benchmark docs SHALL point primary execution toward Harbor registry datasets
 
-### Requirement: Future `brain-acp` Harbor Integration Is Documented
-The repo SHALL document the planned Harbor integration path for `brain-acp`
-without requiring that path to be completed in this change.
+### Requirement: `brain-acp` Runs Through The Harbor ACP Bridge
+The repo SHALL support running `brain-acp` through the same repo-local Harbor
+ACP bridge used for `codex-acp` on Harbor registry tasks.
 
-The documented path SHALL distinguish:
+The integration SHALL:
 
-- a generic ACP bridge validated first with `codex-acp`
-- a subsequent `brain-acp` backend path
-- a richer metrics and trajectory-aware adapter
+- keep the Harbor-side ACP client generic
+- launch `brain-acp` from the local repo
+- ensure ACP-backed filesystem operations land in Harbor's task workspace
+  rather than on the host
+- defer richer metrics and trajectory-aware adapter work
 
-#### Scenario: Contributor reads Harbor benchmark docs
-- **WHEN** a contributor reads the Harbor benchmark documentation
-- **THEN** they SHALL find the planned custom-agent path for `brain-acp`
-- **AND** the documentation SHALL mark that work as deferred beyond the current baseline implementation
+#### Scenario: Contributor runs brain-acp on Harbor hello-world
+- **WHEN** a contributor runs the Harbor ACP helper with `HARBOR_BACKEND=brain-acp`
+- **THEN** Harbor SHALL load the repo-local custom ACP bridge
+- **AND** the bridge SHALL launch local `brain-acp`
+- **AND** the task SHALL be completable inside Harbor's Docker workspace

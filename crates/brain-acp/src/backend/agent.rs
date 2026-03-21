@@ -1,6 +1,8 @@
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use agent_client_protocol as acp;
+use brain_tools::{AcpClientHandle, AcpClientToolContext, set_active_acp_client_context};
 use futures::StreamExt;
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
@@ -19,19 +21,23 @@ use super::ids::{parse_session_id, session_id_from_ulid};
 
 pub(super) type NotificationEnvelope = (acp::SessionNotification, oneshot::Sender<()>);
 
+#[derive(Clone)]
 pub(super) struct BackendAgent {
     app: Arc<BackendApp>,
     session_update_tx: mpsc::UnboundedSender<NotificationEnvelope>,
+    client_handle: AcpClientHandle,
 }
 
 impl BackendAgent {
     pub(super) fn new(
         app: Arc<BackendApp>,
         session_update_tx: mpsc::UnboundedSender<NotificationEnvelope>,
+        client_handle: AcpClientHandle,
     ) -> Self {
         Self {
             app,
             session_update_tx,
+            client_handle,
         }
     }
 
@@ -114,6 +120,26 @@ impl BackendAgent {
             return Err(acp::Error::invalid_params());
         }
         Ok(session)
+    }
+
+    async fn session_cwd(&self, session_id: ulid::Ulid) -> Result<PathBuf, acp::Error> {
+        let session = self
+            .app
+            .runtime
+            .store()
+            .sessions()
+            .get(session_id)
+            .await
+            .map_err(map_brain_error)?;
+        let project = self
+            .app
+            .runtime
+            .store()
+            .projects()
+            .get(session.project_id)
+            .await
+            .map_err(map_brain_error)?;
+        project.root.ok_or_else(acp::Error::internal_error)
     }
 
     #[cfg(feature = "unstable_session_model")]
@@ -308,6 +334,8 @@ impl acp::Agent for BackendAgent {
         arguments: acp::PromptRequest,
     ) -> Result<acp::PromptResponse, acp::Error> {
         let session_id = parse_session_id(&arguments.session_id)?;
+        let session_cwd = self.session_cwd(session_id).await?;
+        let client_handle = self.client_handle.clone();
         let stop_reason = async {
             let session = self
                 .app
@@ -337,6 +365,11 @@ impl acp::Agent for BackendAgent {
                 .await?;
             }
 
+            let _client_context_guard = set_active_acp_client_context(AcpClientToolContext::new(
+                client_handle,
+                arguments.session_id.clone(),
+                session_cwd,
+            ));
             let mut stream =
                 self.app
                     .runtime

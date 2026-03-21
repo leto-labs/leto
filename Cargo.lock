@@ -479,6 +479,7 @@ dependencies = [
  "async-trait",
  "brain-config",
  "brain-core",
+ "brain-tools",
  "chrono",
  "futures",
  "serde_json",
@@ -608,6 +609,7 @@ dependencies = [
 name = "brain-tools"
 version = "0.1.0"
 dependencies = [
+ "agent-client-protocol",
  "brain-types",
  "futures",
  "glob",

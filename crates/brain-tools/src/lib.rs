@@ -1,3 +1,5 @@
+#[cfg(feature = "acp")]
+pub mod acp;
 pub mod apply_patch;
 pub mod echo;
 pub mod file_edit;
@@ -19,12 +21,21 @@ pub use grep::{GrepDriver, GrepTool};
 pub use list_directory::{ListDirectoryDriver, ListDirectoryTool};
 pub use shell::{ShellDriver, ShellTool};
 
+#[cfg(feature = "acp")]
+pub use acp::{
+    AcpClientHandle, AcpClientRequest, AcpClientToolContext, ActiveAcpClientContextGuard,
+    active_acp_client_context, resolve_acp_client_path, set_active_acp_client_context,
+};
 #[cfg(feature = "native")]
 pub use apply_patch::native::ApplyPatchDriverNative;
 #[cfg(feature = "native")]
 pub use file_edit::native::FileEditDriverNative;
+#[cfg(feature = "acp")]
+pub use file_read::acp::FileReadDriverAcp;
 #[cfg(feature = "native")]
 pub use file_read::native::FileReadDriverNative;
+#[cfg(feature = "acp")]
+pub use file_write::acp::FileWriteDriverAcp;
 #[cfg(feature = "native")]
 pub use file_write::native::FileWriteDriverNative;
 #[cfg(feature = "native")]

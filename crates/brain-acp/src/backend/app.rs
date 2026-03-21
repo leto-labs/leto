@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use agent_client_protocol as acp;
 use brain_core::*;
+use brain_tools::{FileReadDriverAcp, FileWriteDriverAcp};
 
 use super::errors::internal_error;
 
@@ -44,6 +45,15 @@ pub async fn build_default_app() -> Result<BackendApp, acp::Error> {
         let name = tool.definition().name.clone();
         runtime.set_tool(name, tool).map_err(internal_error)?;
     }
+    runtime
+        .set_tool("file_read", Arc::new(FileReadTool::new(FileReadDriverAcp)))
+        .map_err(internal_error)?;
+    runtime
+        .set_tool(
+            "file_write",
+            Arc::new(FileWriteTool::new(FileWriteDriverAcp)),
+        )
+        .map_err(internal_error)?;
 
     let runtime: Arc<dyn BrainRuntime> = runtime;
     Ok(BackendApp::new(runtime))

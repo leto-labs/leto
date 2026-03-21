@@ -15,27 +15,21 @@ fi
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 JOBS_DIR="${ROOT_DIR}/target/harbor/jobs"
 
-if [[ -f "${ROOT_DIR}/.env" ]]; then
-  set -a
-  # shellcheck disable=SC1091
-  source "${ROOT_DIR}/.env"
-  set +a
-fi
-
 HARBOR_DATASET="${HARBOR_DATASET:-hello-world@1.0}"
 HARBOR_TASK_NAME="${HARBOR_TASK_NAME:-}"
 HARBOR_N_TASKS="${HARBOR_N_TASKS:-1}"
 HARBOR_N_ATTEMPTS="${HARBOR_N_ATTEMPTS:-1}"
 HARBOR_N_CONCURRENT="${HARBOR_N_CONCURRENT:-1}"
 HARBOR_TIMEOUT_MULTIPLIER="${HARBOR_TIMEOUT_MULTIPLIER:-1.0}"
-HARBOR_JOB_NAME="${HARBOR_JOB_NAME:-acp-codex-hello-world}"
-HARBOR_MODEL="${HARBOR_MODEL:-openai/gpt-5}"
+HARBOR_MODEL="${HARBOR_MODEL:-openai/gpt-5.4}"
 HARBOR_BACKEND="${HARBOR_BACKEND:-codex-acp}"
 HARBOR_PERMISSION_MODE="${HARBOR_PERMISSION_MODE:-allow_once}"
 HARBOR_SESSION_CWD="${HARBOR_SESSION_CWD:-/app}"
 HARBOR_AGENT_IMPORT_PATH="${HARBOR_AGENT_IMPORT_PATH:-tools.harbor.agents.acp:AcpAgent}"
 HARBOR_BACKEND_ARGS="${HARBOR_BACKEND_ARGS:-}"
 HARBOR_BACKEND_CWD="${HARBOR_BACKEND_CWD:-}"
+HARBOR_JOB_SUFFIX="${HARBOR_JOB_SUFFIX:-$(date -u +%Y%m%dT%H%M%SZ)}"
+HARBOR_JOB_NAME="${HARBOR_JOB_NAME:-acp-${HARBOR_BACKEND}-hello-world-${HARBOR_JOB_SUFFIX}}"
 
 case "${HARBOR_BACKEND}" in
   codex-acp)
@@ -44,14 +38,19 @@ case "${HARBOR_BACKEND}" in
       exit 1
     }
     HARBOR_BACKEND_COMMAND="${HARBOR_BACKEND_COMMAND:-codex-acp}"
-    if [[ -z "${OPENAI_API_KEY:-}" && -z "${CODEX_API_KEY:-}" ]]; then
-      echo "Set OPENAI_API_KEY or CODEX_API_KEY for codex-acp runs." >&2
+    ;;
+  brain-acp)
+    command -v cargo >/dev/null 2>&1 || {
+      echo "cargo is required for HARBOR_BACKEND=brain-acp." >&2
       exit 1
-    fi
+    }
+    HARBOR_BACKEND_COMMAND="${HARBOR_BACKEND_COMMAND:-cargo}"
+    HARBOR_BACKEND_ARGS="${HARBOR_BACKEND_ARGS:-run -q --manifest-path ${ROOT_DIR}/Cargo.toml -p brain-acp --bin brain-acp}"
+    HARBOR_BACKEND_CWD="${HARBOR_BACKEND_CWD:-${ROOT_DIR}}"
     ;;
   *)
     echo "Unsupported ACP backend '${HARBOR_BACKEND}'." >&2
-    echo "Set HARBOR_BACKEND_COMMAND explicitly if you add another backend." >&2
+    echo "Supported backends: codex-acp, brain-acp." >&2
     exit 1
     ;;
 esac

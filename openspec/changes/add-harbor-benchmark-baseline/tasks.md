@@ -13,5 +13,5 @@
 - [x] Add `just` targets for Harbor installation, dataset listing, and bounded benchmark helpers
 - [x] Run a built-in paid Harbor benchmark task with API-backed agent credentials
 - [x] Run the repo-local Harbor ACP bridge successfully against `hello-world@1.0` with `codex-acp`
-- [ ] Run `brain-acp` successfully through the Harbor ACP bridge
+- [x] Run `brain-acp` successfully through the Harbor ACP bridge
 - [ ] Add richer `brain` metrics and trajectory integration

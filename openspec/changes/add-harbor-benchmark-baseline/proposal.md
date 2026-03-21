@@ -17,8 +17,8 @@ the repo needs an explicit low-risk workflow:
 3. run exactly one paid task with hard bounds once a model and API key are set
 4. run the repo-local ACP bridge against one Harbor dataset task
 
-This lets us learn the real Harbor execution model before pushing on
-`brain-acp`.
+This lets us learn the real Harbor execution model and then validate both
+`codex-acp` and `brain-acp` through the same Harbor ACP bridge.
 
 ## What
 
@@ -34,6 +34,8 @@ workflow:
   `mini-swe-agent` or `codex`
 - run a repo-local custom ACP bridge against `hello-world@1.0` using
   `codex-acp`
+- run `brain-acp` against the same Harbor registry task using the same
+  repo-local ACP bridge
 
 ### Repo-local Harbor ACP bridge
 
@@ -46,29 +48,31 @@ backend process such as `codex-acp`.
 Keep a tiny Harbor-compatible local task in the repo as a template for future
 custom Harbor task authoring, not as the default benchmark workflow.
 
-### Deferred `brain-acp` integration path
+### `brain-acp` Harbor integration path
 
-Document, but do not yet implement, the planned Harbor integration path for
-`brain-acp`:
+Implement the minimal working Harbor path for `brain-acp`:
 
-- Level 1: generic Harbor ACP bridge validated with `codex-acp`
-- Level 2: run `brain-acp` through the same ACP bridge
-- Level 2: richer metrics and trajectory-aware adapter
+- keep the Harbor ACP bridge generic and host-side
+- launch `brain-acp` with the Nori-style local cargo command
+- route the real backend's filesystem operations through ACP client
+  capabilities so work lands in Harbor's Docker task workspace
+- defer richer metrics and trajectory-aware adapter work
 
 ## Impact
 
 - **New spec**: `brain-benchmarks`
+- **Modified spec**: `brain-acp`
 - **New docs**: Harbor operational guidance under `docs/benchmarks/`
 - **New scripts**: Harbor install and smoke-test helpers under `scripts/`
 - **New custom agent**: repo-local Harbor ACP bridge under `tools/harbor/`
 - **Template task**: repo-owned Harbor `hello-world` task under
   `tools/harbor/tasks/`
-- **No current `brain-acp` parity**: the generic ACP bridge is implemented and
-  validated first with `codex-acp`
+- **Harbor ACP parity at hello-world scope**: the generic ACP bridge is now
+  validated with both `codex-acp` and `brain-acp` on `hello-world@1.0`
 
 ## Non-Goals
 
 - running broad benchmark sweeps
-- fully integrating `brain-acp` into Harbor yet
+- richer `brain-acp` metrics / trajectory integration
 - modifying Harbor upstream
 - using `repocache` as the runtime source of truth

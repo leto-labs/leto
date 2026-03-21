@@ -1,9 +1,15 @@
+#[cfg(feature = "acp")]
+pub mod acp;
 #[cfg(feature = "native")]
 pub mod native;
 
 use futures::future::BoxFuture;
 
 use brain_types::{BrainError, Tool, ToolDef};
+
+const DEFAULT_LIMIT: usize = 200;
+const MAX_LIMIT: usize = 400;
+const MAX_LINE_CHARS: usize = 500;
 
 pub trait FileReadDriver: Send + Sync {
     fn read_file(
@@ -71,4 +77,43 @@ impl<T: FileReadDriver> Tool for FileReadTool<T> {
             self.driver.read_file(path, offset, limit).await
         })
     }
+}
+
+pub(super) fn format_file_read_output(
+    content: &str,
+    offset: Option<usize>,
+    limit: Option<usize>,
+) -> String {
+    use crate::truncation::truncate_line;
+
+    let lines: Vec<&str> = content.lines().collect();
+    let start = offset.map(|o| o.saturating_sub(1)).unwrap_or(0);
+    let limit = limit.unwrap_or(DEFAULT_LIMIT).min(MAX_LIMIT);
+    let end = (start + limit).min(lines.len());
+
+    if start >= lines.len() {
+        return "Requested offset is beyond the end of the file.".into();
+    }
+
+    let mut formatted = lines[start..end]
+        .iter()
+        .enumerate()
+        .map(|(i, line)| {
+            let line = truncate_line(line, MAX_LINE_CHARS);
+            format!("{:>6}|{}", start + i + 1, line)
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    if end < lines.len() {
+        formatted.push_str(&format!(
+            "\n\n...[showing lines {}-{} of {}. Use offset={} to continue]...",
+            start + 1,
+            end,
+            lines.len(),
+            end + 1
+        ));
+    }
+
+    formatted
 }

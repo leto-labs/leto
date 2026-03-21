@@ -24,6 +24,7 @@ agent-client-protocol = { workspace = true }
 async-trait = "0.1"
 brain-config = { workspace = true }
 brain-core = { workspace = true }
+brain-tools = { workspace = true, features = ["acp"] }
 chrono = { workspace = true }
 futures = { workspace = true }
 serde_json = { workspace = true }

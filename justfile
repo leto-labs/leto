@@ -66,7 +66,7 @@ harbor-datasets:
 harbor-builtin-hello-world:
     ./scripts/harbor-builtin-hello-world.sh
 
-# Run the repo-local Harbor ACP bridge against hello-world with codex-acp
+# Run the repo-local Harbor ACP bridge against hello-world with an ACP backend
 harbor-acp-hello-world:
     ./scripts/harbor-acp-hello-world.sh
 

@@ -20,9 +20,7 @@ The current implementation covers two Harbor paths:
 2. inspect the CLI and dataset registry
 3. run one bounded paid task with a built-in Harbor agent
 4. run one bounded task through the repo-local ACP bridge with `codex-acp`
-
-It does **not** yet run `brain-acp` successfully through Harbor. The current
-custom agent is a generic ACP client bridge validated first with `codex-acp`.
+5. run one bounded task through the same ACP bridge with `brain-acp`
 
 ## Install Harbor
 
@@ -90,39 +88,53 @@ Defaults used by the helper:
 ## ACP Bridge Hello World
 
 The repo-local custom Harbor agent is an ACP client implemented with the
-official Python ACP SDK. It launches an ACP backend such as `codex-acp`, sends
+official Python ACP SDK. It launches an ACP backend such as `codex-acp` or
+`brain-acp`, sends
 the Harbor task instruction over ACP, and maps ACP filesystem / terminal calls
 onto Harbor's task container.
 
 Use this as the default custom-agent validation path:
 
 ```bash
-OPENAI_API_KEY=... just harbor-acp-hello-world
+just harbor-acp-hello-world
+```
+
+To run the same helper with `brain-acp`:
+
+```bash
+HARBOR_BACKEND=brain-acp just harbor-acp-hello-world
 ```
 
 Defaults used by the helper:
 
 - dataset: `hello-world@1.0`
-- backend: `codex-acp`
+- backend: `codex-acp` by default, override with `HARBOR_BACKEND=brain-acp`
 - Harbor custom agent: `tools.harbor.agents.acp:AcpAgent`
-- model: `openai/gpt-5`
+- model: `openai/gpt-5.4`
 - tasks: `1`
 - attempts: `1`
 - concurrency: `1`
 - timeout multiplier: `1.0`
 - output dir: `target/harbor/jobs/`
+- job name: unique per run by default; override with `HARBOR_JOB_NAME`
 
 Important notes:
 
-- `codex-acp` still needs `OPENAI_API_KEY` or `CODEX_API_KEY`
-- `gpt-4o` is not a safe default for `codex-acp` here; the validated default is
-  `openai/gpt-5`
 - the Harbor side is a custom ACP client; the spawned backend process is the
   ACP agent
+- `brain-acp` is launched on the host with the same cargo command shape already
+  used by Nori:
+  `cargo run -q --manifest-path /home/leovigna/Documents/projects/leovigna/mauser/Cargo.toml -p brain-acp --bin brain-acp`
+- `brain-acp` initially failed Harbor `hello-world` because its real backend
+  used host-native filesystem tools; the cleaned-up integration now uses
+  ACP-backed `brain-tools` drivers for `file_write` and `file_read` so
+  workspace file operations land in Harbor's `/app` task workspace instead of
+  the backend host
 
 Artifacts are kept on disk after the run. The helper passes `--delete` so the
 Docker environment is torn down, but Harbor still keeps the job and trial
-directories under `target/harbor/`.
+directories under `target/harbor/`. The ACP helper now defaults to a unique
+job name per run so reruns do not silently reuse an older Harbor result.
 
 Override points:
 
@@ -133,6 +145,8 @@ Override points:
 - `HARBOR_N_CONCURRENT`
 - `HARBOR_TIMEOUT_MULTIPLIER`
 - `HARBOR_JOB_NAME`
+- `HARBOR_JOB_SUFFIX`
+- `HARBOR_BACKEND`
 
 ## Cost Controls
 
@@ -258,12 +272,18 @@ Harbor's built-in `oracle` agent is not an LLM agent. It runs the task's
 reference solution from `solution/solve.sh` so benchmark authors can verify
 that the task and verifier are sound.
 
-## Future `brain-acp` Integration
+## `brain-acp` Status
 
-The current ACP bridge is intentionally generic, but the first successful
-backend is `codex-acp`, not `brain-acp`.
+`brain-acp` now runs successfully through the same generic Harbor ACP bridge on
+Harbor registry `hello-world@1.0`.
 
-That matters because `brain-acp`'s real backend does not yet expose the same
-client-owned filesystem and terminal behavior that makes the Harbor ACP bridge
-useful for containerized tasks today. The next `brain-acp` step should build on
-this ACP bridge rather than replacing it.
+The important architecture point is:
+
+- Harbor's custom ACP agent runs on the host
+- Harbor's Docker environment remains the benchmark workspace
+- `brain-acp` therefore needs ACP-backed client-owned filesystem operations for
+  containerized tasks
+
+The current cleanup moves ACP-backed `file_write` and `file_read` drivers into
+`brain-tools`, leaving `brain-acp` responsible for ACP session context and
+request forwarding while keeping the Harbor-side ACP client generic.

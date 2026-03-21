@@ -88,6 +88,10 @@ The first validated backend is:
 
 - `codex-acp`
 
+The second validated backend is:
+
+- `brain-acp`
+
 The bridge maps ACP client-owned capabilities onto Harbor's environment:
 
 - `fs/read_text_file`
@@ -95,10 +99,20 @@ The bridge maps ACP client-owned capabilities onto Harbor's environment:
 - permission requests
 - terminal lifecycle calls
 
+`brain-acp` exposed one important integration gap during implementation:
+
+- the real backend initially used Brain's host-native filesystem tools, which
+  operated outside Harbor's Docker task workspace
+
+The cleaned-up fix keeps the Harbor ACP bridge generic and moves ACP-backed
+`file_write` and `file_read` drivers into `brain-tools` behind an ACP feature.
+`brain-acp` now owns only ACP session context and request forwarding so file
+operations land in Harbor's `/app` workspace through the client bridge.
+
 ## Future `brain-acp` Integration
 
-This change documents, but does not fully complete, the Harbor adapter path for
-`brain-acp`.
+This change now completes the minimal Harbor adapter path for `brain-acp` at
+`hello-world@1.0` scope.
 
 Two levels are explicitly planned:
 
@@ -106,19 +120,19 @@ Two levels are explicitly planned:
 
 - repo-local custom agent loaded by `--agent-import-path`
 - validated first with `codex-acp`
+- now also validated with `brain-acp`
 - goal is execution correctness, not immediate metrics parity
 
 ### Level 2: Rich Adapter
 
-- run `brain-acp` successfully through the same ACP bridge
 - richer metrics population
 - better trajectory handling and export
 - closer parity with Harbor's stronger built-in agents like Codex
 
 This split matters because Harbor's richer adapters are meaningfully deeper
-than the thin legacy `Terminal-Bench` launchers, and because `brain-acp` does
-not yet expose the same client-owned filesystem and terminal behavior that the
-bridge can already exercise with `codex-acp`.
+than the thin legacy `Terminal-Bench` launchers, and because `brain-acp` still
+only bridges the ACP client-owned filesystem behavior required for the current
+Harbor hello-world path.
 
 ## Alternatives Considered
 
@@ -136,9 +150,10 @@ Rejected:
 
 - user requirement is that `repocache` remains documentation/research only
 
-### Implement `brain-acp` first
+### Keep `brain-acp` on host-native tools
 
 Rejected:
 
-- we need to understand Harbor's real execution and artifact model first
-- `codex-acp` is a stronger ACP reference implementation for the bridge itself
+- Harbor task file operations must land in the Docker workspace, not on the host
+- the real `brain-acp` backend therefore needs ACP-backed client-owned
+  filesystem operations for Harbor compatibility
