@@ -23,6 +23,7 @@ struct RawAgentConfig {
     max_iterations: Option<u32>,
     system_prompt: Option<String>,
     loop_name: Option<String>,
+    tool_output_max_bytes: Option<usize>,
     doom_loop_threshold: Option<u32>,
     doom_loop_strategy: Option<brain_types::DoomLoopStrategy>,
     compaction_threshold: Option<Option<f32>>,
@@ -52,6 +53,7 @@ impl Default for RawAgentConfig {
             max_iterations: None,
             system_prompt: None,
             loop_name: None,
+            tool_output_max_bytes: None,
             doom_loop_threshold: None,
             doom_loop_strategy: None,
             compaction_threshold: None,
@@ -73,6 +75,9 @@ impl RawAgentConfig {
         }
         if let Some(loop_name) = self.loop_name {
             target.agent.loop_name = Some(loop_name);
+        }
+        if let Some(tool_output_max_bytes) = self.tool_output_max_bytes {
+            target.agent.tool_output_max_bytes = tool_output_max_bytes;
         }
         if let Some(doom_loop_threshold) = self.doom_loop_threshold {
             target.agent.doom_loop_threshold = doom_loop_threshold;

@@ -76,6 +76,27 @@ async fn file_read_with_offset_and_limit() {
 }
 
 #[tokio::test]
+async fn file_read_adds_continuation_hint_when_more_lines_remain() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("test.txt");
+    let content = (1..=450)
+        .map(|line| format!("line-{line}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    std::fs::write(&path, content).unwrap();
+
+    let tool = FileReadTool::new(FileReadDriverNative);
+    let result = tool
+        .execute(serde_json::json!({
+            "path": path.to_str().unwrap()
+        }))
+        .await
+        .unwrap();
+
+    assert!(result.contains("Use offset=201 to continue"), "{result}");
+}
+
+#[tokio::test]
 async fn file_read_missing_path_errors() {
     let tool = FileReadTool::new(FileReadDriverNative);
     let result = tool.execute(serde_json::json!({})).await;
@@ -186,6 +207,18 @@ async fn shell_captures_exit_code() {
 }
 
 #[tokio::test]
+async fn shell_truncates_large_output() {
+    let tool = ShellTool::new(ShellDriverNative);
+    let result = tool
+        .execute(serde_json::json!({
+            "command": "python3 - <<'PY'\nprint('x' * 20000)\nPY"
+        }))
+        .await
+        .unwrap();
+    assert!(result.contains("shell output truncated"), "{result}");
+}
+
+#[tokio::test]
 async fn glob_finds_files() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("a.rs"), "").unwrap();
@@ -208,6 +241,25 @@ async fn glob_finds_files() {
     assert!(result.contains("a.rs"));
     assert!(result.contains("b.rs"));
     assert!(!result.contains("c.txt"));
+}
+
+#[tokio::test]
+async fn glob_search_truncates_large_match_sets() {
+    let dir = tempfile::tempdir().unwrap();
+    for index in 0..250 {
+        std::fs::write(dir.path().join(format!("file-{index}.rs")), "").unwrap();
+    }
+
+    let tool = GlobTool::new(GlobDriverNative);
+    let result = tool
+        .execute(serde_json::json!({
+            "pattern": "*.rs",
+            "path": dir.path().to_str().unwrap()
+        }))
+        .await
+        .unwrap();
+
+    assert!(result.contains("results truncated"), "{result}");
 }
 
 #[tokio::test]
@@ -250,6 +302,25 @@ async fn grep_with_include_filter() {
 
     assert!(result.contains("code.rs"));
     assert!(!result.contains("notes.txt"));
+}
+
+#[tokio::test]
+async fn list_directory_truncates_large_directories() {
+    let dir = tempfile::tempdir().unwrap();
+    for index in 0..250 {
+        std::fs::write(dir.path().join(format!("file-{index}.txt")), "").unwrap();
+    }
+
+    let tool = ListDirectoryTool::new(ListDirectoryDriverNative);
+    let result = tool
+        .execute(serde_json::json!({
+            "path": dir.path().to_str().unwrap(),
+            "depth": 2
+        }))
+        .await
+        .unwrap();
+
+    assert!(result.contains("directory listing truncated"), "{result}");
 }
 
 #[tokio::test]

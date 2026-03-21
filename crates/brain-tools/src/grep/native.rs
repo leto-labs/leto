@@ -3,8 +3,10 @@ use futures::future::BoxFuture;
 use brain_types::BrainError;
 
 use super::GrepDriver;
+use crate::truncation::truncate_line;
 
 const MAX_MATCHES: usize = 200;
+const MAX_LINE_CHARS: usize = 500;
 
 pub struct GrepDriverNative;
 
@@ -66,8 +68,18 @@ impl GrepDriver for GrepDriverRipgrep {
             match output.status.code() {
                 Some(0) => {
                     let stdout = String::from_utf8_lossy(&output.stdout).trim().to_owned();
-                    let match_count = stdout.lines().count();
-                    Ok(format!("{match_count} matches:\n{stdout}"))
+                    let lines = stdout
+                        .lines()
+                        .map(|line| truncate_line(line, MAX_LINE_CHARS))
+                        .collect::<Vec<_>>();
+                    let match_count = lines.len();
+                    let mut formatted = format!("{match_count} matches:\n{}", lines.join("\n"));
+                    if match_count >= MAX_MATCHES {
+                        formatted.push_str(&format!(
+                            "\n... results may be truncated at {MAX_MATCHES} matches ..."
+                        ));
+                    }
+                    Ok(formatted)
                 }
                 Some(1) => Ok("No matches found.".into()),
                 _ => {
@@ -142,6 +154,7 @@ impl GrepDriver for GrepDriverNative {
                 for (line_num, line) in content.lines().enumerate() {
                     if re.is_match(line) {
                         let path_str = path.to_string_lossy();
+                        let line = truncate_line(line, MAX_LINE_CHARS);
                         results.push(format!("{}:{}:{}", path_str, line_num + 1, line));
                         match_count += 1;
                         if match_count >= MAX_MATCHES {

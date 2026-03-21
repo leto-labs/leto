@@ -9,6 +9,8 @@ use ulid::Ulid;
 
 use brain_types::*;
 
+use crate::output::truncate_tool_result;
+
 pub struct SimpleLoop;
 
 impl AgentLoop for SimpleLoop {
@@ -177,6 +179,7 @@ async fn run_inner(
                 },
                 None => (format!("tool not found: {}", call.name), true),
             };
+            let result = truncate_tool_result(&result, &config);
 
             let _ = tx
                 .send(Event::ToolCallDone {

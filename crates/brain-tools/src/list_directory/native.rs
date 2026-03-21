@@ -7,6 +7,7 @@ use brain_types::BrainError;
 use super::ListDirectoryDriver;
 
 const DEFAULT_DEPTH: u32 = 3;
+const MAX_ENTRIES: usize = 200;
 const IGNORED_NAMES: &[&str] = &[".git", "node_modules", "target"];
 
 pub struct ListDirectoryDriverNative;
@@ -30,11 +31,26 @@ impl ListDirectoryDriver for ListDirectoryDriverNative {
                     })?;
 
             let mut lines = Vec::new();
+            let mut visited = 0usize;
+            let mut truncated = false;
             if metadata.is_dir() {
                 lines.push(format!("{}/", display_name(&root)));
-                render_directory(&root, 0, max_depth, &mut lines)?;
+                render_directory(
+                    &root,
+                    0,
+                    max_depth,
+                    &mut visited,
+                    &mut truncated,
+                    &mut lines,
+                )?;
             } else {
                 lines.push(display_name(&root));
+            }
+
+            if truncated {
+                lines.push(format!(
+                    "...[directory listing truncated at {MAX_ENTRIES} entries; use a narrower path or smaller depth]..."
+                ));
             }
 
             Ok(lines.join("\n"))
@@ -46,9 +62,11 @@ fn render_directory(
     path: &Path,
     depth: u32,
     max_depth: u32,
+    visited: &mut usize,
+    truncated: &mut bool,
     lines: &mut Vec<String>,
 ) -> Result<(), BrainError> {
-    if depth >= max_depth {
+    if depth >= max_depth || *truncated {
         return Ok(());
     }
 
@@ -74,6 +92,10 @@ fn render_directory(
     });
 
     for entry in entries {
+        if *visited >= MAX_ENTRIES {
+            *truncated = true;
+            break;
+        }
         let entry_path = entry.path();
         let file_type = entry.file_type().map_err(|error| BrainError::ToolFailed {
             tool: "list_directory".into(),
@@ -81,10 +103,11 @@ fn render_directory(
         })?;
         let indent = "  ".repeat((depth + 1) as usize);
         let name = entry.file_name().to_string_lossy().to_string();
+        *visited += 1;
 
         if file_type.is_dir() {
             lines.push(format!("{indent}{name}/"));
-            render_directory(&entry_path, depth + 1, max_depth, lines)?;
+            render_directory(&entry_path, depth + 1, max_depth, visited, truncated, lines)?;
         } else {
             lines.push(format!("{indent}{name}"));
         }

@@ -1,3 +1,4 @@
+mod output;
 pub mod robust;
 pub mod simple;
 

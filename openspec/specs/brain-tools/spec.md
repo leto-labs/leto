@@ -47,15 +47,25 @@ Each tool capability SHALL be defined by a driver trait with typed parameters (n
 - **AND** calling `execute()` SHALL parse JSON arguments and delegate to the driver
 
 ### Requirement: Native File Read
-The system SHALL provide `FileReadDriver` trait and `FileReadDriverNative` implementation. `FileReadTool<T>` SHALL expose tool name `file_read` with parameters `path` (required string), `offset` (optional integer, 1-indexed line), `limit` (optional integer, max lines). The native driver SHALL read files using `tokio::fs` and format output with line numbers.
+
+The native `file_read` implementation SHALL page output safely for model use.
 
 #### Scenario: Read entire file
 - **WHEN** `file_read` is called with `{"path": "foo.txt"}`
-- **THEN** it SHALL return the full file contents with line numbers
+- **THEN** it SHALL return a bounded default slice of lines rather than the full
+  file
+- **AND** if more content remains it SHALL include a continuation hint using
+  `offset`
 
 #### Scenario: Read with offset and limit
 - **WHEN** `file_read` is called with `{"path": "foo.txt", "offset": 5, "limit": 10}`
 - **THEN** it SHALL return lines 5 through 14 with line numbers
+- **AND** if more content remains it SHALL include a continuation hint using
+  `offset`
+
+#### Scenario: Read truncates long lines
+- **WHEN** a returned line exceeds the native line-length cap
+- **THEN** the native driver SHALL truncate the displayed line content
 
 ### Requirement: Native File Write
 The system SHALL provide `FileWriteDriver` trait and `FileWriteDriverNative` implementation. `FileWriteTool<T>` SHALL expose tool name `file_write` with parameters `path` (required string) and `content` (required string). The native driver SHALL create parent directories and write using `tokio::fs`.
@@ -78,25 +88,48 @@ The system SHALL provide `FileEditDriver` trait and `FileEditDriverNative` imple
 - **THEN** it SHALL return an error indicating the match is not unique
 
 ### Requirement: Native Shell
-The system SHALL provide `ShellDriver` trait and `ShellDriverNative` implementation. `ShellTool<T>` SHALL expose tool name `shell` with parameters `command` (required string) and `working_directory` (optional string). The native driver SHALL execute commands via `tokio::process::Command` and return combined stdout and stderr.
+
+The native `shell` implementation SHALL bound returned command output.
 
 #### Scenario: Shell executes command
 - **WHEN** `shell` is called with `{"command": "echo hello"}`
-- **THEN** it SHALL execute the command and return stdout/stderr
+- **THEN** it SHALL execute the command and return bounded stdout/stderr
+
+#### Scenario: Shell output exceeds native cap
+- **WHEN** combined stdout/stderr exceeds the native output budget
+- **THEN** the tool SHALL return a truncated output preview
+- **AND** it SHALL include a truncation notice
 
 ### Requirement: Native Glob Search
-The system SHALL provide `GlobDriver` trait and `GlobDriverNative` implementation. `GlobTool<T>` SHALL expose tool name `glob_search` with parameters `pattern` (required string) and `path` (optional string, base directory). The native driver SHALL find files matching the glob pattern and return the list of paths.
+
+The native `glob_search` implementation SHALL cap large result sets.
 
 #### Scenario: Glob finds matching files
 - **WHEN** `glob_search` is called with `{"pattern": "**/*.rs"}`
-- **THEN** it SHALL return a newline-separated list of matching file paths
+- **THEN** it SHALL return a bounded list of matching file paths
+
+#### Scenario: Glob result set exceeds native cap
+- **WHEN** more than the native maximum number of matches are found
+- **THEN** the tool SHALL return only the bounded prefix of matches
+- **AND** it SHALL include a truncation notice
 
 ### Requirement: Native Grep
-The system SHALL provide `GrepDriver` trait and `GrepDriverNative` implementation. `GrepTool<T>` SHALL expose tool name `grep` with parameters `pattern` (required string), `path` (optional string, base directory), and `include` (optional string, file glob filter). The native driver SHALL search file contents by regex and return matching lines with file paths, line numbers, and context.
+
+The native `grep` implementation SHALL cap large result sets and long match
+lines.
 
 #### Scenario: Grep finds matches
 - **WHEN** `grep` is called with `{"pattern": "fn main"}`
-- **THEN** it SHALL return matching lines with file path and line number
+- **THEN** it SHALL return bounded matching lines with file path and line number
+
+#### Scenario: Grep result set exceeds native cap
+- **WHEN** `grep` finds more than the native maximum number of matches
+- **THEN** it SHALL return only the bounded prefix of matches
+- **AND** it SHALL include a truncation notice
+
+#### Scenario: Grep match line exceeds native cap
+- **WHEN** a matching line exceeds the native line-length cap
+- **THEN** the tool SHALL truncate the displayed line content
 
 ### Requirement: Native Tools Preset
 
@@ -149,21 +182,18 @@ errors.
 
 ### Requirement: ListDirectory Tool
 
-The system SHALL provide a `list_directory` tool for repository structure
-inspection.
-
-The tool SHALL:
-
-- accept `path` and optional `depth`
-- return deterministic tree-like output
-- ignore common generated directories such as `.git`, `node_modules`, and
-  `target`
+The native `list_directory` implementation SHALL cap recursive listings.
 
 #### Scenario: Directory listing returns tree output
-
 - **WHEN** `list_directory` is called on a nested directory
 - **THEN** it SHALL return a readable tree-like listing
 - **AND** omit ignored generated directories
+
+#### Scenario: Directory walk exceeds native entry cap
+- **WHEN** a recursive listing discovers more than the native maximum number of
+  entries
+- **THEN** the tool SHALL stop after the bounded prefix
+- **AND** it SHALL include a truncation notice
 
 ### Requirement: Grep Prefers Ripgrep When Available
 

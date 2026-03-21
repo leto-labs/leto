@@ -6,6 +6,8 @@ use brain_types::BrainError;
 
 use super::GlobDriver;
 
+const MAX_MATCHES: usize = 200;
+
 pub struct GlobDriverNative;
 
 impl GlobDriver for GlobDriverNative {
@@ -25,7 +27,7 @@ impl GlobDriver for GlobDriverNative {
                 None => pattern,
             };
 
-            let paths: Vec<String> = glob::glob(&full_pattern)
+            let mut paths: Vec<String> = glob::glob(&full_pattern)
                 .map_err(|e| BrainError::ToolFailed {
                     tool: "glob_search".into(),
                     reason: format!("invalid pattern: {e}"),
@@ -33,15 +35,21 @@ impl GlobDriver for GlobDriverNative {
                 .filter_map(|entry| entry.ok())
                 .map(|p| p.to_string_lossy().into_owned())
                 .collect();
+            paths.sort();
 
             if paths.is_empty() {
                 Ok("No files found matching the pattern.".into())
             } else {
-                Ok(format!(
-                    "{} files found:\n{}",
-                    paths.len(),
-                    paths.join("\n")
-                ))
+                let total = paths.len();
+                let truncated = total > MAX_MATCHES;
+                let paths = paths.into_iter().take(MAX_MATCHES).collect::<Vec<_>>();
+                let mut output = format!("{total} files found:\n{}", paths.join("\n"));
+                if truncated {
+                    output.push_str(&format!(
+                        "\n... results truncated at {MAX_MATCHES} files; use a narrower pattern or path ..."
+                    ));
+                }
+                Ok(output)
             }
         })
     }

@@ -1,5 +1,10 @@
+use std::io::IsTerminal;
+
 fn init_tracing() {
-    let _ = tracing_subscriber::fmt::try_init();
+    let _ = tracing_subscriber::fmt()
+        .with_writer(std::io::stderr)
+        .with_ansi(std::io::stderr().is_terminal())
+        .try_init();
 }
 
 fn main() -> Result<(), agent_client_protocol::Error> {

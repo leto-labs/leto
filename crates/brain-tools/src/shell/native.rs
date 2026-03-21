@@ -3,6 +3,9 @@ use futures::future::BoxFuture;
 use brain_types::BrainError;
 
 use super::ShellDriver;
+use crate::truncation::truncate_middle_with_notice;
+
+const MAX_OUTPUT_BYTES: usize = 16_000;
 
 pub struct ShellDriverNative;
 
@@ -47,7 +50,11 @@ impl ShellDriver for ShellDriverNative {
                 result.push_str(&format!("\n[exit code: {code}]"));
             }
 
-            Ok(result)
+            Ok(truncate_middle_with_notice(
+                &result,
+                MAX_OUTPUT_BYTES,
+                "shell output",
+            ))
         })
     }
 }

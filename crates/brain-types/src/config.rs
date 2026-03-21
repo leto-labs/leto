@@ -16,6 +16,7 @@ pub struct AgentConfig {
     pub max_iterations: u32,
     pub system_prompt: Option<String>,
     pub loop_name: Option<String>,
+    pub tool_output_max_bytes: usize,
     pub doom_loop_threshold: u32,
     pub doom_loop_strategy: DoomLoopStrategy,
     pub compaction_threshold: Option<f32>,
@@ -30,6 +31,7 @@ impl Default for AgentConfig {
             max_iterations: 20,
             system_prompt: None,
             loop_name: None,
+            tool_output_max_bytes: 16_000,
             doom_loop_threshold: 3,
             doom_loop_strategy: DoomLoopStrategy::Steer,
             compaction_threshold: Some(0.8),
@@ -109,6 +111,7 @@ mod tests {
         assert_eq!(cfg.max_iterations, 20);
         assert!(cfg.system_prompt.is_none());
         assert!(cfg.loop_name.is_none());
+        assert_eq!(cfg.tool_output_max_bytes, 16_000);
         assert_eq!(cfg.doom_loop_threshold, 3);
         assert_eq!(cfg.doom_loop_strategy, DoomLoopStrategy::Steer);
         assert_eq!(cfg.compaction_threshold, Some(0.8));
@@ -163,6 +166,7 @@ mod tests {
             max_iterations: 10,
             system_prompt: Some("You are helpful.".into()),
             loop_name: Some("simple".into()),
+            tool_output_max_bytes: 24_000,
             doom_loop_threshold: 4,
             doom_loop_strategy: DoomLoopStrategy::Error,
             compaction_threshold: Some(0.9),
@@ -184,6 +188,7 @@ mod tests {
             Some("You are helpful.")
         );
         assert_eq!(deserialized.loop_name.as_deref(), Some("simple"));
+        assert_eq!(deserialized.tool_output_max_bytes, 24_000);
         assert_eq!(deserialized.doom_loop_threshold, 4);
         assert_eq!(deserialized.doom_loop_strategy, DoomLoopStrategy::Error);
         assert_eq!(deserialized.compaction_threshold, Some(0.9));
@@ -206,6 +211,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(cfg.max_iterations, 7);
+        assert_eq!(cfg.tool_output_max_bytes, 16_000);
         assert_eq!(cfg.doom_loop_threshold, 3);
         assert_eq!(cfg.doom_loop_strategy, DoomLoopStrategy::Steer);
         assert_eq!(cfg.compaction_threshold, Some(0.8));

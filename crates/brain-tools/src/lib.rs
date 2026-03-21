@@ -7,6 +7,7 @@ pub mod glob_search;
 pub mod grep;
 pub mod list_directory;
 pub mod shell;
+mod truncation;
 
 pub use apply_patch::{ApplyPatchDriver, ApplyPatchTool};
 pub use echo::EchoTool;

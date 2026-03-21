@@ -1,0 +1,7 @@
+- [x] Add an OpenSpec change for bounded tool output and ACP stdio isolation
+- [x] Add a shared loop-side tool output cap before results re-enter provider history
+- [x] Add native tool output bounds and continuation hints for read/search/list/shell
+- [x] Route ACP tracing to stderr in the real and mock binaries
+- [x] Add tests for bounded tool behavior
+- [ ] Validate Nori behavior manually with large tool outputs
+- [x] Archive the change after implementation and validation
