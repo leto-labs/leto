@@ -99,10 +99,86 @@ The system SHALL provide `GrepDriver` trait and `GrepDriverNative` implementatio
 - **THEN** it SHALL return matching lines with file path and line number
 
 ### Requirement: Native Tools Preset
-The system SHALL provide a `native_tools()` function (feature-gated under `native`) that returns `Vec<Arc<dyn Tool>>` containing all native-driver-backed tools plus EchoTool.
 
-#### Scenario: Preset returns all native tools
-- **WHEN** `native_tools()` is called
-- **THEN** it SHALL return a vector containing EchoTool and all 6 native tool adapters
+The native tool preset MUST include an `apply_patch` tool for structured file
+changes.
 
+#### Scenario: Native preset includes apply_patch
+- **WHEN** native tools are constructed
+- **THEN** the preset includes `apply_patch`
+
+### Requirement: ApplyPatch Tool
+
+The `apply_patch` tool MUST accept patch text in the V4A patch-envelope format
+used by Codex-family agents.
+
+#### Scenario: Add file patch succeeds
+- **WHEN** the caller submits a patch containing `*** Begin Patch`,
+  `*** Add File:`, `+`-prefixed file contents, and `*** End Patch`
+- **THEN** the tool creates the file
+
+#### Scenario: Update patch succeeds
+- **WHEN** the caller submits a patch containing `*** Update File:` and one or
+  more `@@` hunks with context and `+` / `-` lines
+- **THEN** the tool updates the file contents
+
+#### Scenario: Delete patch succeeds
+- **WHEN** the caller submits a patch containing `*** Delete File:`
+- **THEN** the tool deletes the file
+
+#### Scenario: Move patch succeeds
+- **WHEN** the caller submits a patch containing `*** Update File:` followed by
+  `*** Move to:`
+- **THEN** the tool writes the updated contents at the new relative path and
+  removes the original file
+
+The `apply_patch` tool MUST reject malformed V4A input with explicit tool
+errors.
+
+#### Scenario: Missing envelope markers
+- **WHEN** the patch omits `*** Begin Patch` or `*** End Patch`
+- **THEN** the tool returns an error describing the missing markers
+
+#### Scenario: Empty patch
+- **WHEN** the patch contains no file operations
+- **THEN** the tool returns an error indicating the patch is empty
+
+#### Scenario: Absolute path
+- **WHEN** a file operation references an absolute path
+- **THEN** the tool returns an error indicating only relative paths are allowed
+
+### Requirement: ListDirectory Tool
+
+The system SHALL provide a `list_directory` tool for repository structure
+inspection.
+
+The tool SHALL:
+
+- accept `path` and optional `depth`
+- return deterministic tree-like output
+- ignore common generated directories such as `.git`, `node_modules`, and
+  `target`
+
+#### Scenario: Directory listing returns tree output
+
+- **WHEN** `list_directory` is called on a nested directory
+- **THEN** it SHALL return a readable tree-like listing
+- **AND** omit ignored generated directories
+
+### Requirement: Grep Prefers Ripgrep When Available
+
+The `grep` tool SHALL keep its public name and schema while allowing a
+ripgrep-backed implementation internally.
+
+The native preset SHALL:
+
+- use a ripgrep-backed driver when `rg` is available
+- fall back to the existing native grep implementation otherwise
+
+#### Scenario: Native tool preset keeps grep contract stable
+
+- **WHEN** `native_tools()` is constructed
+- **THEN** it SHALL still expose a tool named `grep`
+- **AND** the choice of native or ripgrep-backed implementation SHALL remain an
+  internal detail
 

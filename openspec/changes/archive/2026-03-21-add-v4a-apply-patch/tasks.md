@@ -1,0 +1,5 @@
+- [x] Replace unified-diff `apply_patch` parsing with V4A parsing and execution
+- [x] Update `apply_patch` tool definition and tests for V4A
+- [x] Add `strongdm/attractor` to `repocache` and refine notes
+- [x] Validate with `cargo test --workspace`
+- [x] Validate and archive the OpenSpec change
