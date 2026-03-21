@@ -1,8 +1,7 @@
-# brain-transports Specification
+# brain-transports Delta Spec
 
-## Purpose
-IO abstraction between the engine and the outside world. Defines the `Transport` trait, `InputEvent` enum, and `CliTransport` (stdin/stdout) implementation.
-## Requirements
+## MODIFIED Requirements
+
 ### Requirement: InputEvent Enum
 The `InputEvent` enum SHALL be extended with new variants:
 
@@ -48,4 +47,3 @@ CliTransport SHALL be updated to handle new events:
 #### Scenario: Default CLI mode
 - **WHEN** CliTransport uses default settings
 - **THEN** it SHALL print ToolCallPending and ToolCallDone but skip deltas
-

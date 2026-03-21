@@ -1,7 +1,8 @@
 # brain-types Specification
 
 ## Purpose
-Core abstraction for LLM inference. Defines the `Provider` trait, `ChatStream` type, and `MockProvider` for testing.
+Shared types and trait boundaries for `brain`, including provider, tool,
+store, transport, loop, and runtime abstractions used across the workspace.
 ## Requirements
 ### Requirement: Provider Trait
 The system SHALL define a `Provider` trait that abstracts LLM inference behind a single async method. Implementations MUST accept a slice of messages and tool definitions, and return a stream of response chunks.
@@ -489,3 +490,63 @@ model-visible tool output.
 - **AND** loop implementations SHALL use it when truncating tool results before
   they re-enter model-visible session history
 
+### Requirement: Session Inference Overrides
+
+The session model SHALL support optional session-scoped inference overrides.
+
+`Session` SHALL include:
+`inference: Option<InferenceConfig>`
+
+This field SHALL represent the session-local override layer rather than the
+fully resolved effective inference config.
+
+#### Scenario: New session starts without overrides
+
+- **WHEN** a session is created
+- **THEN** `Session.inference` SHALL be `None`
+
+#### Scenario: Session stores partial inference override
+
+- **WHEN** a session stores `InferenceConfig { model: Some("gpt-5"), temperature: Some(0.2), .. }`
+- **THEN** only those fields SHALL be treated as session-local overrides
+
+### Requirement: Session Updates Can Modify Inference
+
+The session update model SHALL support setting or clearing session inference
+overrides.
+
+#### Scenario: Session update sets inference overrides
+
+- **WHEN** a session update sets inference overrides
+- **THEN** the store SHALL persist them on the session
+
+#### Scenario: Session update clears inference overrides
+
+- **WHEN** a session update clears inference overrides
+- **THEN** the session SHALL fall back to project inference defaults
+
+### Requirement: Dedicated Core Trait Modules
+The system SHALL expose the remaining core runtime traits from dedicated
+`brain-types` modules instead of a shared catch-all trait file.
+
+The crate SHALL provide:
+- `tool.rs` for `Tool` and tool-related data types
+- `store.rs` for `ProjectStore`, `SessionStore`, `MessageStore`,
+  `CredentialStore`, and `Store`
+- `agent_loop.rs` for `EventStream` and `AgentLoop`
+
+The crate root SHALL continue re-exporting these types so existing imports such
+as `brain_types::Store` and `brain_types::AgentLoop` remain valid.
+
+#### Scenario: Import store traits from dedicated module
+- **WHEN** a caller imports `brain_types::store::{ProjectStore, Store}`
+- **THEN** the store traits SHALL resolve from the dedicated `store` module
+
+#### Scenario: Import agent loop traits from dedicated module
+- **WHEN** a caller imports `brain_types::agent_loop::{AgentLoop, EventStream}`
+- **THEN** the agent loop abstractions SHALL resolve from the dedicated
+  `agent_loop` module
+
+#### Scenario: Existing root-level imports continue to resolve
+- **WHEN** a caller imports `brain_types::{Tool, Store, AgentLoop}`
+- **THEN** those root-level re-exports SHALL continue to resolve

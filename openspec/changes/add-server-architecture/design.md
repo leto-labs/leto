@@ -7,7 +7,7 @@ The long-term boundary for clients is `BrainRuntime`, not `BrainApi`.
 The intended split is:
 
 - `BrainRuntimeNative` for embedded/in-process use
-- a future remote implementation, conceptually `BrainRuntimeApi`, for networked use
+- a future remote implementation, `BrainRuntimeRemote`, for networked use
 
 Both should implement the same `BrainRuntime` trait so client code can stay
 stable across embedded and remote modes.

@@ -1,7 +1,10 @@
 # brain-core Specification
 
 ## Purpose
-Central orchestration engine for the AI agent. The `Brain` struct coordinates Provider, Store, AgentLoop, and Tool into a reusable reasoning engine. Project context (config, session scoping) is passed at call sites rather than owned by Brain. `ProviderRouter` enables multi-provider dispatch by model name.
+Core engine and native runtime orchestration for `brain`. `Brain` remains the
+reusable reasoning engine API, while `BrainRuntimeNative` provides the
+app-facing runtime boundary over stores, providers, tools, loops, and runtime
+events.
 ## Requirements
 ### Requirement: Brain Struct
 The system SHALL provide a `Brain` struct in `brain-core` that orchestrates all engine components. It SHALL hold:
@@ -17,30 +20,26 @@ Brain does NOT hold a `Project` or `AgentConfig`. It is a reusable engine; proje
 - **THEN** it SHALL return a Brain instance holding all provided components
 
 ### Requirement: Brain Turn Method
-The `Brain` SHALL provide a `turn` method that executes a single conversational turn:
-1. Load existing messages from the store for the given session
-2. Append a new user message
-3. Run the agent loop with the full message history and the provided `AgentConfig`
-4. Collect all assistant and tool messages emitted during the turn
-5. Persist the new messages (user + assistant + tool results) to the store
-6. Return the event stream to the caller
+
+The `Brain` SHALL provide a `turn` method that executes a single conversational
+turn:
+1. Load the session for the given session ID
+2. Load the owning project and derive the base `AgentConfig`
+3. Merge any session inference overrides into the project's inference defaults
+4. Load existing messages from the store
+5. Append a new user message
+6. Run the agent loop with the full message history and the effective config
+7. Collect all assistant and tool messages emitted during the turn
+8. Persist the new messages (user + assistant + tool results) to the store
+9. Return the event stream to the caller
 
 The method signature SHALL be:
-`turn(&self, session_id: Ulid, input: &str, config: AgentConfig, cancel: CancellationToken) -> EventStream`
+`turn(&self, session_id: Ulid, input: &str, cancel: CancellationToken) -> EventStream`
 
-#### Scenario: First turn in new session
-- **WHEN** `turn()` is called on a session with no prior messages
-- **THEN** the agent loop SHALL receive only the user message (plus system prompt if configured)
-- **AND** the user message and all assistant/tool messages SHALL be persisted to the store
+#### Scenario: Turn uses effective session inference
 
-#### Scenario: Subsequent turn with history
-- **WHEN** `turn()` is called on a session with prior messages
-- **THEN** the agent loop SHALL receive the full history plus the new user message
-- **AND** only the new messages SHALL be appended to the store
-
-#### Scenario: Turn with tool calls
-- **WHEN** the agent loop invokes tools during a turn
-- **THEN** all tool result messages SHALL also be persisted to the store
+- **WHEN** a session has inference overrides and `turn()` is called
+- **THEN** the agent loop SHALL receive the project defaults merged with those session overrides
 
 ### Requirement: Brain Run Loop
 The `Brain` SHALL provide a `run` method that drives an interactive session using a Transport and a Project:
@@ -77,32 +76,50 @@ These allow callers to manage sessions without accessing the store directly.
 - **THEN** it SHALL delegate to `store.session_list(project_id)` and return the result
 
 ### Requirement: Re-export Facade Preserved
-`brain-core` SHALL continue to re-export all public items from `brain-types`, `brain-providers`, `brain-stores`, `brain-loops`, and `brain-transports`. Downstream consumers using `use brain_core::*` SHALL not break.
+`brain-core` SHALL continue to re-export the runtime-facing crates used by the
+local CLI path. The old `cli-echo` and `cli-local` binaries have been removed
+from the workspace because their behavior is subsumed by `brain-cli`.
 
-#### Scenario: Existing imports still work
-- **WHEN** a consumer uses `use brain_core::*`
-- **THEN** all types, traits, and implementations from sub-crates SHALL be accessible
-- **AND** the `Brain` struct SHALL also be accessible
+#### Scenario: Workspace members updated
+- **WHEN** the focused runtime workspace is built
+- **THEN** `brain-cli` SHALL be the user-facing local binary crate
+- **AND** `examples/cli-echo` and `examples/cli-local` SHALL NOT be present
 
 ### Requirement: ProviderRouter
-The system SHALL provide a `ProviderRouter` struct in `brain-core` that implements the `Provider` trait. It SHALL hold a map of model names to `Arc<dyn Provider>` instances and a default provider. When `chat()` is called, it SHALL read `InferenceConfig.model` to look up the target provider, falling back to the default if the model is `None` or not found in the map.
 
-#### Scenario: Route by model name
-- **WHEN** `chat()` is called with `InferenceConfig { model: Some("gpt-4o") }`
-- **AND** a provider is registered under the name `"gpt-4o"`
-- **THEN** the call SHALL be dispatched to that provider
+The system SHALL provide a `ProviderRouter` struct in `brain-core` that
+implements the `Provider` trait.
 
-#### Scenario: Fallback to default
-- **WHEN** `chat()` is called with `InferenceConfig { model: None }`
-- **THEN** the call SHALL be dispatched to the default provider
+It SHALL:
 
-#### Scenario: Unknown model falls back
-- **WHEN** `chat()` is called with a model name not registered in the router
-- **THEN** the call SHALL be dispatched to the default provider
+- register providers by provider name
+- resolve `InferenceConfig.provider` explicitly when present
+- resolve `InferenceConfig.model` only when that model maps to exactly one
+  registered provider
+- fall back to the configured default provider only when neither provider nor
+  model is set
 
-#### Scenario: Construction
-- **WHEN** `ProviderRouter::new(default)` is called and providers are added via `add(name, provider)`
-- **THEN** the router SHALL be usable as an `Arc<dyn Provider>` passed to `Brain::new()`
+#### Scenario: Explicit provider wins
+
+- **WHEN** `chat()` is called with `InferenceConfig { provider: Some("openai"), .. }`
+- **THEN** the router SHALL dispatch to the registered `openai` provider
+
+#### Scenario: Model-only routing requires unique ownership
+
+- **WHEN** `chat()` is called with `InferenceConfig { provider: None, model: Some("gpt-4o") }`
+- **AND** exactly one registered provider advertises `"gpt-4o"`
+- **THEN** the router SHALL dispatch to that provider
+
+#### Scenario: Ambiguous model-only routing errors
+
+- **WHEN** a model ID belongs to more than one registered provider
+- **THEN** model-only routing for that ID SHALL fail instead of silently picking one
+
+#### Scenario: Available models preserve provider-declared order
+
+- **WHEN** `ProviderRouter` exposes its available model list for transports or clients
+- **THEN** it SHALL preserve the order declared by each registered provider
+- **AND** it SHALL exclude model IDs that are ambiguous across providers
 
 ### Requirement: BrainRuntimeNative
 The system SHALL provide a `BrainRuntimeNative` type in `brain-core` as the
@@ -226,3 +243,17 @@ The core SHALL:
 - **WHEN** the effective session model does not advertise reasoning support
 - **THEN** the effective session inference SHALL have no thought-level value
 
+### Requirement: Effective Session Inference Resolution
+
+`Brain` SHALL provide helpers for resolving and updating session inference
+state.
+
+#### Scenario: Effective inference merges project and session state
+
+- **WHEN** a project default sets provider/model and the session override sets only model
+- **THEN** the effective inference SHALL keep the project provider and use the session model
+
+#### Scenario: Empty session override is cleared
+
+- **WHEN** a caller updates session inference with an empty override config
+- **THEN** `Brain` SHALL persist no session override layer for that session

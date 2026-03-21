@@ -14,11 +14,3 @@ the shared `BrainRuntime` boundary rather than depending on `BrainApi`.
 #### Scenario: Interactive clients prefer BrainRuntime
 - **WHEN** building an interactive client or a future remote runtime client
 - **THEN** the preferred boundary SHALL be `BrainRuntime`
-
-### Requirement: Provider Info
-The `Provider` trait SHALL include an `info(&self) -> ProviderInfo` method
-alongside `chat()`. All provider implementations SHALL implement `info()`.
-
-#### Scenario: Provider reports metadata
-- **WHEN** `provider.info()` is called
-- **THEN** it SHALL return `ProviderInfo { name, default_model, models }`

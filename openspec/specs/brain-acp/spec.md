@@ -1,7 +1,9 @@
 # brain-acp Specification
 
 ## Purpose
-TBD - created by archiving change add-brain-runtime-trait. Update Purpose after archive.
+ACP stdio compatibility surface for `brain`. Defines the real and mock ACP
+entrypoints, runtime-backed session handling, ACP-facing session
+configuration, and protocol-safe stdio behavior for external ACP clients.
 ## Requirements
 ### Requirement: ACP Backend Depends On BrainRuntime
 The real ACP backend SHALL depend on the shared `BrainRuntime` boundary rather
@@ -82,3 +84,102 @@ human-readable tracing and backend logs.
 - **THEN** those logs SHALL go to stderr rather than stdout
 - **AND** ACP stdout SHALL remain parseable protocol output
 
+### Requirement: Real ACP Session Model State
+
+When ACP unstable session model support is enabled, the real ACP backend SHALL
+report model state from the real `brain-core` session/runtime model rather than
+from ACP-local adapter state.
+
+#### Scenario: New session reports effective model state
+
+- **WHEN** a client creates a real ACP session
+- **THEN** the response SHALL include the current effective model derived from the session and project config
+- **AND** it SHALL include the available unambiguous models exposed by the provider router
+
+#### Scenario: Load session reports persisted model state
+
+- **WHEN** a client loads a real ACP session
+- **THEN** the response SHALL include the current persisted session model state
+
+### Requirement: Real ACP Session Model Switching
+
+When ACP unstable session model support is enabled, the real ACP backend SHALL
+support `session/set_model` through persisted session inference overrides.
+
+#### Scenario: session/set_model persists provider and model on the session
+
+- **WHEN** ACP `session/set_model` is called with a valid model ID
+- **THEN** the real ACP backend SHALL resolve the owning provider through `ProviderRouter`
+- **AND** it SHALL persist provider+model on the real `Session.inference`
+
+#### Scenario: session/set_model preserves other session inference fields
+
+- **WHEN** a session already has per-session `temperature` or `max_tokens` overrides
+- **THEN** changing only the model through ACP SHALL preserve those other session-local overrides
+
+### Requirement: Dedicated ACP Binaries
+
+The system SHALL expose the ACP surface directly from the `brain-acp` crate
+through dedicated binaries rather than only through `brain-cli`.
+
+The ACP binary identities SHALL be:
+
+- `brain-acp`
+- `brain-acp-mock`
+
+#### Scenario: Mock ACP is launched directly from brain-acp
+
+- **WHEN** a user or ACP client launches the explicit mock ACP binary
+- **THEN** the system SHALL start the ACP stdio server without going through the `brain` compatibility alias
+
+#### Scenario: Real and mock ACP binaries remain distinct
+
+- **WHEN** ACP launch paths are configured for local validation
+- **THEN** `brain-acp` SHALL represent the real runtime-backed backend
+- **AND** `brain-acp-mock` SHALL remain the explicit mock backend
+
+### Requirement: Explicit Mock Binary Identity
+
+The system SHALL keep the mock ACP runtime available through an explicit
+mock-scoped binary identity.
+
+#### Scenario: Mock ACP remains available for development
+
+- **WHEN** developers need ACP interoperability validation against mock behavior
+- **THEN** they SHALL be able to launch `brain-acp-mock`
+
+#### Scenario: Compatibility harness uses explicit mock path
+
+- **WHEN** the repo runs its external ACP compatibility harness
+- **THEN** the harness SHALL launch the explicit mock ACP binary rather than relying on `brain-cli`
+
+### Requirement: Temporary brain ACP Compatibility Alias
+
+The system SHALL keep `brain acp` only as a temporary compatibility path
+while direct `brain-acp` binaries become the canonical ACP entrypoints.
+
+#### Scenario: Existing brain ACP command continues to work
+
+- **WHEN** a user launches `brain acp`
+- **THEN** the ACP stdio server SHALL still start successfully
+
+#### Scenario: Direct brain-acp binaries are canonical
+
+- **WHEN** ACP launch paths are documented or configured for external clients
+- **THEN** direct `brain-acp` binaries SHALL be treated as the canonical ACP surface
+
+### Requirement: Dual Nori ACP Registration
+
+The system SHALL support registering both ACP binary identities in Nori at the
+same time.
+
+#### Scenario: Nori registers both ACP agents
+
+- **WHEN** Nori is configured for local `brain` ACP validation
+- **THEN** it SHALL be able to register one entry for `brain-acp` and one entry for `brain-acp-mock`
+
+#### Scenario: Nori entries can target distinct real and mock binaries
+
+- **WHEN** Nori registers both local ACP entries
+- **THEN** one entry SHALL be able to target `brain-acp`
+- **AND** the other SHALL be able to target `brain-acp-mock`
