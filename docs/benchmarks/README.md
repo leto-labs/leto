@@ -47,6 +47,7 @@ This research concentrates on the dimensions that matter most for `brain`:
 - [`Methodology.md`](Methodology.md)
 - [`Formats.md`](Formats.md)
 - [`LoopDesign.md`](LoopDesign.md)
+- [`Harbor.md`](Harbor.md)
 - [`SWEBench.md`](SWEBench.md)
 - [`TerminalBench.md`](TerminalBench.md)
 - [`HAL.md`](HAL.md)
@@ -74,6 +75,10 @@ This research concentrates on the dimensions that matter most for `brain`:
   `brain` as standardized evaluation infrastructure: framework-agnostic,
   cost-aware, multi-benchmark, and explicitly aimed at reproducible agent
   comparisons.
+- Harbor should be treated as the practical operational harness for the first
+  baseline workflow: install it externally, run one tightly bounded built-in
+  `hello-world@1.0` baseline, then run the repo-local ACP bridge against
+  `codex-acp` on `hello-world@1.0` before attempting broader comparisons.
 - Harbor's `ATIF` is the strongest current candidate for a reusable trace
   interchange format because it is designed for debugging, visualization, SFT,
   and RL rather than only one benchmark leaderboard.

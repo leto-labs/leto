@@ -54,6 +54,26 @@ acpx-compat:
 nori-prompts-install:
     ./scripts/install-nori-prompts.sh
 
+# Install the pinned Harbor CLI as an external tool
+harbor-install:
+    ./scripts/harbor-install.sh
+
+# List datasets exposed by the live Harbor registry
+harbor-datasets:
+    harbor datasets list
+
+# Run one tightly bounded built-in Harbor hello-world baseline
+harbor-builtin-hello-world:
+    ./scripts/harbor-builtin-hello-world.sh
+
+# Run the repo-local Harbor ACP bridge against hello-world with codex-acp
+harbor-acp-hello-world:
+    ./scripts/harbor-acp-hello-world.sh
+
+# Browse Harbor job trajectories in the built-in web viewer
+harbor-view-jobs:
+    harbor view target/harbor/jobs
+
 # Clean build artifacts
 clean:
     cargo clean
