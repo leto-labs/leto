@@ -96,14 +96,17 @@ class AcpBrainAgent(BaseAcpAgent):
     def _default_backend_artifact_path(self) -> Path:
         repo_root = Path(__file__).resolve().parents[3]
         for candidate in (
-            repo_root / "target" / "debug" / "brain-acp",
+            repo_root / "target" / "x86_64-unknown-linux-musl" / "release" / "brain-acp",
             repo_root / "target" / "release" / "brain-acp",
+            repo_root / "target" / "debug" / "brain-acp",
         ):
             if candidate.exists():
                 return candidate
         raise RuntimeError(
-            "Unable to locate a local brain-acp binary. Build target/debug/brain-acp "
-            "or target/release/brain-acp first, or pass backend_artifact_path."
+            "Unable to locate a local brain-acp binary. Build "
+            "target/x86_64-unknown-linux-musl/release/brain-acp, "
+            "target/release/brain-acp, or target/debug/brain-acp first, or pass "
+            "backend_artifact_path."
         )
 
     async def _upload_additional_inputs(self, environment: BaseEnvironment) -> None:

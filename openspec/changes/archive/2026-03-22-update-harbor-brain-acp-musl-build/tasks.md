@@ -1,0 +1,6 @@
+- [x] Add OpenSpec deltas for portable Harbor `brain-acp` artifacts and full-dataset runner defaults
+- [x] Add musl-targeted build support in `justfile` and target-specific Cargo config
+- [x] Update `AcpBrainAgent` artifact selection to prefer the musl release artifact
+- [x] Update `scripts/harbor-run.sh` to default to full datasets when no task name is provided
+- [x] Update Harbor benchmark docs to describe the musl Harbor artifact path and new runner behavior
+- [x] Validate with `bash -n`, `python3 -m py_compile`, `openspec validate ... --strict`, and `cargo test --workspace`

@@ -37,7 +37,13 @@ fi
 
 HARBOR_DATASET="${HARBOR_DATASET:-${DATASET}}"
 HARBOR_TASK_NAME="${HARBOR_TASK_NAME:-${TASK_NAME}}"
-HARBOR_N_TASKS="${HARBOR_N_TASKS:-1}"
+if [[ -n "${HARBOR_N_TASKS:-}" ]]; then
+  resolved_n_tasks="${HARBOR_N_TASKS}"
+elif [[ -n "${HARBOR_TASK_NAME}" ]]; then
+  resolved_n_tasks="1"
+else
+  resolved_n_tasks=""
+fi
 HARBOR_N_ATTEMPTS="${HARBOR_N_ATTEMPTS:-1}"
 HARBOR_N_CONCURRENT="${HARBOR_N_CONCURRENT:-1}"
 HARBOR_TIMEOUT_MULTIPLIER="${HARBOR_TIMEOUT_MULTIPLIER:-1.0}"
@@ -59,7 +65,6 @@ cmd=(
   --job-name "${HARBOR_JOB_NAME}"
   --model "${HARBOR_MODEL}"
   --dataset "${HARBOR_DATASET}"
-  --n-tasks "${HARBOR_N_TASKS}"
   --n-attempts "${HARBOR_N_ATTEMPTS}"
   --n-concurrent "${HARBOR_N_CONCURRENT}"
   --timeout-multiplier "${HARBOR_TIMEOUT_MULTIPLIER}"
@@ -67,6 +72,10 @@ cmd=(
   --force-build
   --delete
 )
+
+if [[ -n "${resolved_n_tasks}" ]]; then
+  cmd+=(--n-tasks "${resolved_n_tasks}")
+fi
 
 if [[ -n "${HARBOR_TASK_NAME}" ]]; then
   cmd+=(--task-name "${HARBOR_TASK_NAME}")

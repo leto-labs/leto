@@ -40,11 +40,15 @@ check: fmt-check clippy test
 
 # Build the workspace
 build:
-    cargo build --workspace
+    command -v musl-gcc >/dev/null || (echo "musl-gcc is required for musl builds. Install musl-tools (or equivalent) first." >&2; exit 1)
+    rustup target add x86_64-unknown-linux-musl
+    cargo build --workspace --target x86_64-unknown-linux-musl
 
 # Build in release mode
 build-release:
-    cargo build --workspace --release
+    command -v musl-gcc >/dev/null || (echo "musl-gcc is required for musl builds. Install musl-tools (or equivalent) first." >&2; exit 1)
+    rustup target add x86_64-unknown-linux-musl
+    cargo build --workspace --release --target x86_64-unknown-linux-musl
 
 # Run the opt-in acpx compatibility harness against brain-acp
 acpx-compat:
