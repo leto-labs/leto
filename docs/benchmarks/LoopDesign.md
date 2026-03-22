@@ -518,6 +518,162 @@ either one.
 
 ## Working Recommendation
 
+The Harbor full-suite result gives us a much sharper next-step recommendation
+than the earlier benchmark survey alone.
+
+## Harbor-Driven Loop Findings
+
+The first full `brain-acp` robust run on `terminal-bench@2.0` ended at:
+
+- `24/89` passes
+- `48/89` verifier failures
+- `23/89` trials with exceptions
+- mean reward `0.2697`
+
+The important news is not the raw score by itself. It is that the musl
+packaging fix held across the full mixed-image suite, so the dominant failures
+are now loop and runtime behavior rather than startup portability.
+
+### What the full run changed
+
+Before the full Harbor run, it was still plausible that the main blocker for
+`brain-acp` was the container environment itself.
+
+After the full Harbor run, that is no longer the main story:
+
+- the backend now starts across the suite
+- Harbor can run `brain-acp` end to end on the full dataset
+- the remaining problems are now mostly about turn control, failure surfacing,
+  and completion quality
+
+That is exactly the point where benchmark findings should start feeding back
+into loop design.
+
+## Failure Taxonomy From The Full Run
+
+The failures clustered into three main classes.
+
+### 1. Iteration-budget exhaustion currently disguised as request failure
+
+The most important exception bucket was a set of Harbor `RequestError` trials
+that all shared the same backend signature:
+
+```text
+max iterations reached: 20
+```
+
+This is a critical design signal:
+
+- the current default `max_iterations=20` is too low for robust full-suite use
+- loop exhaustion is currently surfacing too much like a transport/protocol
+  failure instead of a normal turn-level outcome
+
+That means the current loop budget is not only too small; it is also producing
+the wrong operational shape when it is exceeded.
+
+### 2. Long-running tasks need better in-flight visibility and termination behavior
+
+A smaller but high-value failure class came from long-running tasks and long
+shell steps.
+
+The clearest example was `build-pov-ray`:
+
+- the task reached verifier reward `1.0`
+- Harbor still recorded an `AgentTimeoutError`
+
+That means the agent had effectively solved the task but still got stuck in a
+final long-running step.
+
+This does not argue for making the loop simpler. It argues for making it more
+observable and better behaved under long-running tool activity.
+
+### 3. Clean verifier failures remain the largest overall class
+
+The largest remaining bucket after exception analysis is still ordinary
+verifier failure:
+
+- the turn completed
+- the produced artifact or answer was wrong
+
+This is the hardest class, but it is also the one where better loop mechanics
+can still help. Many of these failures look like:
+
+- partial diagnosis without finishing the fix
+- too-early finalization
+- weak final validation
+
+Those are productively described as loop-policy and completion-discipline
+problems, not as benchmark noise.
+
+## What This Suggests About The Next Loop Change
+
+The Harbor run does not suggest that we should abandon typed tools or revert to
+a pure bash-only agent. It suggests something more specific.
+
+### 1. The robust loop needs a better turn budget story
+
+The current flat default of `20` iterations is too low for harder benchmark
+tasks, especially ones that need:
+
+- multiple inspection steps
+- build/setup steps
+- recovery from partial failures
+
+The benchmark evidence now supports treating this as a real loop problem rather
+than a tuning afterthought.
+
+### 2. Loop termination must be surfaced cleanly
+
+A turn ending because it exhausted its iteration budget should not look like a
+protocol failure to Harbor.
+
+That is partly a loop-design issue and partly an ACP-surfacing issue:
+
+- the loop should expose a clear typed termination reason
+- the ACP layer should propagate it as a normal turn outcome instead of hiding
+  it behind `internal_error`
+
+### 3. Long-running tool activity needs visibility
+
+The long-task failures show that the loop currently gives too little
+structured signal during expensive tool execution.
+
+The right lesson is not “never run long commands.” It is:
+
+- expose more progress during long tool calls
+- steer or terminate more cleanly when progress is not being made
+
+### 4. Completion discipline is probably a real missing capability
+
+The verifier-failure bucket strongly suggests that the current loop ends turns
+too optimistically in some cases.
+
+But this is not yet ready to become a clean normative requirement. The current
+tool model does not encode enough semantics to define a generic
+“verify-before-finish” policy without inventing behavior we do not actually
+have.
+
+So this should influence the next design pass, but it should not yet be forced
+into a brittle spec.
+
+## Updated Working Recommendation
+
+The next loop work should be driven by the Harbor result in this order:
+
+1. improve iteration-budget and stall behavior
+2. surface loop termination cleanly through ACP
+3. improve long-running tool visibility
+4. revisit completion discipline once the loop/runtime semantics are clearer
+
+This is still consistent with the earlier conclusion of this page:
+
+- keep the simple core request -> tool -> re-request shape
+- avoid accidental complexity
+- add complexity only where it buys measurable capability or stability
+
+The Harbor result now tells us exactly where that additional complexity is
+starting to pay for itself.
+
 Use benchmark evidence to keep the core loop honest:
 
 - simple

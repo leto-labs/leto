@@ -16,6 +16,7 @@ struct ToolPresentation {
     raw_input: serde_json::Value,
 }
 
+#[derive(Debug)]
 pub enum MappedEvent {
     Updates(Vec<acp::SessionUpdate>),
     Cancelled,
@@ -93,6 +94,9 @@ impl EventMapper {
             Event::Error { code, message, .. } => {
                 if code == BrainErrorCode::Cancelled {
                     MappedEvent::Cancelled
+                } else if code == BrainErrorCode::MaxIterations {
+                    self.seen_done = true;
+                    MappedEvent::TurnComplete(acp::StopReason::EndTurn)
                 } else {
                     MappedEvent::Failed(message)
                 }
@@ -363,6 +367,36 @@ enum PatchSummaryOp {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn max_iterations_error_ends_turn_instead_of_failing_prompt() {
+        let mut mapper = EventMapper::new();
+        let mapped = mapper.map(Event::Error {
+            code: BrainErrorCode::MaxIterations,
+            message: "max iterations reached: 20".into(),
+            recoverable: false,
+        });
+
+        match mapped {
+            MappedEvent::TurnComplete(acp::StopReason::EndTurn) => {}
+            other => panic!("unexpected mapping: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn cancelled_error_maps_to_cancelled_stop_reason() {
+        let mut mapper = EventMapper::new();
+        let mapped = mapper.map(Event::Error {
+            code: BrainErrorCode::Cancelled,
+            message: "cancelled".into(),
+            recoverable: false,
+        });
+
+        match mapped {
+            MappedEvent::Cancelled => {}
+            other => panic!("unexpected mapping: {other:?}"),
+        }
+    }
 
     #[test]
     fn list_directory_uses_human_title_and_other_kind() {
