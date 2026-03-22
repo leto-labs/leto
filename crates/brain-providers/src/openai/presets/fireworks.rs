@@ -2,6 +2,7 @@
 use brain_types::ModelInfo;
 
 use super::{OpenAiConfigPreset, REASONING_LMH};
+use crate::openai::config::OpenAiApiSurface;
 
 pub const MODELS: &[ModelInfo] = &[
     ModelInfo {
@@ -415,4 +416,8 @@ pub const PRESET: OpenAiConfigPreset = OpenAiConfigPreset {
     default_model: "accounts/fireworks/models/llama-v3p3-70b-instruct",
     env_key: "FIREWORKS_API_KEY",
     models: MODELS,
+    supported_api_surfaces: &[
+        OpenAiApiSurface::Responses,
+        OpenAiApiSurface::ChatCompletions,
+    ],
 };

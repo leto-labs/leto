@@ -10,6 +10,7 @@ mistralrs = ["brain-providers/mistralrs"]
 llamacpp = ["brain-providers/llamacpp"]
 
 [dependencies]
+atif = { workspace = true }
 brain-config = { workspace = true }
 brain-types = { workspace = true }
 brain-providers = { workspace = true }
@@ -17,12 +18,14 @@ brain-stores = { workspace = true }
 brain-tools = { workspace = true }
 brain-loops = { workspace = true }
 brain-transports = { workspace = true }
+chrono = { workspace = true }
 tokio = { workspace = true, features = ["sync"] }
 tokio-stream = { workspace = true, features = ["sync"] }
 futures = { workspace = true }
 tracing = { workspace = true }
 ulid = { workspace = true }
 tokio-util = { workspace = true }
+serde_json = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }

@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/atif",
     "crates/brain-types",
     "crates/brain-providers",
     "crates/brain-stores",
@@ -75,6 +76,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
 
 # Internal
+atif = { path = "crates/atif" }
 brain-types = { path = "crates/brain-types" }
 brain-providers = { path = "crates/brain-providers" }
 brain-stores = { path = "crates/brain-stores" }

@@ -1,4 +1,5 @@
 mod commands;
+mod exec_mode;
 mod provider;
 
 use std::sync::Arc;
@@ -28,6 +29,13 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
+    if let Some(Commands::Exec(exec)) = command.clone() {
+        exec_mode::run_exec(exec)
+            .await
+            .context("failed to run exec command")?;
+        return Ok(());
+    }
+
     let cwd = std::env::current_dir().context("failed to get current directory")?;
 
     let config = resolve_config(&cwd);
@@ -44,6 +52,9 @@ async fn main() -> Result<()> {
 
     match command {
         Some(Commands::Acp) => unreachable!("ACP command is handled before runtime initialization"),
+        Some(Commands::Exec(_)) => {
+            unreachable!("exec command is handled before runtime initialization")
+        }
         Some(Commands::Credentials { action }) => match action {
             CredentialsAction::Add {
                 provider,

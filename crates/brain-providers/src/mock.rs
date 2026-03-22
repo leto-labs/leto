@@ -117,6 +117,9 @@ impl Provider for MockProvider {
                         prompt: approx_tokens,
                         completion: approx_tokens,
                         total: approx_tokens * 2,
+                        cache_read: None,
+                        cache_write: None,
+                        reasoning: None,
                     }),
                 });
             };

@@ -13,7 +13,7 @@ pub mod xai;
 
 use brain_types::ModelInfo;
 
-use super::config::OpenAiConfig;
+use super::config::{OpenAiApiMode, OpenAiApiSurface, OpenAiConfig};
 
 const REASONING_LMH: &[&str] = &["low", "medium", "high"];
 
@@ -24,6 +24,7 @@ pub struct OpenAiConfigPreset {
     pub default_model: &'static str,
     pub env_key: &'static str,
     pub models: &'static [ModelInfo],
+    pub supported_api_surfaces: &'static [OpenAiApiSurface],
 }
 
 impl OpenAiConfigPreset {
@@ -68,6 +69,8 @@ impl OpenAiConfigPreset {
             base_url: self.base_url.to_owned(),
             default_model: self.default_model.to_owned(),
             models: self.models,
+            supported_api_surfaces: self.supported_api_surfaces,
+            api_surface_mode: OpenAiApiMode::Auto,
         }
     }
 

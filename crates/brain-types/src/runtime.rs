@@ -40,6 +40,17 @@ pub enum RuntimeBusEvent {
         session_id: Ulid,
         project_id: ProjectId,
     },
+    TrajectoryCreated {
+        session_id: Ulid,
+        trajectory: atif::Trajectory,
+    },
+    TrajectoryUpdated {
+        session_id: Ulid,
+        trajectory: atif::Trajectory,
+    },
+    TrajectoryDeleted {
+        session_id: Ulid,
+    },
 }
 
 pub trait BrainRuntime: Send + Sync {
@@ -523,6 +534,57 @@ mod tests {
         }
     }
 
+    struct DummyTrajectoryStore;
+
+    impl CrudStore for DummyTrajectoryStore {
+        type Key = Ulid;
+        type Record = atif::Trajectory;
+        type Event = crate::TrajectoryStoreEvent;
+
+        fn create(
+            &self,
+            _key: Ulid,
+            record: atif::Trajectory,
+        ) -> BoxFuture<'_, Result<atif::Trajectory, BrainError>> {
+            Box::pin(ready(Ok(record)))
+        }
+
+        fn get(&self, _key: Ulid) -> BoxFuture<'_, Result<atif::Trajectory, BrainError>> {
+            Box::pin(ready(Err(BrainError::Storage(
+                "trajectory not found".into(),
+            ))))
+        }
+
+        fn list(&self) -> BoxFuture<'_, Result<Vec<atif::Trajectory>, BrainError>> {
+            Box::pin(ready(Ok(Vec::new())))
+        }
+
+        fn update(
+            &self,
+            _key: Ulid,
+            record: atif::Trajectory,
+        ) -> BoxFuture<'_, Result<atif::Trajectory, BrainError>> {
+            Box::pin(ready(Ok(record)))
+        }
+
+        fn delete(&self, _key: Ulid) -> BoxFuture<'_, Result<(), BrainError>> {
+            Box::pin(ready(Ok(())))
+        }
+
+        fn subscribe(&self) -> crate::TrajectoryStoreEventStream {
+            Box::pin(futures::stream::empty())
+        }
+    }
+
+    impl crate::TrajectoryStore for DummyTrajectoryStore {
+        fn get_for_session(
+            &self,
+            _session_id: Ulid,
+        ) -> BoxFuture<'_, Result<Option<atif::Trajectory>, BrainError>> {
+            Box::pin(ready(Ok(None)))
+        }
+    }
+
     struct DummyStore;
 
     impl Store for DummyStore {
@@ -543,6 +605,11 @@ mod tests {
 
         fn credentials(&self) -> &dyn crate::CredentialStore {
             static STORE: DummyCredentialStore = DummyCredentialStore;
+            &STORE
+        }
+
+        fn trajectories(&self) -> &dyn crate::TrajectoryStore {
+            static STORE: DummyTrajectoryStore = DummyTrajectoryStore;
             &STORE
         }
 
@@ -673,6 +740,11 @@ mod tests {
                 },
                 Event::TurnDone {
                     iterations: 1,
+                    prompt_tokens: None,
+                    completion_tokens: None,
+                    cache_read_tokens: None,
+                    cache_write_tokens: None,
+                    reasoning_tokens: None,
                     total_tokens: 0,
                 },
             ]))
@@ -740,6 +812,11 @@ mod tests {
         fn turn(&self, _session_id: Ulid, _input: &str, _cancel: CancellationToken) -> EventStream {
             Box::pin(futures::stream::iter(vec![Event::TurnDone {
                 iterations: 0,
+                prompt_tokens: None,
+                completion_tokens: None,
+                cache_read_tokens: None,
+                cache_write_tokens: None,
+                reasoning_tokens: None,
                 total_tokens: 0,
             }]))
         }

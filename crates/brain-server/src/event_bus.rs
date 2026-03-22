@@ -42,6 +42,11 @@ mod tests {
             session_id,
             Event::TurnDone {
                 iterations: 1,
+                prompt_tokens: None,
+                completion_tokens: None,
+                cache_read_tokens: None,
+                cache_write_tokens: None,
+                reasoning_tokens: None,
                 total_tokens: 10,
             },
         )

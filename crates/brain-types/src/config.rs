@@ -2,6 +2,22 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use ulid::Ulid;
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AtifConfig {
+    pub emit_events: bool,
+    pub schema_version: atif::SchemaVersion,
+}
+
+impl Default for AtifConfig {
+    fn default() -> Self {
+        Self {
+            emit_events: false,
+            schema_version: atif::SchemaVersion::default(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum DoomLoopStrategy {
@@ -16,6 +32,7 @@ pub struct AgentConfig {
     pub max_iterations: u32,
     pub system_prompt: Option<String>,
     pub loop_name: Option<String>,
+    pub atif: AtifConfig,
     pub tool_output_max_bytes: usize,
     pub doom_loop_threshold: u32,
     pub doom_loop_strategy: DoomLoopStrategy,
@@ -31,6 +48,7 @@ impl Default for AgentConfig {
             max_iterations: 20,
             system_prompt: None,
             loop_name: None,
+            atif: AtifConfig::default(),
             tool_output_max_bytes: 16_000,
             doom_loop_threshold: 3,
             doom_loop_strategy: DoomLoopStrategy::Steer,
@@ -99,6 +117,12 @@ pub struct TokenUsage {
     pub prompt: u32,
     pub completion: u32,
     pub total: u32,
+    #[serde(default)]
+    pub cache_read: Option<u32>,
+    #[serde(default)]
+    pub cache_write: Option<u32>,
+    #[serde(default)]
+    pub reasoning: Option<u32>,
 }
 
 #[cfg(test)]
@@ -111,6 +135,8 @@ mod tests {
         assert_eq!(cfg.max_iterations, 20);
         assert!(cfg.system_prompt.is_none());
         assert!(cfg.loop_name.is_none());
+        assert!(!cfg.atif.emit_events);
+        assert_eq!(cfg.atif.schema_version, atif::SchemaVersion::V1_6);
         assert_eq!(cfg.tool_output_max_bytes, 16_000);
         assert_eq!(cfg.doom_loop_threshold, 3);
         assert_eq!(cfg.doom_loop_strategy, DoomLoopStrategy::Steer);
@@ -166,6 +192,10 @@ mod tests {
             max_iterations: 10,
             system_prompt: Some("You are helpful.".into()),
             loop_name: Some("simple".into()),
+            atif: AtifConfig {
+                emit_events: true,
+                schema_version: atif::SchemaVersion::V1_6,
+            },
             tool_output_max_bytes: 24_000,
             doom_loop_threshold: 4,
             doom_loop_strategy: DoomLoopStrategy::Error,
@@ -188,6 +218,8 @@ mod tests {
             Some("You are helpful.")
         );
         assert_eq!(deserialized.loop_name.as_deref(), Some("simple"));
+        assert!(deserialized.atif.emit_events);
+        assert_eq!(deserialized.atif.schema_version, atif::SchemaVersion::V1_6);
         assert_eq!(deserialized.tool_output_max_bytes, 24_000);
         assert_eq!(deserialized.doom_loop_threshold, 4);
         assert_eq!(deserialized.doom_loop_strategy, DoomLoopStrategy::Error);
@@ -211,6 +243,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(cfg.max_iterations, 7);
+        assert!(!cfg.atif.emit_events);
         assert_eq!(cfg.tool_output_max_bytes, 16_000);
         assert_eq!(cfg.doom_loop_threshold, 3);
         assert_eq!(cfg.doom_loop_strategy, DoomLoopStrategy::Steer);
@@ -226,10 +259,15 @@ mod tests {
             prompt: 100,
             completion: 50,
             total: 150,
+            cache_read: Some(25),
+            cache_write: None,
+            reasoning: Some(10),
         };
         let json = serde_json::to_string(&usage).unwrap();
         let deserialized: TokenUsage = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized.total, 150);
+        assert_eq!(deserialized.cache_read, Some(25));
+        assert_eq!(deserialized.reasoning, Some(10));
     }
 
     #[test]

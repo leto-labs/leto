@@ -56,6 +56,11 @@ impl AgentLoop for RobustLoop {
 struct ProviderTurn {
     text: String,
     tool_calls: Vec<ToolCall>,
+    prompt_tokens: u32,
+    completion_tokens: u32,
+    cache_read_tokens: u32,
+    cache_write_tokens: u32,
+    reasoning_tokens: u32,
     total_tokens: u32,
 }
 
@@ -75,6 +80,11 @@ async fn run_inner(
     let tool_defs: Vec<ToolDef> = tools.iter().map(|tool| tool.definition()).collect();
 
     let mut iterations = 0u32;
+    let mut prompt_tokens = 0u32;
+    let mut completion_tokens = 0u32;
+    let mut cache_read_tokens = 0u32;
+    let mut cache_write_tokens = 0u32;
+    let mut reasoning_tokens = 0u32;
     let mut total_tokens = 0u32;
     let mut doom_tracker = DoomTracker::default();
 
@@ -109,6 +119,11 @@ async fn run_inner(
             &cancel,
         )
         .await?;
+        prompt_tokens += turn.prompt_tokens;
+        completion_tokens += turn.completion_tokens;
+        cache_read_tokens += turn.cache_read_tokens;
+        cache_write_tokens += turn.cache_write_tokens;
+        reasoning_tokens += turn.reasoning_tokens;
         total_tokens += turn.total_tokens;
 
         let mut assistant = Message::assistant(&turn.text);
@@ -187,6 +202,11 @@ async fn run_inner(
     let _ = tx
         .send(Event::TurnDone {
             iterations,
+            prompt_tokens: (prompt_tokens > 0).then_some(prompt_tokens),
+            completion_tokens: (completion_tokens > 0).then_some(completion_tokens),
+            cache_read_tokens: (cache_read_tokens > 0).then_some(cache_read_tokens),
+            cache_write_tokens: (cache_write_tokens > 0).then_some(cache_write_tokens),
+            reasoning_tokens: (reasoning_tokens > 0).then_some(reasoning_tokens),
             total_tokens,
         })
         .await;
@@ -247,6 +267,11 @@ async fn run_provider_turn(
 
         let mut text = String::new();
         let mut tool_calls = Vec::new();
+        let mut prompt_tokens = 0u32;
+        let mut completion_tokens = 0u32;
+        let mut cache_read_tokens = 0u32;
+        let mut cache_write_tokens = 0u32;
+        let mut reasoning_tokens = 0u32;
         let mut total_tokens = 0u32;
         let mut saw_output = false;
         let mut tool_call_deltas: HashMap<String, String> = HashMap::new();
@@ -296,6 +321,11 @@ async fn run_provider_turn(
                 Ok(ChatChunk::Done { usage }) => {
                     saw_output = true;
                     if let Some(usage) = usage {
+                        prompt_tokens += usage.prompt;
+                        completion_tokens += usage.completion;
+                        cache_read_tokens += usage.cache_read.unwrap_or(0);
+                        cache_write_tokens += usage.cache_write.unwrap_or(0);
+                        reasoning_tokens += usage.reasoning.unwrap_or(0);
                         total_tokens += usage.total;
                     }
                 }
@@ -316,6 +346,11 @@ async fn run_provider_turn(
         return Ok(ProviderTurn {
             text,
             tool_calls,
+            prompt_tokens,
+            completion_tokens,
+            cache_read_tokens,
+            cache_write_tokens,
+            reasoning_tokens,
             total_tokens,
         });
     }
@@ -584,6 +619,9 @@ mod tests {
                             prompt: 3,
                             completion: 1,
                             total: 4,
+                            cache_read: None,
+                            cache_write: None,
+                            reasoning: None,
                         }),
                     });
                 };
@@ -692,6 +730,9 @@ mod tests {
                             prompt: 20,
                             completion: 5,
                             total: 25,
+                            cache_read: None,
+                            cache_write: None,
+                            reasoning: None,
                         }),
                     });
                 };

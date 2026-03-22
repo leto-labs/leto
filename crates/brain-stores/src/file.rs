@@ -19,6 +19,7 @@ struct FileStoreInner {
     session_event_tx: broadcast::Sender<SessionStoreEvent>,
     message_event_tx: broadcast::Sender<MessageStoreEvent>,
     credential_event_tx: broadcast::Sender<CredentialStoreEvent>,
+    trajectory_event_tx: broadcast::Sender<TrajectoryStoreEvent>,
 }
 
 impl FileStoreInner {
@@ -28,6 +29,7 @@ impl FileStoreInner {
         let (session_event_tx, _) = broadcast::channel(STORE_EVENT_CAPACITY);
         let (message_event_tx, _) = broadcast::channel(STORE_EVENT_CAPACITY);
         let (credential_event_tx, _) = broadcast::channel(STORE_EVENT_CAPACITY);
+        let (trajectory_event_tx, _) = broadcast::channel(STORE_EVENT_CAPACITY);
         Self {
             root,
             store_event_tx,
@@ -35,6 +37,7 @@ impl FileStoreInner {
             session_event_tx,
             message_event_tx,
             credential_event_tx,
+            trajectory_event_tx,
         }
     }
 
@@ -60,6 +63,10 @@ impl FileStoreInner {
 
     fn messages_file(&self, session_id: Ulid) -> PathBuf {
         self.session_dir(session_id).join("messages.jsonl")
+    }
+
+    fn trajectory_file(&self, session_id: Ulid) -> PathBuf {
+        self.session_dir(session_id).join("trajectory.json")
     }
 
     fn credentials_dir(&self) -> PathBuf {
@@ -102,6 +109,12 @@ impl FileStoreInner {
     fn publish_credential(&self, event: CredentialStoreEvent) {
         if let Err(error) = self.credential_event_tx.send(event) {
             tracing::debug!("credential event dropped: {error}");
+        }
+    }
+
+    fn publish_trajectory(&self, event: TrajectoryStoreEvent) {
+        if let Err(error) = self.trajectory_event_tx.send(event) {
+            tracing::debug!("trajectory event dropped: {error}");
         }
     }
 
@@ -204,12 +217,18 @@ struct FileCredentialStore {
     inner: Arc<FileStoreInner>,
 }
 
+#[derive(Clone)]
+struct FileTrajectoryStore {
+    inner: Arc<FileStoreInner>,
+}
+
 pub struct FileStore {
     inner: Arc<FileStoreInner>,
     projects: FileProjectStore,
     sessions: FileSessionStore,
     messages: FileMessageStore,
     credentials: FileCredentialStore,
+    trajectories: FileTrajectoryStore,
 }
 
 impl FileStore {
@@ -237,6 +256,9 @@ impl FileStore {
                 inner: Arc::clone(&inner),
             },
             credentials: FileCredentialStore {
+                inner: Arc::clone(&inner),
+            },
+            trajectories: FileTrajectoryStore {
                 inner: Arc::clone(&inner),
             },
             inner,
@@ -938,6 +960,145 @@ impl CredentialStore for FileCredentialStore {
     }
 }
 
+impl CrudStore for FileTrajectoryStore {
+    type Key = Ulid;
+    type Record = atif::Trajectory;
+    type Event = TrajectoryStoreEvent;
+
+    fn create(
+        &self,
+        session_id: Ulid,
+        trajectory: atif::Trajectory,
+    ) -> BoxFuture<'_, Result<atif::Trajectory, BrainError>> {
+        let inner = Arc::clone(&self.inner);
+        Box::pin(async move {
+            if !inner.session_file(session_id).exists() {
+                return Err(BrainError::Storage(format!(
+                    "session not found: {session_id}"
+                )));
+            }
+            let path = inner.trajectory_file(session_id);
+            if path.exists() {
+                return Err(BrainError::Storage(format!(
+                    "trajectory already exists: {session_id}"
+                )));
+            }
+            write_json(&path, &trajectory).await?;
+            inner.touch_session(session_id).await?;
+            inner.publish_trajectory(TrajectoryStoreEvent::Created {
+                session_id,
+                trajectory: trajectory.clone(),
+            });
+            inner.publish_store(StoreEvent::TrajectoryCreated {
+                session_id,
+                trajectory: trajectory.clone(),
+            });
+            Ok(trajectory)
+        })
+    }
+
+    fn get(&self, session_id: Ulid) -> BoxFuture<'_, Result<atif::Trajectory, BrainError>> {
+        let inner = Arc::clone(&self.inner);
+        Box::pin(async move {
+            let path = inner.trajectory_file(session_id);
+            if !path.exists() {
+                return Err(BrainError::Storage(format!(
+                    "trajectory not found: {session_id}"
+                )));
+            }
+            read_json(&path).await
+        })
+    }
+
+    fn list(&self) -> BoxFuture<'_, Result<Vec<atif::Trajectory>, BrainError>> {
+        let inner = Arc::clone(&self.inner);
+        Box::pin(async move {
+            let sessions = inner.list_all_sessions().await?;
+            let mut trajectories = Vec::new();
+            for session in sessions {
+                let path = inner.trajectory_file(session.id);
+                if path.exists() {
+                    trajectories.push(read_json(&path).await?);
+                }
+            }
+            Ok(trajectories)
+        })
+    }
+
+    fn update(
+        &self,
+        session_id: Ulid,
+        trajectory: atif::Trajectory,
+    ) -> BoxFuture<'_, Result<atif::Trajectory, BrainError>> {
+        let inner = Arc::clone(&self.inner);
+        Box::pin(async move {
+            if !inner.session_file(session_id).exists() {
+                return Err(BrainError::Storage(format!(
+                    "session not found: {session_id}"
+                )));
+            }
+            let path = inner.trajectory_file(session_id);
+            if !path.exists() {
+                return Err(BrainError::Storage(format!(
+                    "trajectory not found: {session_id}"
+                )));
+            }
+            write_json(&path, &trajectory).await?;
+            inner.touch_session(session_id).await?;
+            inner.publish_trajectory(TrajectoryStoreEvent::Updated {
+                session_id,
+                trajectory: trajectory.clone(),
+            });
+            inner.publish_store(StoreEvent::TrajectoryUpdated {
+                session_id,
+                trajectory: trajectory.clone(),
+            });
+            Ok(trajectory)
+        })
+    }
+
+    fn delete(&self, session_id: Ulid) -> BoxFuture<'_, Result<(), BrainError>> {
+        let inner = Arc::clone(&self.inner);
+        Box::pin(async move {
+            let path = inner.trajectory_file(session_id);
+            if path.exists() {
+                tokio::fs::remove_file(&path)
+                    .await
+                    .map_err(|e| BrainError::Storage(format!("delete trajectory: {e}")))?;
+                inner.touch_session(session_id).await?;
+            }
+            inner.publish_trajectory(TrajectoryStoreEvent::Deleted { session_id });
+            inner.publish_store(StoreEvent::TrajectoryDeleted { session_id });
+            Ok(())
+        })
+    }
+
+    fn subscribe(&self) -> TrajectoryStoreEventStream {
+        broadcast_stream(self.inner.trajectory_event_tx.subscribe())
+    }
+}
+
+impl TrajectoryStore for FileTrajectoryStore {
+    fn get_for_session(
+        &self,
+        session_id: Ulid,
+    ) -> BoxFuture<'_, Result<Option<atif::Trajectory>, BrainError>> {
+        let inner = Arc::clone(&self.inner);
+        Box::pin(async move {
+            if !inner.session_file(session_id).exists() {
+                return Err(BrainError::Storage(format!(
+                    "session not found: {session_id}"
+                )));
+            }
+            let path = inner.trajectory_file(session_id);
+            if !path.exists() {
+                return Ok(None);
+            }
+            Ok(Some(read_json(&path).await?))
+        })
+    }
+}
+
 impl Store for FileStore {
     fn projects(&self) -> &dyn ProjectStore {
         &self.projects
@@ -953,6 +1114,10 @@ impl Store for FileStore {
 
     fn credentials(&self) -> &dyn CredentialStore {
         &self.credentials
+    }
+
+    fn trajectories(&self) -> &dyn TrajectoryStore {
+        &self.trajectories
     }
 
     fn subscribe(&self) -> StoreEventStream {

@@ -4,6 +4,7 @@ edition.workspace = true
 version.workspace = true
 
 [dependencies]
+atif = { workspace = true }
 brain-types = { workspace = true }
 dirs = { workspace = true }
 futures = { workspace = true }

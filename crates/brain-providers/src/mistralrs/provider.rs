@@ -178,6 +178,9 @@ impl Provider for MistralRsProvider {
                                     prompt: p,
                                     completion: c,
                                     total: p + c,
+                                    cache_read: None,
+                                    cache_write: None,
+                                    reasoning: None,
                                 }),
                             });
                         }

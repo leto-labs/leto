@@ -77,6 +77,11 @@ impl Transport for CliTransport {
                 Event::MessageDone { .. } => {}
                 Event::TurnDone {
                     iterations,
+                    prompt_tokens: _,
+                    completion_tokens: _,
+                    cache_read_tokens: _,
+                    cache_write_tokens: _,
+                    reasoning_tokens: _,
                     total_tokens,
                 } => {
                     println!("\n[done: {iterations} iter, {total_tokens} tokens]");

@@ -104,6 +104,24 @@ pub(crate) struct ChunkUsage {
     pub prompt_tokens: u32,
     pub completion_tokens: u32,
     pub total_tokens: u32,
+    #[serde(default)]
+    pub prompt_tokens_details: Option<PromptTokenDetails>,
+    #[serde(default)]
+    pub completion_tokens_details: Option<CompletionTokenDetails>,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct PromptTokenDetails {
+    #[serde(default)]
+    pub cached_tokens: Option<u32>,
+    #[serde(default)]
+    pub cache_creation_tokens: Option<u32>,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct CompletionTokenDetails {
+    #[serde(default)]
+    pub reasoning_tokens: Option<u32>,
 }
 
 #[derive(Default)]
@@ -211,6 +229,18 @@ pub(crate) fn stream_from_response(response: reqwest::Response) -> ChatStream {
                             prompt: usage.prompt_tokens,
                             completion: usage.completion_tokens,
                             total: usage.total_tokens,
+                            cache_read: usage
+                                .prompt_tokens_details
+                                .as_ref()
+                                .and_then(|details| details.cached_tokens),
+                            cache_write: usage
+                                .prompt_tokens_details
+                                .as_ref()
+                                .and_then(|details| details.cache_creation_tokens),
+                            reasoning: usage
+                                .completion_tokens_details
+                                .as_ref()
+                                .and_then(|details| details.reasoning_tokens),
                         }),
                     });
                     got_done = true;
@@ -264,4 +294,52 @@ pub(crate) fn stream_from_response(response: reqwest::Response) -> ChatStream {
     };
 
     Box::pin(s) as ChatStream
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ChunkUsage;
+
+    #[test]
+    fn chunk_usage_deserializes_detailed_token_fields() {
+        let usage: ChunkUsage = serde_json::from_str(
+            r#"{
+                "prompt_tokens": 100,
+                "completion_tokens": 60,
+                "total_tokens": 160,
+                "prompt_tokens_details": {
+                    "cached_tokens": 25,
+                    "cache_creation_tokens": 5
+                },
+                "completion_tokens_details": {
+                    "reasoning_tokens": 12
+                }
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(usage.prompt_tokens, 100);
+        assert_eq!(usage.completion_tokens, 60);
+        assert_eq!(
+            usage
+                .prompt_tokens_details
+                .as_ref()
+                .and_then(|details| details.cached_tokens),
+            Some(25)
+        );
+        assert_eq!(
+            usage
+                .prompt_tokens_details
+                .as_ref()
+                .and_then(|details| details.cache_creation_tokens),
+            Some(5)
+        );
+        assert_eq!(
+            usage
+                .completion_tokens_details
+                .as_ref()
+                .and_then(|details| details.reasoning_tokens),
+            Some(12)
+        );
+    }
 }

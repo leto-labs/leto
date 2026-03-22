@@ -2,19 +2,21 @@ use futures::stream::{self, StreamExt};
 use serde::{Deserialize, Serialize};
 use tracing::warn;
 
-use brain_types::{ChatChunk, ChatStream, Message, Role, TokenUsage};
+use brain_types::{ChatChunk, ChatStream, InferenceConfig, Message, Role, TokenUsage};
 
 const DEFAULT_INSTRUCTIONS: &str = "You are a concise and helpful coding assistant.";
 
 #[derive(Debug, Serialize)]
 pub(crate) struct ResponsesRequest {
     pub model: String,
-    pub input: Vec<ResponsesInput>,
+    pub input: Vec<ResponsesInputItem>,
     pub instructions: String,
     pub store: bool,
     pub stream: bool,
     pub text: TextOptions,
-    pub reasoning: ReasoningOptions,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning: Option<ReasoningOptions>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub include: Vec<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub tools: Vec<ResponsesTool>,
@@ -25,17 +27,29 @@ pub(crate) struct ResponsesRequest {
 }
 
 #[derive(Debug, Serialize)]
-pub(crate) struct ResponsesInput {
-    pub role: String,
-    pub content: Vec<ResponsesInputContent>,
+#[serde(tag = "type")]
+pub(crate) enum ResponsesInputItem {
+    #[serde(rename = "message")]
+    Message {
+        role: String,
+        content: Vec<ResponsesInputContent>,
+    },
+    #[serde(rename = "function_call")]
+    FunctionCall {
+        id: String,
+        call_id: String,
+        name: String,
+        arguments: String,
+    },
+    #[serde(rename = "function_call_output")]
+    FunctionCallOutput { call_id: String, output: String },
 }
 
 #[derive(Debug, Serialize)]
 pub(crate) struct ResponsesInputContent {
     #[serde(rename = "type")]
     pub kind: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub text: Option<String>,
+    pub text: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -67,13 +81,20 @@ struct SseEvent {
     #[serde(default)]
     delta: Option<String>,
     #[serde(default)]
-    name: Option<String>,
-    #[serde(default)]
-    call_id: Option<String>,
-    #[serde(default)]
-    arguments: Option<String>,
+    item: Option<ResponseOutputItem>,
     #[serde(default)]
     response: Option<CompletedResponse>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ResponseOutputItem {
+    id: String,
+    #[serde(rename = "type")]
+    kind: String,
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    arguments: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -87,40 +108,70 @@ struct UsageInfo {
     #[serde(default)]
     input_tokens: u32,
     #[serde(default)]
+    input_tokens_details: Option<InputTokenDetails>,
+    #[serde(default)]
     output_tokens: u32,
+    #[serde(default)]
+    output_tokens_details: Option<OutputTokenDetails>,
     #[serde(default)]
     total_tokens: u32,
 }
 
+#[derive(Debug, Deserialize)]
+struct InputTokenDetails {
+    #[serde(default)]
+    cached_tokens: Option<u32>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OutputTokenDetails {
+    #[serde(default)]
+    reasoning_tokens: Option<u32>,
+}
+
 /// Convert our internal `Message` slice into Responses API (`instructions`, `input`).
-pub(crate) fn build_responses_input(messages: &[Message]) -> (String, Vec<ResponsesInput>) {
+pub(crate) fn build_responses_input(messages: &[Message]) -> (String, Vec<ResponsesInputItem>) {
     let mut system_parts: Vec<&str> = Vec::new();
-    let mut input: Vec<ResponsesInput> = Vec::new();
+    let mut input: Vec<ResponsesInputItem> = Vec::new();
 
     for msg in messages {
         match msg.role {
             Role::System => system_parts.push(&msg.content),
             Role::User => {
-                input.push(ResponsesInput {
+                input.push(ResponsesInputItem::Message {
                     role: "user".to_owned(),
                     content: vec![ResponsesInputContent {
                         kind: "input_text".to_owned(),
-                        text: Some(msg.content.clone()),
+                        text: msg.content.clone(),
                     }],
                 });
             }
             Role::Assistant => {
-                input.push(ResponsesInput {
-                    role: "assistant".to_owned(),
-                    content: vec![ResponsesInputContent {
-                        kind: "output_text".to_owned(),
-                        text: Some(msg.content.clone()),
-                    }],
-                });
+                if !msg.content.is_empty() {
+                    input.push(ResponsesInputItem::Message {
+                        role: "assistant".to_owned(),
+                        content: vec![ResponsesInputContent {
+                            kind: "output_text".to_owned(),
+                            text: msg.content.clone(),
+                        }],
+                    });
+                }
+                for tool_call in &msg.tool_calls {
+                    input.push(ResponsesInputItem::FunctionCall {
+                        id: tool_call.id.clone(),
+                        call_id: tool_call.id.clone(),
+                        name: tool_call.name.clone(),
+                        arguments: tool_call.arguments.to_string(),
+                    });
+                }
             }
             Role::Tool => {
-                // Tool results aren't directly supported in the Responses API input format.
-                // Skip for now — the agent loop handles tool orchestration at a higher level.
+                if let Some(call_id) = &msg.tool_call_id {
+                    input.push(ResponsesInputItem::FunctionCallOutput {
+                        call_id: call_id.clone(),
+                        output: msg.content.clone(),
+                    });
+                }
             }
         }
     }
@@ -132,6 +183,50 @@ pub(crate) fn build_responses_input(messages: &[Message]) -> (String, Vec<Respon
     };
 
     (instructions, input)
+}
+
+pub(crate) fn build_responses_request(
+    model: String,
+    messages: &[Message],
+    tools: &[brain_types::ToolDef],
+    config: &InferenceConfig,
+) -> ResponsesRequest {
+    let (instructions, input) = build_responses_input(messages);
+    let response_tools = to_responses_tools(tools);
+
+    ResponsesRequest {
+        model,
+        input,
+        instructions,
+        store: false,
+        stream: true,
+        text: TextOptions {
+            verbosity: "medium".to_owned(),
+        },
+        reasoning: config
+            .reasoning
+            .as_deref()
+            .map(|reasoning| ReasoningOptions {
+                effort: normalize_reasoning_effort(Some(reasoning)),
+                summary: "auto".to_owned(),
+            }),
+        include: Vec::new(),
+        tools: response_tools,
+        tool_choice: if tools.is_empty() {
+            None
+        } else {
+            Some("auto".to_owned())
+        },
+        parallel_tool_calls: if tools.is_empty() { None } else { Some(true) },
+    }
+}
+
+fn normalize_reasoning_effort(reasoning: Option<&str>) -> String {
+    match reasoning.unwrap_or("medium") {
+        "minimal" => "low".to_owned(),
+        "low" | "medium" | "high" => reasoning.unwrap_or("medium").to_owned(),
+        _ => "medium".to_owned(),
+    }
 }
 
 /// Convert `ToolDef` slice to Responses API tool format.
@@ -215,15 +310,20 @@ fn event_to_chunk(event: &SseEvent) -> Option<ChatChunk> {
                 content: text.to_owned(),
             })
         }
-        "response.function_call_arguments.done" => {
-            let name = event.name.clone().unwrap_or_default();
-            let call_id = event.call_id.clone().unwrap_or_default();
-            let args_str = event.arguments.as_deref().unwrap_or("{}");
+        "response.output_item.done" => {
+            let item = event.item.as_ref()?;
+            if item.kind != "function_call" {
+                return None;
+            }
+
+            let name = item.name.as_ref()?;
+            let args_str = item.arguments.as_deref().unwrap_or("{}");
             let args: serde_json::Value = serde_json::from_str(args_str)
                 .unwrap_or(serde_json::Value::Object(Default::default()));
+
             Some(ChatChunk::ToolCall {
-                id: call_id,
-                name,
+                id: item.id.clone(),
+                name: name.clone(),
                 arguments: args,
             })
         }
@@ -233,6 +333,15 @@ fn event_to_chunk(event: &SseEvent) -> Option<ChatChunk> {
                     prompt: u.input_tokens,
                     completion: u.output_tokens,
                     total: u.total_tokens,
+                    cache_read: u
+                        .input_tokens_details
+                        .as_ref()
+                        .and_then(|details| details.cached_tokens),
+                    cache_write: None,
+                    reasoning: u
+                        .output_tokens_details
+                        .as_ref()
+                        .and_then(|details| details.reasoning_tokens),
                 })
             });
             Some(ChatChunk::Done { usage })
@@ -256,11 +365,24 @@ mod tests {
         let (instructions, input) = build_responses_input(&msgs);
         assert_eq!(instructions, "Be helpful.");
         assert_eq!(input.len(), 3);
-        assert_eq!(input[0].role, "user");
-        assert_eq!(input[0].content[0].kind, "input_text");
-        assert_eq!(input[1].role, "assistant");
-        assert_eq!(input[1].content[0].kind, "output_text");
-        assert_eq!(input[2].role, "user");
+        match &input[0] {
+            ResponsesInputItem::Message { role, content } => {
+                assert_eq!(role, "user");
+                assert_eq!(content[0].kind, "input_text");
+            }
+            other => panic!("expected user message, got {other:?}"),
+        }
+        match &input[1] {
+            ResponsesInputItem::Message { role, content } => {
+                assert_eq!(role, "assistant");
+                assert_eq!(content[0].kind, "output_text");
+            }
+            other => panic!("expected assistant message, got {other:?}"),
+        }
+        match &input[2] {
+            ResponsesInputItem::Message { role, .. } => assert_eq!(role, "user"),
+            other => panic!("expected user message, got {other:?}"),
+        }
     }
 
     #[test]
@@ -269,6 +391,42 @@ mod tests {
         let (instructions, input) = build_responses_input(&msgs);
         assert_eq!(instructions, DEFAULT_INSTRUCTIONS);
         assert_eq!(input.len(), 1);
+    }
+
+    #[test]
+    fn build_input_preserves_tool_history() {
+        let mut assistant = Message::assistant("");
+        assistant.tool_calls.push(brain_types::ToolCall {
+            id: "call_123".into(),
+            name: "file_read".into(),
+            arguments: serde_json::json!({ "path": "/tmp/test.txt" }),
+        });
+        let tool = Message::tool_result("call_123", "hello");
+
+        let (_instructions, input) = build_responses_input(&[assistant, tool]);
+        assert_eq!(input.len(), 2);
+
+        match &input[0] {
+            ResponsesInputItem::FunctionCall {
+                call_id,
+                name,
+                arguments,
+                ..
+            } => {
+                assert_eq!(call_id, "call_123");
+                assert_eq!(name, "file_read");
+                assert!(arguments.contains("/tmp/test.txt"));
+            }
+            other => panic!("expected function_call, got {other:?}"),
+        }
+
+        match &input[1] {
+            ResponsesInputItem::FunctionCallOutput { call_id, output } => {
+                assert_eq!(call_id, "call_123");
+                assert_eq!(output, "hello");
+            }
+            other => panic!("expected function_call_output, got {other:?}"),
+        }
     }
 
     #[test]
@@ -283,9 +441,7 @@ mod tests {
         let event = SseEvent {
             event_type: Some("response.output_text.delta".into()),
             delta: Some("hello".into()),
-            name: None,
-            call_id: None,
-            arguments: None,
+            item: None,
             response: None,
         };
         match event_to_chunk(&event) {
@@ -299,13 +455,17 @@ mod tests {
         let event = SseEvent {
             event_type: Some("response.completed".into()),
             delta: None,
-            name: None,
-            call_id: None,
-            arguments: None,
+            item: None,
             response: Some(CompletedResponse {
                 usage: Some(UsageInfo {
                     input_tokens: 10,
+                    input_tokens_details: Some(InputTokenDetails {
+                        cached_tokens: Some(3),
+                    }),
                     output_tokens: 20,
+                    output_tokens_details: Some(OutputTokenDetails {
+                        reasoning_tokens: Some(4),
+                    }),
                     total_tokens: 30,
                 }),
             }),
@@ -315,8 +475,38 @@ mod tests {
                 assert_eq!(u.prompt, 10);
                 assert_eq!(u.completion, 20);
                 assert_eq!(u.total, 30);
+                assert_eq!(u.cache_read, Some(3));
+                assert_eq!(u.reasoning, Some(4));
             }
             other => panic!("expected Done, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn event_to_chunk_handles_function_call_output_item() {
+        let event = SseEvent {
+            event_type: Some("response.output_item.done".into()),
+            delta: None,
+            item: Some(ResponseOutputItem {
+                id: "fc_123".into(),
+                kind: "function_call".into(),
+                name: Some("file_write".into()),
+                arguments: Some(r#"{"path":"hello.txt"}"#.into()),
+            }),
+            response: None,
+        };
+
+        match event_to_chunk(&event) {
+            Some(ChatChunk::ToolCall {
+                id,
+                name,
+                arguments,
+            }) => {
+                assert_eq!(id, "fc_123");
+                assert_eq!(name, "file_write");
+                assert_eq!(arguments["path"], "hello.txt");
+            }
+            other => panic!("expected ToolCall, got {other:?}"),
         }
     }
 }

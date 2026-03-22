@@ -2,6 +2,7 @@
 use brain_types::ModelInfo;
 
 use super::{OpenAiConfigPreset, REASONING_LMH};
+use crate::openai::config::OpenAiApiSurface;
 
 pub const MODELS: &[ModelInfo] = &[
     ModelInfo {
@@ -5902,4 +5903,8 @@ pub const PRESET: OpenAiConfigPreset = OpenAiConfigPreset {
     default_model: "openai/gpt-4o-mini",
     env_key: "OPENROUTER_API_KEY",
     models: MODELS,
+    supported_api_surfaces: &[
+        OpenAiApiSurface::Responses,
+        OpenAiApiSurface::ChatCompletions,
+    ],
 };

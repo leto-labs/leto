@@ -2,6 +2,7 @@
 use brain_types::ModelInfo;
 
 use super::{OpenAiConfigPreset, REASONING_LMH};
+use crate::openai::config::OpenAiApiSurface;
 
 pub const MODELS: &[ModelInfo] = &[
     ModelInfo {
@@ -771,4 +772,8 @@ pub const PRESET: OpenAiConfigPreset = OpenAiConfigPreset {
     default_model: "llama3.3",
     env_key: "OLLAMA_API_KEY",
     models: MODELS,
+    supported_api_surfaces: &[
+        OpenAiApiSurface::Responses,
+        OpenAiApiSurface::ChatCompletions,
+    ],
 };

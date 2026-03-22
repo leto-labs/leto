@@ -1,10 +1,12 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use chrono::Utc;
 use futures::StreamExt;
 use tokio_util::sync::CancellationToken;
 use ulid::Ulid;
 
+use crate::atif_events::{TurnSummary, complete_turn, completion_events, started_event};
 use brain_types::*;
 
 pub struct Brain {
@@ -200,13 +202,29 @@ pub(crate) async fn run_turn_with_config(
     user_msg: Message,
     tx: tokio::sync::mpsc::Sender<Event>,
 ) -> Result<(), BrainError> {
-    let mut history = store.messages().list_for_session(session_id).await?;
+    let existing_trajectory = store.trajectories().get_for_session(session_id).await?;
+    let history_before = store.messages().list_for_session(session_id).await?;
+    let mut history = history_before.clone();
     history.push(user_msg.clone());
 
-    let mut inner_stream =
-        agent_loop.run(provider, tools, history, config, cancel, Some(session_id));
+    let mut inner_stream = agent_loop.run(
+        provider.clone(),
+        tools.clone(),
+        history,
+        config.clone(),
+        cancel,
+        Some(session_id),
+    );
 
     let mut new_messages: Vec<Message> = vec![user_msg];
+    let mut turn_summary = None::<TurnSummary>;
+    let mut pending_turn_done = None::<Event>;
+    let started_at = Utc::now();
+
+    if config.atif.emit_events && existing_trajectory.is_none() {
+        let event = started_event(session_id, &config, provider.as_ref(), &tools, started_at)?;
+        let _ = tx.send(event).await;
+    }
 
     while let Some(event) = inner_stream.next().await {
         match &event {
@@ -218,16 +236,81 @@ pub(crate) async fn run_turn_with_config(
                 let _ = tx.send(event).await;
                 continue;
             }
+            Event::TurnDone {
+                iterations,
+                prompt_tokens,
+                completion_tokens,
+                cache_read_tokens,
+                cache_write_tokens,
+                reasoning_tokens,
+                total_tokens,
+            } => {
+                turn_summary = Some(TurnSummary {
+                    iterations: *iterations,
+                    prompt_tokens: *prompt_tokens,
+                    completion_tokens: *completion_tokens,
+                    cache_read_tokens: *cache_read_tokens,
+                    cache_write_tokens: *cache_write_tokens,
+                    reasoning_tokens: *reasoning_tokens,
+                    total_tokens: *total_tokens,
+                });
+                pending_turn_done = Some(event);
+                continue;
+            }
             _ => {}
         }
         let _ = tx.send(event).await;
     }
 
-    let keyed_messages = new_messages
+    let persisted_messages = new_messages.clone();
+    let keyed_messages = persisted_messages
         .into_iter()
         .map(|message| ((session_id, message.id), message))
         .collect();
     store.messages().create_many(keyed_messages).await?;
+
+    if config.atif.emit_events
+        && let Some(turn_summary) = turn_summary
+    {
+        let finished_at = Utc::now();
+        let completed = complete_turn(
+            session_id,
+            existing_trajectory,
+            &config,
+            provider.as_ref(),
+            &tools,
+            &new_messages,
+            started_at,
+            finished_at,
+            turn_summary,
+        )?;
+        if store
+            .trajectories()
+            .get_for_session(session_id)
+            .await?
+            .is_some()
+        {
+            store
+                .trajectories()
+                .update(session_id, completed.trajectory.clone())
+                .await?;
+        } else {
+            store
+                .trajectories()
+                .create(session_id, completed.trajectory.clone())
+                .await?;
+        }
+        for atif_event in completion_events(&completed) {
+            let _ = tx.send(atif_event).await;
+        }
+    }
+
+    // `TurnDone` stays terminal even when ATIF is enabled. Consumers that stop
+    // on `TurnDone` should still observe a complete-turn view, including any
+    // ATIF completion records emitted for this turn.
+    if let Some(turn_done) = pending_turn_done {
+        let _ = tx.send(turn_done).await;
+    }
 
     Ok(())
 }
@@ -345,7 +428,11 @@ mod tests {
     use tempfile::tempdir;
 
     async fn make_brain() -> (Brain, Project, Arc<InMemoryStore>) {
-        let project = Project::with_defaults("test");
+        make_brain_with_config(ProjectConfig::default()).await
+    }
+
+    async fn make_brain_with_config(config: ProjectConfig) -> (Brain, Project, Arc<InMemoryStore>) {
+        let project = Project::new(Some("test".into()), None, config);
         let provider: Arc<dyn Provider> = Arc::new(MockProvider::new());
         let store = Arc::new(InMemoryStore::new());
         let agent_loop: Arc<dyn AgentLoop> = Arc::new(SimpleLoop);
@@ -553,6 +640,208 @@ system_prompt = "config prompt"
 
         let messages = store.messages().list_for_session(session.id).await.unwrap();
         assert_eq!(messages.len(), 4);
+    }
+
+    #[tokio::test]
+    async fn turn_does_not_emit_atif_events_by_default() {
+        let (brain, project, _store) = make_brain().await;
+        let session = brain.create_session(project.id).await.unwrap();
+        let mut events = brain.turn(session.id, "hello world", CancellationToken::new());
+
+        while let Some(event) = events.next().await {
+            assert!(
+                !matches!(event, Event::Atif { .. }),
+                "ATIF events should be disabled by default"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn turn_emits_atif_completion_records_when_enabled() {
+        let (brain, project, _store) = make_brain_with_config(ProjectConfig {
+            agent: AgentConfig {
+                system_prompt: Some("system prompt".into()),
+                atif: AtifConfig {
+                    emit_events: true,
+                    ..AtifConfig::default()
+                },
+                ..AgentConfig::default()
+            },
+        })
+        .await;
+        let session = brain.create_session(project.id).await.unwrap();
+        let mut events = brain.turn(session.id, "hello world", CancellationToken::new());
+
+        let mut saw_started = false;
+        let mut saw_system_step = false;
+        let mut saw_user_step = false;
+        let mut saw_agent_step = false;
+        let mut saw_final_metrics = false;
+        let mut saw_completed = false;
+        let mut saw_turn_done = false;
+        let mut turn_done_after_trajectory = false;
+
+        while let Some(event) = events.next().await {
+            match event {
+                Event::Atif {
+                    event:
+                        AtifEvent::TrajectoryStarted {
+                            schema_version,
+                            session_id,
+                            agent,
+                        },
+                } => {
+                    saw_started = true;
+                    assert_eq!(schema_version, AtifConfig::default().schema_version);
+                    assert_eq!(session_id, session.id.to_string());
+                    assert_eq!(agent.name, "brain");
+                }
+                Event::Atif {
+                    event: AtifEvent::StepCompleted { step },
+                } => match step.source {
+                    atif::StepSource::System => {
+                        saw_system_step = true;
+                        assert_eq!(step.message, atif::MessageContent::from("system prompt"));
+                    }
+                    atif::StepSource::User => {
+                        saw_user_step = true;
+                        assert_eq!(step.message, atif::MessageContent::from("hello world"));
+                    }
+                    atif::StepSource::Agent => {
+                        saw_agent_step = true;
+                    }
+                },
+                Event::Atif {
+                    event: AtifEvent::FinalMetrics { final_metrics },
+                } => {
+                    saw_final_metrics = true;
+                    assert!(final_metrics.total_steps.is_some());
+                }
+                Event::Atif {
+                    event: AtifEvent::TrajectoryCompleted { trajectory },
+                } => {
+                    saw_completed = true;
+                    assert_eq!(trajectory.session_id, session.id.to_string());
+                    assert!(trajectory.final_metrics.is_some());
+                    assert_eq!(trajectory.steps.len(), 3);
+                }
+                Event::TurnDone { .. } => {
+                    saw_turn_done = true;
+                    turn_done_after_trajectory = saw_completed;
+                }
+                _ => {}
+            }
+        }
+
+        assert!(saw_started);
+        assert!(saw_system_step);
+        assert!(saw_user_step);
+        assert!(saw_agent_step);
+        assert!(saw_final_metrics);
+        assert!(saw_completed);
+        assert!(saw_turn_done);
+        assert!(turn_done_after_trajectory);
+    }
+
+    #[tokio::test]
+    async fn turn_preserves_historical_model_names_across_turns() {
+        let (brain, project, store) = make_brain_with_config(ProjectConfig {
+            agent: AgentConfig {
+                atif: AtifConfig {
+                    emit_events: true,
+                    ..AtifConfig::default()
+                },
+                inference: InferenceConfig {
+                    provider: Some("mock".into()),
+                    model: Some("mock-echo".into()),
+                    reasoning: None,
+                    max_tokens: None,
+                    temperature: None,
+                },
+                ..AgentConfig::default()
+            },
+        })
+        .await;
+        let session = brain.create_session(project.id).await.unwrap();
+
+        let mut first_turn = brain.turn(session.id, "first", CancellationToken::new());
+        while first_turn.next().await.is_some() {}
+
+        brain
+            .update_session_inference(
+                session.id,
+                Some(InferenceConfig {
+                    provider: Some("mock".into()),
+                    model: Some("mock-think".into()),
+                    reasoning: None,
+                    max_tokens: None,
+                    temperature: None,
+                }),
+            )
+            .await
+            .unwrap();
+
+        let mut second_turn = brain.turn(session.id, "second", CancellationToken::new());
+        while second_turn.next().await.is_some() {}
+
+        let trajectory = store
+            .trajectories()
+            .get_for_session(session.id)
+            .await
+            .unwrap()
+            .unwrap();
+        let agent_steps = trajectory
+            .steps
+            .iter()
+            .filter(|step| matches!(step.source, atif::StepSource::Agent))
+            .collect::<Vec<_>>();
+
+        assert_eq!(agent_steps.len(), 2);
+        assert_eq!(agent_steps[0].model_name.as_deref(), Some("mock-echo"));
+        assert_eq!(agent_steps[1].model_name.as_deref(), Some("mock-think"));
+    }
+
+    #[tokio::test]
+    async fn turn_does_not_rewrite_original_system_prompt_after_config_change() {
+        let (brain, mut project, store) = make_brain_with_config(ProjectConfig {
+            agent: AgentConfig {
+                system_prompt: Some("system prompt a".into()),
+                atif: AtifConfig {
+                    emit_events: true,
+                    ..AtifConfig::default()
+                },
+                ..AgentConfig::default()
+            },
+        })
+        .await;
+        let session = brain.create_session(project.id).await.unwrap();
+
+        let mut first_turn = brain.turn(session.id, "first", CancellationToken::new());
+        while first_turn.next().await.is_some() {}
+
+        project.config.agent.system_prompt = Some("system prompt b".into());
+        store.projects().update(project.id, project).await.unwrap();
+
+        let mut second_turn = brain.turn(session.id, "second", CancellationToken::new());
+        while second_turn.next().await.is_some() {}
+
+        let trajectory = store
+            .trajectories()
+            .get_for_session(session.id)
+            .await
+            .unwrap()
+            .unwrap();
+        let system_steps = trajectory
+            .steps
+            .iter()
+            .filter(|step| matches!(step.source, atif::StepSource::System))
+            .collect::<Vec<_>>();
+
+        assert_eq!(system_steps.len(), 1);
+        assert_eq!(
+            system_steps[0].message,
+            atif::MessageContent::from("system prompt a")
+        );
     }
 
     #[tokio::test]

@@ -2,6 +2,14 @@ use std::sync::Arc;
 
 use brain_core::*;
 
+#[derive(Debug, Clone)]
+pub struct ExecRuntimeAuth {
+    pub provider: String,
+    pub api_key: Option<String>,
+    pub base_url: Option<String>,
+    pub api_surface: Option<String>,
+}
+
 /// Build the embedded CLI runtime so the CLI depends on `BrainRuntime`
 /// directly rather than going through `BrainServer`/`BrainApi`.
 pub async fn build_runtime(
@@ -22,15 +30,80 @@ pub async fn build_runtime(
     for (provider_name, provider) in providers {
         runtime.set_provider(provider_name, provider)?;
     }
+    register_common_runtime_surface(&runtime)?;
+
+    let runtime: Arc<dyn BrainRuntime> = runtime;
+    Ok(runtime)
+}
+
+pub fn build_exec_runtime(
+    config: &ProjectConfig,
+    store: Arc<dyn Store>,
+    auth: &ExecRuntimeAuth,
+) -> Result<Arc<dyn BrainRuntime>, BrainError> {
+    let runtime = Arc::new(BrainRuntimeNative::new(
+        store,
+        auth.provider.clone(),
+        "simple",
+    ));
+
+    let provider: Arc<dyn Provider> = if auth.provider == "mock" {
+        Arc::new(MockProvider::new())
+    } else {
+        let preset = OpenAiConfigPreset::ALL
+            .iter()
+            .find(|preset| preset.name == auth.provider)
+            .ok_or_else(|| {
+                BrainError::Internal(format!("unsupported exec provider '{}'", auth.provider))
+            })?;
+        let api_key = auth.api_key.clone().ok_or_else(|| {
+            BrainError::Internal(format!(
+                "api key is required for exec provider '{}'",
+                auth.provider
+            ))
+        })?;
+
+        let mut provider_config = preset.into_config(api_key);
+        if let Some(model) = config.agent.inference.model.as_deref() {
+            provider_config = provider_config.with_model(model);
+        }
+        if let Some(base_url) = auth.base_url.as_deref() {
+            provider_config = provider_config.with_base_url(base_url);
+        }
+        if let Some(api_surface) = auth.api_surface.as_deref() {
+            provider_config =
+                provider_config.with_api_surface_mode(parse_api_surface_mode(api_surface)?);
+        }
+
+        Arc::new(OpenAiProvider::new(provider_config))
+    };
+
+    runtime.set_provider(auth.provider.clone(), provider)?;
+    register_common_runtime_surface(&runtime)?;
+
+    let runtime: Arc<dyn BrainRuntime> = runtime;
+    Ok(runtime)
+}
+
+fn parse_api_surface_mode(value: &str) -> Result<OpenAiApiMode, BrainError> {
+    match value {
+        "auto" => Ok(OpenAiApiMode::Auto),
+        "responses" => Ok(OpenAiApiMode::Responses),
+        "chat-completions" | "chat_completions" => Ok(OpenAiApiMode::ChatCompletions),
+        other => Err(BrainError::Internal(format!(
+            "unsupported api surface '{other}' (expected auto, responses, or chat-completions)"
+        ))),
+    }
+}
+
+fn register_common_runtime_surface(runtime: &Arc<BrainRuntimeNative>) -> Result<(), BrainError> {
     runtime.set_loop("simple", Arc::new(SimpleLoop))?;
     runtime.set_loop("robust", Arc::new(RobustLoop))?;
     for tool in native_tools() {
         let name = tool.definition().name.clone();
         runtime.set_tool(name, tool)?;
     }
-
-    let runtime: Arc<dyn BrainRuntime> = runtime;
-    Ok(runtime)
+    Ok(())
 }
 
 async fn discover_providers(
@@ -216,6 +289,32 @@ async fn discover_local_providers(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parse_api_surface_mode_accepts_known_values() {
+        assert!(matches!(
+            parse_api_surface_mode("auto").unwrap(),
+            OpenAiApiMode::Auto
+        ));
+        assert!(matches!(
+            parse_api_surface_mode("responses").unwrap(),
+            OpenAiApiMode::Responses
+        ));
+        assert!(matches!(
+            parse_api_surface_mode("chat-completions").unwrap(),
+            OpenAiApiMode::ChatCompletions
+        ));
+        assert!(matches!(
+            parse_api_surface_mode("chat_completions").unwrap(),
+            OpenAiApiMode::ChatCompletions
+        ));
+    }
+
+    #[test]
+    fn parse_api_surface_mode_rejects_unknown_values() {
+        let error = parse_api_surface_mode("bogus").unwrap_err();
+        assert!(error.to_string().contains("unsupported api surface"));
+    }
 
     #[tokio::test]
     async fn build_runtime_registers_mock_when_no_credentials() {

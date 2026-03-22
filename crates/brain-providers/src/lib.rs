@@ -4,7 +4,7 @@ pub mod strategy;
 #[cfg(any(feature = "openai", feature = "openai-oauth"))]
 pub(crate) mod openai_sse;
 
-#[cfg(feature = "openai-oauth")]
+#[cfg(any(feature = "openai", feature = "openai-oauth"))]
 pub(crate) mod codex_sse;
 
 #[cfg(feature = "openai")]
@@ -35,7 +35,9 @@ pub use oauth::{
     CredentialStore, OAuthCredentials, ProviderCredential, browser_flow, device_flow, pkce, refresh,
 };
 #[cfg(feature = "openai")]
-pub use openai::{OpenAiConfig, OpenAiConfigPreset, OpenAiProvider};
+pub use openai::{
+    OpenAiApiMode, OpenAiApiSurface, OpenAiConfig, OpenAiConfigPreset, OpenAiProvider,
+};
 #[cfg(feature = "openai-oauth")]
 pub use openai_oauth::{OAuthFlow, OpenAiOAuthPreset, OpenAiOAuthProvider};
 pub use pool::CredentialPool;

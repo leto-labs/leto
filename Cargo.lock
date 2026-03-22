@@ -283,6 +283,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "atif"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "atomic-waker"
 version = "1.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -495,6 +506,7 @@ name = "brain-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "atif",
  "brain-acp",
  "brain-config",
  "brain-core",
@@ -503,6 +515,8 @@ dependencies = [
  "clap",
  "futures",
  "reqwest 0.12.28",
+ "serde",
+ "serde_json",
  "tempfile",
  "tokio",
  "tokio-util",
@@ -529,6 +543,7 @@ name = "brain-core"
 version = "0.1.0"
 dependencies = [
  "async-stream",
+ "atif",
  "brain-config",
  "brain-loops",
  "brain-providers",
@@ -536,6 +551,7 @@ dependencies = [
  "brain-tools",
  "brain-transports",
  "brain-types",
+ "chrono",
  "futures",
  "serde_json",
  "tempfile",
@@ -592,6 +608,7 @@ dependencies = [
 name = "brain-stores"
 version = "0.1.0"
 dependencies = [
+ "atif",
  "brain-types",
  "chrono",
  "dirs",
@@ -634,6 +651,7 @@ dependencies = [
 name = "brain-types"
 version = "0.1.0"
 dependencies = [
+ "atif",
  "chrono",
  "futures",
  "serde",

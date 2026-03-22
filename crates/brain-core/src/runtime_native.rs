@@ -492,6 +492,23 @@ fn map_store_event(event: StoreEvent) -> RuntimeBusEvent {
             session_id,
             project_id,
         },
+        StoreEvent::TrajectoryCreated {
+            session_id,
+            trajectory,
+        } => RuntimeBusEvent::TrajectoryCreated {
+            session_id,
+            trajectory,
+        },
+        StoreEvent::TrajectoryUpdated {
+            session_id,
+            trajectory,
+        } => RuntimeBusEvent::TrajectoryUpdated {
+            session_id,
+            trajectory,
+        },
+        StoreEvent::TrajectoryDeleted { session_id } => {
+            RuntimeBusEvent::TrajectoryDeleted { session_id }
+        }
     }
 }
 
@@ -622,6 +639,11 @@ mod tests {
                 },
                 Event::TurnDone {
                     iterations: 1,
+                    prompt_tokens: None,
+                    completion_tokens: None,
+                    cache_read_tokens: None,
+                    cache_write_tokens: None,
+                    reasoning_tokens: None,
                     total_tokens: 0,
                 },
             ]))

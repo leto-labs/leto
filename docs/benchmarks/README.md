@@ -48,6 +48,7 @@ This research concentrates on the dimensions that matter most for `brain`:
 - [`Formats.md`](Formats.md)
 - [`LoopDesign.md`](LoopDesign.md)
 - [`Harbor.md`](Harbor.md)
+- [`Terminus.md`](Terminus.md)
 - [`SWEBench.md`](SWEBench.md)
 - [`TerminalBench.md`](TerminalBench.md)
 - [`HAL.md`](HAL.md)
@@ -90,6 +91,10 @@ This research concentrates on the dimensions that matter most for `brain`:
 - Harbor's `ATIF` is the strongest current candidate for a reusable trace
   interchange format because it is designed for debugging, visualization, SFT,
   and RL rather than only one benchmark leaderboard.
+- Terminus deserves separate study because Harbor ships `terminus-2` as a
+  first-party reference agent, while KRAFTON's Terminus-KIRA shows that large
+  leaderboard gains can come from redesigning the loop and execution contract
+  rather than only swapping models or making tiny prompt tweaks.
 - Other format families matter too: typed response-item streams, tool metadata,
   and structured patch artifacts are all useful inputs to loop design even when
   they are not "benchmark formats" in the narrow sense.
@@ -177,6 +182,7 @@ The practical path for `brain` is:
 - AppWorld: <https://appworld.dev/>
 - Terminal-Bench source: [`repocache/laude-institute/terminal-bench`](../../repocache/laude-institute/terminal-bench)
 - Harbor source: [`repocache/harbor-framework/harbor`](../../repocache/harbor-framework/harbor)
+- KIRA source: [`repocache/krafton-ai/KIRA`](../../repocache/krafton-ai/KIRA)
 - SWE-bench source: [`repocache/SWE-bench/SWE-bench`](../../repocache/SWE-bench/SWE-bench)
 - mini-SWE-agent source: [`repocache/SWE-agent/mini-swe-agent`](../../repocache/SWE-agent/mini-swe-agent)
 - HAL source: [`repocache/princeton-pli/hal-harness`](../../repocache/princeton-pli/hal-harness)

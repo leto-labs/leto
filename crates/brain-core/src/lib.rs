@@ -1,3 +1,4 @@
+mod atif_events;
 mod brain;
 mod router;
 mod runtime_native;

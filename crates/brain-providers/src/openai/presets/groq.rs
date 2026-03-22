@@ -2,6 +2,7 @@
 use brain_types::ModelInfo;
 
 use super::{OpenAiConfigPreset, REASONING_LMH};
+use crate::openai::config::OpenAiApiSurface;
 
 pub const MODELS: &[ModelInfo] = &[
     ModelInfo {
@@ -291,4 +292,8 @@ pub const PRESET: OpenAiConfigPreset = OpenAiConfigPreset {
     default_model: "llama-3.3-70b-versatile",
     env_key: "GROQ_API_KEY",
     models: MODELS,
+    supported_api_surfaces: &[
+        OpenAiApiSurface::Responses,
+        OpenAiApiSurface::ChatCompletions,
+    ],
 };

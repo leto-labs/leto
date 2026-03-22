@@ -82,6 +82,49 @@ if [[ -n "${HARBOR_TASK_NAME}" ]]; then
 fi
 
 case "${AGENT}" in
+  brain)
+    HARBOR_SESSION_CWD="${HARBOR_SESSION_CWD:-/app}"
+    HARBOR_BRAIN_LOOP="${HARBOR_BRAIN_LOOP:-simple}"
+    HARBOR_BACKEND_ARTIFACT_PATH="${HARBOR_BACKEND_ARTIFACT_PATH:-}"
+    HARBOR_AGENT_IMPORT_PATH="${HARBOR_AGENT_IMPORT_PATH:-tools.harbor.agents.brain:BrainAgent}"
+    HARBOR_PROVIDER="${HARBOR_PROVIDER:-${HARBOR_MODEL%%/*}}"
+    if [[ "${HARBOR_PROVIDER}" == "${HARBOR_MODEL}" ]]; then
+      HARBOR_PROVIDER="openai"
+    fi
+    HARBOR_API_KEY="${HARBOR_API_KEY:-${OPENAI_API_KEY:-}}"
+    HARBOR_BASE_URL="${HARBOR_BASE_URL:-${OPENAI_BASE_URL:-}}"
+
+    if [[ -z "${HARBOR_API_KEY}" ]]; then
+      echo "brain Harbor runs require HARBOR_API_KEY or OPENAI_API_KEY." >&2
+      exit 1
+    fi
+
+    if [[ -z "${HARBOR_BACKEND_ARTIFACT_PATH}" ]]; then
+      echo "Building direct Harbor brain backend artifact..."
+      if cargo build -p brain-cli --release --target x86_64-unknown-linux-musl; then
+        HARBOR_BACKEND_ARTIFACT_PATH="${ROOT_DIR}/target/x86_64-unknown-linux-musl/release/brain"
+      else
+        echo "musl release build failed, falling back to host debug build." >&2
+        cargo build -p brain-cli
+        HARBOR_BACKEND_ARTIFACT_PATH="${ROOT_DIR}/target/debug/brain"
+      fi
+    fi
+
+    cmd+=(
+      --agent-import-path "${HARBOR_AGENT_IMPORT_PATH}"
+      --ak "session_cwd=${HARBOR_SESSION_CWD}"
+      --ak "brain_loop=${HARBOR_BRAIN_LOOP}"
+      --ak "provider=${HARBOR_PROVIDER}"
+      --ak "backend_artifact_path=${HARBOR_BACKEND_ARTIFACT_PATH}"
+    )
+
+    if [[ -n "${HARBOR_BASE_URL}" ]]; then
+      export HARBOR_BASE_URL
+      cmd+=(--ak "base_url=${HARBOR_BASE_URL}")
+    fi
+
+    export HARBOR_API_KEY
+    ;;
   codex-acp)
     if ! command -v codex-acp >/dev/null 2>&1; then
       echo "codex-acp must be installed on the host so its local binary can be copied into the container." >&2

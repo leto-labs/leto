@@ -301,6 +301,9 @@ fn run_inference(
             prompt: prompt_len as u32,
             completion: completion_tokens,
             total: prompt_len as u32 + completion_tokens,
+            cache_read: None,
+            cache_write: None,
+            reasoning: None,
         }),
     }));
 

@@ -67,7 +67,12 @@ async fn run_inner(
     let tool_defs: Vec<ToolDef> = tools.iter().map(|t| t.definition()).collect();
 
     let mut iterations = 0u32;
+    let mut prompt_tokens = 0u32;
+    let mut completion_tokens = 0u32;
     let mut total_tokens = 0u32;
+    let mut cache_read_tokens = 0u32;
+    let mut cache_write_tokens = 0u32;
+    let mut reasoning_tokens = 0u32;
 
     loop {
         if cancel.is_cancelled() {
@@ -126,7 +131,12 @@ async fn run_inner(
                 }
                 ChatChunk::Done { usage } => {
                     if let Some(u) = usage {
+                        prompt_tokens += u.prompt;
+                        completion_tokens += u.completion;
                         total_tokens += u.total;
+                        cache_read_tokens += u.cache_read.unwrap_or(0);
+                        cache_write_tokens += u.cache_write.unwrap_or(0);
+                        reasoning_tokens += u.reasoning.unwrap_or(0);
                     }
                 }
                 _ => {}
@@ -196,6 +206,11 @@ async fn run_inner(
     let _ = tx
         .send(Event::TurnDone {
             iterations,
+            prompt_tokens: (prompt_tokens > 0).then_some(prompt_tokens),
+            completion_tokens: (completion_tokens > 0).then_some(completion_tokens),
+            cache_read_tokens: (cache_read_tokens > 0).then_some(cache_read_tokens),
+            cache_write_tokens: (cache_write_tokens > 0).then_some(cache_write_tokens),
+            reasoning_tokens: (reasoning_tokens > 0).then_some(reasoning_tokens),
             total_tokens,
         })
         .await;
@@ -235,7 +250,16 @@ mod tests {
             Box::pin(async move {
                 let s = stream! {
                     yield Ok(ChatChunk::Delta { content: last });
-                    yield Ok(ChatChunk::Done { usage: Some(TokenUsage { prompt: 10, completion: 5, total: 15 }) });
+                    yield Ok(ChatChunk::Done {
+                        usage: Some(TokenUsage {
+                            prompt: 10,
+                            completion: 5,
+                            total: 15,
+                            cache_read: None,
+                            cache_write: None,
+                            reasoning: None,
+                        }),
+                    });
                 };
                 Ok(Box::pin(s) as ChatStream)
             })

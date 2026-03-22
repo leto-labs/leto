@@ -1,4 +1,6 @@
-use clap::{Parser, Subcommand};
+use std::path::PathBuf;
+
+use clap::{Args, Parser, Subcommand};
 
 #[derive(Parser)]
 #[command(name = "brain", about = "AI agent engine CLI")]
@@ -7,10 +9,12 @@ pub struct Cli {
     pub command: Option<Commands>,
 }
 
-#[derive(Subcommand)]
+#[derive(Subcommand, Clone)]
 pub enum Commands {
     /// Run the ACP compatibility alias (canonical binaries live in brain-acp)
     Acp,
+    /// Execute one non-interactive agent run for benchmark harnesses
+    Exec(ExecCommand),
     /// Manage sessions
     Sessions {
         #[command(subcommand)]
@@ -23,7 +27,38 @@ pub enum Commands {
     },
 }
 
-#[derive(Subcommand)]
+#[derive(Args, Clone)]
+pub struct ExecCommand {
+    /// Workspace root / current working directory for the run
+    #[arg(long)]
+    pub cwd: PathBuf,
+    /// Model ID to use for the run (provider-qualified names are accepted)
+    #[arg(long)]
+    pub model: String,
+    /// Registered loop name to use for the run
+    #[arg(long = "loop")]
+    pub loop_name: String,
+    /// Provider name to use for the run
+    #[arg(long)]
+    pub provider: String,
+    /// Directory where run artifacts will be written
+    #[arg(long)]
+    pub output_dir: PathBuf,
+    /// API key to inject for the selected provider
+    #[arg(long)]
+    pub api_key: Option<String>,
+    /// Optional base URL override for OpenAI-compatible providers
+    #[arg(long)]
+    pub base_url: Option<String>,
+    /// Optional API surface override: auto, responses, or chat-completions
+    #[arg(long)]
+    pub api_surface: Option<String>,
+    /// Instruction to execute
+    #[arg(required = true)]
+    pub instruction: String,
+}
+
+#[derive(Subcommand, Clone)]
 pub enum SessionsAction {
     /// List past sessions
     List,
@@ -34,7 +69,7 @@ pub enum SessionsAction {
     },
 }
 
-#[derive(Subcommand)]
+#[derive(Subcommand, Clone)]
 pub enum CredentialsAction {
     /// Add an API key for a provider
     Add {

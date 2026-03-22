@@ -17,21 +17,26 @@ The documented installation path SHALL pin a known Harbor version.
 - **AND** the command SHALL pin a specific Harbor version
 
 ### Requirement: The Repo Defines Five Harbor Reference Agent Surfaces
-The repo SHALL define five Harbor reference agent surfaces:
+
+The repo SHALL define six Harbor reference agent surfaces:
 
 - built-in `codex`
 - built-in `mini-swe-agent`
 - built-in `terminus-2`
+- repo-local direct `brain`
 - repo-local `codex-acp`
 - repo-local `brain-acp`
 
 The repo SHALL document the current support level of each surface.
 
 #### Scenario: Contributor reads the benchmark workflow
+
 - **WHEN** a contributor reads the Harbor benchmark docs or benchmark spec
-- **THEN** they SHALL see all five reference agent surfaces listed
-- **AND** they SHALL see built-in agents distinguished from repo-local ACP agents
-- **AND** they SHALL see which surfaces are stable baselines versus bounded validation paths
+- **THEN** they SHALL see all six reference agent surfaces listed
+- **AND** they SHALL see built-in agents distinguished from repo-local direct
+  and ACP agents
+- **AND** they SHALL see which surfaces are stable baselines versus bounded
+  validation paths
 
 ### Requirement: The Repo Defines A Common Harbor Benchmark Ladder
 The repo SHALL define a common Harbor benchmark ladder for bounded evaluation:
@@ -49,6 +54,7 @@ This ladder SHALL be documented as the repo's common checkpoint progression.
 - **AND** each target SHALL map to a concrete Harbor dataset/task combination
 
 ### Requirement: Harbor Benchmark Runs Use One Dedicated Runner Interface
+
 The repo SHALL expose one dedicated Harbor benchmark runner script that
 requires an agent name, a Harbor dataset id, and an optional Harbor task name.
 
@@ -58,25 +64,13 @@ The runner script command shape SHALL be:
 
 The repo MAY also expose that same runner through `just`.
 
-When a contributor provides a dataset without a task name, the runner SHALL
-default to the full filtered dataset unless `HARBOR_N_TASKS` is explicitly set.
+#### Scenario: Contributor runs the direct brain benchmark surface
 
-When a contributor provides a dataset and a task name, the runner MAY keep a
-bounded single-task default.
-
-#### Scenario: Contributor runs a benchmark through the repo interface
-- **WHEN** a contributor invokes `./scripts/harbor-run.sh codex terminal-bench-sample@2.0 regex-log`
-- **THEN** the repo SHALL dispatch the built-in Codex Harbor run for the
-  requested dataset and task
-- **AND** the same command shape SHALL be available for the other supported
-  reference agent surfaces
-- **AND** the repo MAY provide `just harbor-run codex terminal-bench-sample@2.0 regex-log` as a thin wrapper
-
-#### Scenario: Dataset-only run defaults to the full dataset
-- **WHEN** a contributor invokes `./scripts/harbor-run.sh brain-acp terminal-bench@2.0`
-- **AND** `HARBOR_N_TASKS` is not set
-- **THEN** the runner SHALL not force a one-task bound
-- **AND** Harbor SHALL be allowed to run the full dataset
+- **WHEN** a contributor invokes `./scripts/harbor-run.sh brain hello-world@1.0`
+- **THEN** Harbor SHALL load the repo-local direct `brain` agent through
+  `--agent-import-path`
+- **AND** that agent SHALL launch the local `brain` binary directly inside the
+  Harbor task container
 
 ### Requirement: Built-In Harbor Agents Run Through Harbor's Native Agent Path
 The built-in reference surfaces SHALL use Harbor's built-in agent path.
@@ -127,4 +121,23 @@ shared ACP base, with a Brain-specific backend implementation.
   surface built on the shared Harbor ACP client and base
 - **AND** they SHALL see it documented as validated on `hello-world@1.0` and
   bounded real-task probes rather than the first stable comparison baseline
+
+### Requirement: Repo-Local Direct Brain Runs Through Harbor Import Path
+
+The repo SHALL support a repo-local direct Harbor `brain` agent loaded through
+`--agent-import-path`.
+
+This surface SHALL:
+
+- run the local `brain` binary directly
+- avoid ACP entirely
+- use explicit API-key auth passed through the Harbor runner surface
+
+#### Scenario: Direct brain Harbor run avoids host brain state
+
+- **WHEN** Harbor runs the repo-local direct `brain` surface
+- **THEN** the run SHALL NOT require host `~/.brain/config.toml`
+- **AND** it SHALL NOT require host `~/.brain/credentials`
+- **AND** the selected API key SHALL be provided explicitly through the Harbor
+  runner path
 

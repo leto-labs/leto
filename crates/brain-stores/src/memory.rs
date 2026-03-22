@@ -16,6 +16,7 @@ const STORE_EVENT_CAPACITY: usize = 1024;
 struct SessionData {
     session: Session,
     messages: Vec<Message>,
+    trajectory: Option<atif::Trajectory>,
 }
 
 struct MemoryStoreInner {
@@ -27,6 +28,7 @@ struct MemoryStoreInner {
     session_event_tx: broadcast::Sender<SessionStoreEvent>,
     message_event_tx: broadcast::Sender<MessageStoreEvent>,
     credential_event_tx: broadcast::Sender<CredentialStoreEvent>,
+    trajectory_event_tx: broadcast::Sender<TrajectoryStoreEvent>,
 }
 
 impl MemoryStoreInner {
@@ -36,6 +38,7 @@ impl MemoryStoreInner {
         let (session_event_tx, _) = broadcast::channel(STORE_EVENT_CAPACITY);
         let (message_event_tx, _) = broadcast::channel(STORE_EVENT_CAPACITY);
         let (credential_event_tx, _) = broadcast::channel(STORE_EVENT_CAPACITY);
+        let (trajectory_event_tx, _) = broadcast::channel(STORE_EVENT_CAPACITY);
         Self {
             projects: RwLock::new(HashMap::new()),
             sessions: RwLock::new(HashMap::new()),
@@ -45,6 +48,7 @@ impl MemoryStoreInner {
             session_event_tx,
             message_event_tx,
             credential_event_tx,
+            trajectory_event_tx,
         }
     }
 
@@ -77,6 +81,12 @@ impl MemoryStoreInner {
             tracing::debug!("credential event dropped: {error}");
         }
     }
+
+    fn publish_trajectory(&self, event: TrajectoryStoreEvent) {
+        if let Err(error) = self.trajectory_event_tx.send(event) {
+            tracing::debug!("trajectory event dropped: {error}");
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -99,11 +109,17 @@ struct MemoryCredentialStore {
     inner: Arc<MemoryStoreInner>,
 }
 
+#[derive(Clone)]
+struct MemoryTrajectoryStore {
+    inner: Arc<MemoryStoreInner>,
+}
+
 pub struct InMemoryStore {
     projects: MemoryProjectStore,
     sessions: MemorySessionStore,
     messages: MemoryMessageStore,
     credentials: MemoryCredentialStore,
+    trajectories: MemoryTrajectoryStore,
     inner: Arc<MemoryStoreInner>,
 }
 
@@ -121,6 +137,9 @@ impl InMemoryStore {
                 inner: Arc::clone(&inner),
             },
             credentials: MemoryCredentialStore {
+                inner: Arc::clone(&inner),
+            },
+            trajectories: MemoryTrajectoryStore {
                 inner: Arc::clone(&inner),
             },
             inner,
@@ -314,6 +333,7 @@ impl CrudStore for MemorySessionStore {
                 SessionData {
                     session: session.clone(),
                     messages: Vec::new(),
+                    trajectory: None,
                 },
             );
             drop(sessions);
@@ -700,6 +720,137 @@ impl CredentialStore for MemoryCredentialStore {
     }
 }
 
+impl CrudStore for MemoryTrajectoryStore {
+    type Key = Ulid;
+    type Record = atif::Trajectory;
+    type Event = TrajectoryStoreEvent;
+
+    fn create(
+        &self,
+        session_id: Ulid,
+        trajectory: atif::Trajectory,
+    ) -> BoxFuture<'_, Result<atif::Trajectory, BrainError>> {
+        let inner = Arc::clone(&self.inner);
+        Box::pin(async move {
+            let mut sessions = inner.sessions.write().await;
+            let entry = sessions
+                .get_mut(&session_id)
+                .ok_or_else(|| BrainError::Storage(format!("session not found: {session_id}")))?;
+            if entry.trajectory.is_some() {
+                return Err(BrainError::Storage(format!(
+                    "trajectory already exists for session: {session_id}"
+                )));
+            }
+            entry.trajectory = Some(trajectory.clone());
+            entry.session.updated_at = Utc::now();
+            drop(sessions);
+            inner.publish_trajectory(TrajectoryStoreEvent::Created {
+                session_id,
+                trajectory: trajectory.clone(),
+            });
+            inner.publish_store(StoreEvent::TrajectoryCreated {
+                session_id,
+                trajectory: trajectory.clone(),
+            });
+            Ok(trajectory)
+        })
+    }
+
+    fn get(&self, session_id: Ulid) -> BoxFuture<'_, Result<atif::Trajectory, BrainError>> {
+        let inner = Arc::clone(&self.inner);
+        Box::pin(async move {
+            let sessions = inner.sessions.read().await;
+            let entry = sessions
+                .get(&session_id)
+                .ok_or_else(|| BrainError::Storage(format!("session not found: {session_id}")))?;
+            entry
+                .trajectory
+                .clone()
+                .ok_or_else(|| BrainError::Storage(format!("trajectory not found: {session_id}")))
+        })
+    }
+
+    fn list(&self) -> BoxFuture<'_, Result<Vec<atif::Trajectory>, BrainError>> {
+        let inner = Arc::clone(&self.inner);
+        Box::pin(async move {
+            let sessions = inner.sessions.read().await;
+            Ok(sessions
+                .values()
+                .filter_map(|entry| entry.trajectory.clone())
+                .collect())
+        })
+    }
+
+    fn update(
+        &self,
+        session_id: Ulid,
+        trajectory: atif::Trajectory,
+    ) -> BoxFuture<'_, Result<atif::Trajectory, BrainError>> {
+        let inner = Arc::clone(&self.inner);
+        Box::pin(async move {
+            let mut sessions = inner.sessions.write().await;
+            let entry = sessions
+                .get_mut(&session_id)
+                .ok_or_else(|| BrainError::Storage(format!("session not found: {session_id}")))?;
+            if entry.trajectory.is_none() {
+                return Err(BrainError::Storage(format!(
+                    "trajectory not found: {session_id}"
+                )));
+            }
+            entry.trajectory = Some(trajectory.clone());
+            entry.session.updated_at = Utc::now();
+            drop(sessions);
+            inner.publish_trajectory(TrajectoryStoreEvent::Updated {
+                session_id,
+                trajectory: trajectory.clone(),
+            });
+            inner.publish_store(StoreEvent::TrajectoryUpdated {
+                session_id,
+                trajectory: trajectory.clone(),
+            });
+            Ok(trajectory)
+        })
+    }
+
+    fn delete(&self, session_id: Ulid) -> BoxFuture<'_, Result<(), BrainError>> {
+        let inner = Arc::clone(&self.inner);
+        Box::pin(async move {
+            let mut sessions = inner.sessions.write().await;
+            let entry = sessions
+                .get_mut(&session_id)
+                .ok_or_else(|| BrainError::Storage(format!("session not found: {session_id}")))?;
+            entry.trajectory = None;
+            entry.session.updated_at = Utc::now();
+            drop(sessions);
+            inner.publish_trajectory(TrajectoryStoreEvent::Deleted { session_id });
+            inner.publish_store(StoreEvent::TrajectoryDeleted { session_id });
+            Ok(())
+        })
+    }
+
+    fn subscribe(&self) -> TrajectoryStoreEventStream {
+        broadcast_stream(self.inner.trajectory_event_tx.subscribe())
+    }
+}
+
+impl TrajectoryStore for MemoryTrajectoryStore {
+    fn get_for_session(
+        &self,
+        session_id: Ulid,
+    ) -> BoxFuture<'_, Result<Option<atif::Trajectory>, BrainError>> {
+        let inner = Arc::clone(&self.inner);
+        Box::pin(async move {
+            let sessions = inner.sessions.read().await;
+            let trajectory = sessions
+                .get(&session_id)
+                .ok_or_else(|| BrainError::Storage(format!("session not found: {session_id}")))?
+                .trajectory
+                .clone();
+            Ok(trajectory)
+        })
+    }
+}
+
 impl Store for InMemoryStore {
     fn projects(&self) -> &dyn ProjectStore {
         &self.projects
@@ -715,6 +866,10 @@ impl Store for InMemoryStore {
 
     fn credentials(&self) -> &dyn CredentialStore {
         &self.credentials
+    }
+
+    fn trajectories(&self) -> &dyn TrajectoryStore {
+        &self.trajectories
     }
 
     fn subscribe(&self) -> StoreEventStream {

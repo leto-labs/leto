@@ -260,6 +260,14 @@
     "enabled": true
   },
   {
+    "name": "KIRA",
+    "url": "https://github.com/krafton-ai/KIRA",
+    "tag": "main",
+    "searchPath": "terminus_kira",
+    "notes": "KRAFTON AI benchmark and product repo. Start with terminus_kira/ for the Terminus-KIRA Terminal-Bench harness redesign on top of Terminus 2. Also inspect KiraClaw/docs for the broader second-iteration runtime and product architecture, especially the move toward an embedded long-running agent daemon rather than a benchmark-only harness.",
+    "enabled": true
+  },
+  {
     "name": "swe-bench",
     "url": "https://github.com/SWE-bench/SWE-bench",
     "tag": "v4.1.0",

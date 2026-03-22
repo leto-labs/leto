@@ -6,7 +6,7 @@ use tokio::sync::Mutex;
 
 use brain_types::*;
 
-use crate::codex_sse::*;
+use crate::codex_sse::{build_responses_request, stream_from_response};
 use crate::oauth::browser_flow::{self, BrowserFlowConfig, BrowserFlowPrompt};
 use crate::oauth::device_flow::{self, DeviceFlowConfig, DeviceUserPrompt};
 use crate::oauth::refresh;
@@ -202,31 +202,7 @@ impl Provider for OpenAiOAuthProvider {
                 .unwrap_or(&self.default_model)
                 .to_string();
 
-            let (instructions, input) = build_responses_input(messages);
-            let resp_tools = to_responses_tools(tools);
-
-            let body = ResponsesRequest {
-                model,
-                input,
-                instructions,
-                store: false,
-                stream: true,
-                text: TextOptions {
-                    verbosity: "medium".to_owned(),
-                },
-                reasoning: ReasoningOptions {
-                    effort: "high".to_owned(),
-                    summary: "auto".to_owned(),
-                },
-                include: vec!["reasoning.encrypted_content".to_owned()],
-                tools: resp_tools,
-                tool_choice: if tools.is_empty() {
-                    None
-                } else {
-                    Some("auto".to_owned())
-                },
-                parallel_tool_calls: if tools.is_empty() { None } else { Some(true) },
-            };
+            let body = build_responses_request(model, messages, tools, config);
 
             let url = format!("{}/responses", self.api_base_url.trim_end_matches('/'));
 

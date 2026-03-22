@@ -13,6 +13,7 @@ pub type ProjectStoreEventStream = CrudStoreEventStream<ProjectStoreEvent>;
 pub type SessionStoreEventStream = CrudStoreEventStream<SessionStoreEvent>;
 pub type MessageStoreEventStream = CrudStoreEventStream<MessageStoreEvent>;
 pub type CredentialStoreEventStream = CrudStoreEventStream<CredentialStoreEvent>;
+pub type TrajectoryStoreEventStream = CrudStoreEventStream<TrajectoryStoreEvent>;
 pub type MessageStoreKey = (Ulid, Ulid);
 pub type CredentialStoreKey = (String, String);
 
@@ -37,6 +38,17 @@ pub enum StoreEvent {
     SessionDeleted {
         session_id: Ulid,
         project_id: ProjectId,
+    },
+    TrajectoryCreated {
+        session_id: Ulid,
+        trajectory: atif::Trajectory,
+    },
+    TrajectoryUpdated {
+        session_id: Ulid,
+        trajectory: atif::Trajectory,
+    },
+    TrajectoryDeleted {
+        session_id: Ulid,
     },
 }
 
@@ -92,6 +104,22 @@ pub enum CredentialStoreEvent {
     },
     Deleted {
         key: CredentialStoreKey,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum TrajectoryStoreEvent {
+    Created {
+        session_id: Ulid,
+        trajectory: atif::Trajectory,
+    },
+    Updated {
+        session_id: Ulid,
+        trajectory: atif::Trajectory,
+    },
+    Deleted {
+        session_id: Ulid,
     },
 }
 
@@ -208,6 +236,18 @@ pub trait CredentialStore:
     ) -> BoxFuture<'_, Result<(), BrainError>>;
 }
 
+pub trait TrajectoryStore:
+    CrudStore<Key = Ulid, Record = atif::Trajectory, Event = TrajectoryStoreEvent>
+{
+    // Trajectories are persisted separately from messages so exported ATIF
+    // transcript state can preserve historical step metadata across turns
+    // without replaying old messages through the latest config.
+    fn get_for_session(
+        &self,
+        session_id: Ulid,
+    ) -> BoxFuture<'_, Result<Option<atif::Trajectory>, BrainError>>;
+}
+
 pub trait Store: Send + Sync {
     fn projects(&self) -> &dyn ProjectStore;
 
@@ -216,6 +256,8 @@ pub trait Store: Send + Sync {
     fn messages(&self) -> &dyn MessageStore;
 
     fn credentials(&self) -> &dyn CredentialStore;
+
+    fn trajectories(&self) -> &dyn TrajectoryStore;
 
     fn subscribe(&self) -> StoreEventStream;
 }
@@ -521,11 +563,63 @@ mod tests {
         }
     }
 
+    struct DummyTrajectoryStore;
+
+    impl CrudStore for DummyTrajectoryStore {
+        type Key = Ulid;
+        type Record = atif::Trajectory;
+        type Event = TrajectoryStoreEvent;
+
+        fn create(
+            &self,
+            _key: Ulid,
+            record: atif::Trajectory,
+        ) -> BoxFuture<'_, Result<atif::Trajectory, BrainError>> {
+            Box::pin(ready(Ok(record)))
+        }
+
+        fn get(&self, _key: Ulid) -> BoxFuture<'_, Result<atif::Trajectory, BrainError>> {
+            Box::pin(ready(Err(BrainError::Storage(
+                "trajectory not found".into(),
+            ))))
+        }
+
+        fn list(&self) -> BoxFuture<'_, Result<Vec<atif::Trajectory>, BrainError>> {
+            Box::pin(ready(Ok(Vec::new())))
+        }
+
+        fn update(
+            &self,
+            _key: Ulid,
+            record: atif::Trajectory,
+        ) -> BoxFuture<'_, Result<atif::Trajectory, BrainError>> {
+            Box::pin(ready(Ok(record)))
+        }
+
+        fn delete(&self, _key: Ulid) -> BoxFuture<'_, Result<(), BrainError>> {
+            Box::pin(ready(Ok(())))
+        }
+
+        fn subscribe(&self) -> TrajectoryStoreEventStream {
+            Box::pin(futures::stream::empty())
+        }
+    }
+
+    impl TrajectoryStore for DummyTrajectoryStore {
+        fn get_for_session(
+            &self,
+            _session_id: Ulid,
+        ) -> BoxFuture<'_, Result<Option<atif::Trajectory>, BrainError>> {
+            Box::pin(ready(Ok(None)))
+        }
+    }
+
     struct DummyStore {
         projects: DummyProjectStore,
         sessions: DummySessionStore,
         messages: DummyMessageStore,
         credentials: DummyCredentialStore,
+        trajectories: DummyTrajectoryStore,
     }
 
     impl DummyStore {
@@ -535,6 +629,7 @@ mod tests {
                 sessions: DummySessionStore,
                 messages: DummyMessageStore,
                 credentials: DummyCredentialStore,
+                trajectories: DummyTrajectoryStore,
             }
         }
     }
@@ -554,6 +649,10 @@ mod tests {
 
         fn credentials(&self) -> &dyn CredentialStore {
             &self.credentials
+        }
+
+        fn trajectories(&self) -> &dyn TrajectoryStore {
+            &self.trajectories
         }
 
         fn subscribe(&self) -> StoreEventStream {
