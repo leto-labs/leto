@@ -1,0 +1,9 @@
+- [x] Add spec deltas for `terminus-kira` loop behavior and multimodal message support
+- [x] Extend `brain-types::Message` to support structured multimodal content
+- [x] Extend OpenAI-compatible provider request serializers for multimodal messages
+- [x] Implement `TerminusKiraLoop` in `brain-loops`
+- [x] Register `terminus-kira` in native runtime bootstrap paths
+- [x] Add focused unit tests for multimodal message handling and KIRA loop behavior
+- [x] Run `openspec validate add-terminus-kira-loop --strict`
+- [x] Run targeted cargo tests for modified crates
+- [x] Run local Docker Harbor smoke tasks for `hello-world` and `log-summary-date-ranges`

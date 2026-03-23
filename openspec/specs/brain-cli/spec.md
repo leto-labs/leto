@@ -172,3 +172,23 @@ The command SHALL:
 - **AND** it SHALL NOT require `~/.brain/config.toml`
 - **AND** it SHALL resolve only project-local config plus explicit CLI inputs
 
+### Requirement: Exec Runtime Exposes Terminus2 Loop
+
+The native CLI/runtime bootstrap SHALL register `terminus2` as a selectable
+ loop name anywhere common runtime loops are registered.
+
+#### Scenario: Exec can select terminus2
+
+- **WHEN** a caller runs `brain exec --loop terminus2`
+- **THEN** the runtime SHALL resolve and execute `Terminus2Loop`
+
+### Requirement: Exec Runtime Exposes TerminusKira Loop
+
+The native CLI/runtime bootstrap SHALL register `terminus-kira` as a selectable
+loop name anywhere common runtime loops are registered.
+
+#### Scenario: Exec can select terminus-kira
+
+- **WHEN** a caller runs `brain exec --loop terminus-kira`
+- **THEN** the runtime SHALL resolve and execute `TerminusKiraLoop`
+

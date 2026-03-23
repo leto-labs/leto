@@ -1,0 +1,9 @@
+- [x] Add spec deltas for Terminus-2 loop behavior and required shared primitives
+- [x] Add shared runtime primitives needed by Terminus-2 in `brain-types`
+- [x] Add a native stateful terminal-session tool in `brain-tools`
+- [x] Implement `Terminus2Loop` in `brain-loops`
+- [x] Register `terminus2` in native runtime bootstrap paths
+- [x] Extend ATIF/runtime export coverage for Terminus-2-specific steps
+- [x] Add focused tests for parsing, confirmation, retries, summarization, and terminal execution
+- [x] Run `openspec validate add-terminus2-loop --strict`
+- [x] Run `cargo test --workspace`
