@@ -69,3 +69,11 @@ flowchart LR
 | benchmark parity work | [`terminus2.md`](terminus2.md) and [`terminus_kira.md`](terminus_kira.md) |
 | event-model changes | confirm impact across all four loops |
 | tool-surface changes | validate against persistent terminal-session semantics, not only one-shot tools |
+
+## Related Reading
+
+| Topic | Document |
+| --- | --- |
+| Loop and agent-engine research | [`../../research/competitors/loops.md`](../../research/competitors/loops.md) |
+| Provider-trait research | [`../../research/competitors/provider.md`](../../research/competitors/provider.md) |
+| Provider architecture overview | [`../provider/README.md`](../provider/README.md) |

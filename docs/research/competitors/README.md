@@ -35,6 +35,8 @@ All requested projects are present in `repocache/repocache.json`, and the implem
 
 ## Index
 
+- [`loops.md`](loops.md)
+- [`provider.md`](provider.md)
 - [`OpenCode.md`](OpenCode.md)
 - [`Cline.md`](Cline.md)
 - [`OpenClaw.md`](OpenClaw.md)
@@ -49,6 +51,13 @@ All requested projects are present in `repocache/repocache.json`, and the implem
 
 ## Executive Summary
 
+- [`loops.md`](loops.md) is the cross-cutting page for agent-loop and
+  agent-engine design. It compares how adjacent runtimes split responsibilities
+  across loops, engines, sessions, and providers.
+- [`provider.md`](provider.md) is the cross-cutting page for `brain`'s current
+  provider seam. It analyzes `crates/brain-types/src/provider.rs` against both
+  competitor agents and provider SDKs, with special focus on streaming and the
+  recent multimodal changes driven by `terminus_kira`.
 - `OpenCode` and `OpenClaw` are product platforms first. They solve much more than a reusable engine, which gives them depth in UX, approvals, and control-plane concerns, but also makes them less cleanly composable than `brain`.
 - `Cline` is the strongest benchmark here for an IDE-hosted task runtime: explicit plan/act modes, durable task persistence, checkpoints, MCP, browser tooling, and a shared core reused across VS Code, standalone, and CLI shells.
 - `Codex` is the strongest Rust product benchmark. It validates JSONL session persistence, typed tool routing, compaction, plan-mode UX, sandboxing, and client/server layering, while also showing the risks of letting one core runtime own too much.
@@ -287,6 +296,8 @@ Actual data structures each framework uses for projects, sessions, messages, and
 
 ## Suggested Next Analyses
 
+- provider-trait refactor candidates after the current doc pass, using
+  [`provider.md`](provider.md) as the baseline
 - `mastra`: useful for another SDK-first comparison with stronger workflow/app-builder positioning.
 - `langgraph`: useful for a graph-oriented agent-loop benchmark rather than a coding-agent benchmark.
 - `ACP` and editor protocol implementations: useful if `brain` wants to sharpen its attach/editor story after the TUI transport work.
