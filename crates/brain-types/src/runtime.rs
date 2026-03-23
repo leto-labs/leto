@@ -437,6 +437,7 @@ mod tests {
                 id: key.1,
                 role: crate::Role::User,
                 content: "dummy".into(),
+                reasoning_content: None,
                 tool_calls: Vec::new(),
                 tool_call_id: None,
                 created_at: Utc::now(),

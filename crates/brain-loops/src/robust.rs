@@ -542,7 +542,7 @@ fn current_context_limit(provider: &dyn Provider, model_id: Option<&str>) -> Opt
 }
 
 fn estimate_message_tokens(message: &Message) -> usize {
-    let mut content = message.content.clone();
+    let mut content = message.content_text_lossy();
     if !message.tool_calls.is_empty() {
         let tool_calls = serde_json::to_string(&message.tool_calls).unwrap_or_default();
         content.push_str(&tool_calls);
@@ -716,6 +716,7 @@ mod tests {
                 let is_summary = messages.first().is_some_and(|message| {
                     message
                         .content
+                        .to_string()
                         .contains("Summarize the following conversation history")
                 });
                 if is_summary {

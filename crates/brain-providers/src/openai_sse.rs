@@ -26,11 +26,36 @@ pub(crate) struct ChatCompletionRequest {
 pub(crate) struct OaiMessage {
     pub role: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub content: Option<String>,
+    pub content: Option<OaiMessageContent>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning_content: Option<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub tool_calls: Vec<OaiToolCallOut>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_call_id: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(untagged)]
+pub(crate) enum OaiMessageContent {
+    Text(String),
+    Parts(Vec<OaiContentPart>),
+}
+
+#[derive(Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub(crate) enum OaiContentPart {
+    Text {
+        text: String,
+    },
+    ImageUrl {
+        image_url: OaiImageUrlPart,
+    },
+}
+
+#[derive(Serialize)]
+pub(crate) struct OaiImageUrlPart {
+    pub url: String,
 }
 
 #[derive(Serialize)]
@@ -88,7 +113,8 @@ pub(crate) struct ChunkDelta {
 
 #[derive(Deserialize)]
 pub(crate) struct ToolCallChunk {
-    pub index: u32,
+    #[serde(default)]
+    pub index: Option<u32>,
     pub id: Option<String>,
     pub function: Option<FunctionCallChunk>,
 }
@@ -144,12 +170,13 @@ pub(crate) fn to_oai_message(msg: &Message) -> OaiMessage {
     let content = if msg.content.is_empty() && !msg.tool_calls.is_empty() {
         None
     } else {
-        Some(msg.content.clone())
+        Some(to_oai_message_content(&msg.content))
     };
 
     OaiMessage {
         role: role.into(),
         content,
+        reasoning_content: msg.reasoning_content.clone(),
         tool_calls: msg
             .tool_calls
             .iter()
@@ -166,6 +193,23 @@ pub(crate) fn to_oai_message(msg: &Message) -> OaiMessage {
     }
 }
 
+fn to_oai_message_content(content: &MessageContent) -> OaiMessageContent {
+    match content {
+        MessageContent::Text(text) => OaiMessageContent::Text(text.clone()),
+        MessageContent::Parts(parts) => OaiMessageContent::Parts(
+            parts
+                .iter()
+                .map(|part| match part {
+                    ContentPart::Text { text } => OaiContentPart::Text { text: text.clone() },
+                    ContentPart::ImageUrl { url } => OaiContentPart::ImageUrl {
+                        image_url: OaiImageUrlPart { url: url.clone() },
+                    },
+                })
+                .collect(),
+        ),
+    }
+}
+
 pub(crate) fn to_oai_tool(def: &ToolDef) -> OaiTool {
     OaiTool {
         tool_type: "function".into(),
@@ -174,6 +218,32 @@ pub(crate) fn to_oai_tool(def: &ToolDef) -> OaiTool {
             description: def.description.clone(),
             parameters: def.parameters.clone(),
         },
+    }
+}
+
+#[cfg(test)]
+mod multimodal_tests {
+    use super::*;
+
+    #[test]
+    fn serializes_multimodal_user_message_for_chat_completions() {
+        let message = Message::user_parts(vec![
+            ContentPart::Text {
+                text: "describe image".into(),
+            },
+            ContentPart::ImageUrl {
+                url: "data:image/png;base64,abc".into(),
+            },
+        ]);
+
+        let serialized = serde_json::to_value(to_oai_message(&message)).unwrap();
+        let content = serialized.get("content").unwrap().as_array().unwrap();
+        assert_eq!(content.len(), 2);
+        assert_eq!(content[0].get("type").and_then(|v| v.as_str()), Some("text"));
+        assert_eq!(
+            content[1].get("type").and_then(|v| v.as_str()),
+            Some("image_url")
+        );
     }
 }
 
@@ -258,7 +328,7 @@ pub(crate) fn stream_from_response(response: reqwest::Response) -> ChatStream {
 
             if let Some(ref tc_chunks) = choice.delta.tool_calls {
                 for tc in tc_chunks {
-                    let idx = tc.index as usize;
+                    let idx = tc.index.unwrap_or(0) as usize;
                     while tool_calls.len() <= idx {
                         tool_calls.push(AccumulatedToolCall::default());
                     }
@@ -298,7 +368,7 @@ pub(crate) fn stream_from_response(response: reqwest::Response) -> ChatStream {
 
 #[cfg(test)]
 mod tests {
-    use super::ChunkUsage;
+    use super::{ChunkUsage, ToolCallChunk};
 
     #[test]
     fn chunk_usage_deserializes_detailed_token_fields() {
@@ -341,5 +411,22 @@ mod tests {
                 .and_then(|details| details.reasoning_tokens),
             Some(12)
         );
+    }
+
+    #[test]
+    fn tool_call_chunk_tolerates_missing_index() {
+        let chunk: ToolCallChunk = serde_json::from_str(
+            r#"{
+                "id": "call_1",
+                "function": {
+                    "name": "execute_commands",
+                    "arguments": "{}"
+                }
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(chunk.index, None);
+        assert_eq!(chunk.id.as_deref(), Some("call_1"));
     }
 }

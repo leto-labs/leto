@@ -101,8 +101,6 @@ impl Brain {
                 .await?;
             session.id
         };
-        let mut active_cancel = None::<CancellationToken>;
-
         loop {
             let input = match transport.recv().await? {
                 Some(InputEvent::Message(text)) => text,
@@ -110,9 +108,6 @@ impl Brain {
                     continue;
                 }
                 Some(InputEvent::Cancel) => {
-                    if let Some(token) = active_cancel.take() {
-                        token.cancel();
-                    }
                     continue;
                 }
                 Some(InputEvent::SwitchSession(target)) => {
@@ -134,13 +129,11 @@ impl Brain {
             };
 
             let cancel = CancellationToken::new();
-            active_cancel = Some(cancel.clone());
             let mut events = self.turn(session_id, &input, cancel);
 
             while let Some(event) = events.next().await {
                 transport.send(event).await?;
             }
-            active_cancel = None;
         }
 
         tracing::info!(session_id = %session_id, "session ended");
@@ -621,7 +614,7 @@ system_prompt = "config prompt"
         let messages = store.messages().list_for_session(session.id).await.unwrap();
         assert_eq!(messages.len(), 2);
         assert_eq!(messages[0].role, Role::User);
-        assert_eq!(messages[0].content, "hello world");
+        assert_eq!(messages[0].content, MessageContent::text("hello world"));
         assert_eq!(messages[1].role, Role::Assistant);
     }
 
@@ -999,7 +992,7 @@ system_prompt = "config prompt"
             .unwrap();
         assert!(!alt_messages.is_empty());
         assert_eq!(alt_messages[0].role, Role::User);
-        assert_eq!(alt_messages[0].content, "hello world");
+        assert_eq!(alt_messages[0].content, MessageContent::text("hello world"));
         assert_eq!(alt_messages[1].role, Role::Assistant);
     }
 
@@ -1063,7 +1056,7 @@ system_prompt = "config prompt"
         let messages = store.messages().list_for_session(session.id).await.unwrap();
         assert!(!messages.is_empty());
         assert_eq!(messages[0].role, Role::User);
-        assert_eq!(messages[0].content, "resumed hello");
+        assert_eq!(messages[0].content, MessageContent::text("resumed hello"));
     }
 
     #[tokio::test]

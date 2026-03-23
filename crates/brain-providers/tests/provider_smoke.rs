@@ -10,6 +10,11 @@ async fn smoke_test_preset(preset: OpenAiConfigPreset) {
             return;
         }
     };
+    let config = if preset.name == "gemini" {
+        config.with_model("gemini-3.1-flash-lite-preview")
+    } else {
+        config
+    };
 
     eprintln!(
         "  TEST {}: {} @ {}",

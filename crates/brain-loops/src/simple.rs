@@ -245,7 +245,7 @@ mod tests {
                 .iter()
                 .rev()
                 .find(|m| m.role == Role::User)
-                .map(|m| m.content.clone())
+                .map(|m| m.content_text_lossy())
                 .unwrap_or_default();
             Box::pin(async move {
                 let s = stream! {
@@ -467,7 +467,7 @@ mod tests {
                 _session_id: Option<Ulid>,
             ) -> BoxFuture<'a, Result<ChatStream, BrainError>> {
                 assert_eq!(messages[0].role, Role::System);
-                assert_eq!(messages[0].content, "Be helpful");
+                assert_eq!(messages[0].content, MessageContent::text("Be helpful"));
                 Box::pin(async move {
                     let s = stream! {
                         yield Ok(ChatChunk::Delta { content: "ok".into() });

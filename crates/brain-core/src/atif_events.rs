@@ -215,7 +215,7 @@ fn build_steps(
                     source: AtifStepSource::System,
                     model_name: None,
                     reasoning_effort: None,
-                    message: message.content.clone().into(),
+                    message: to_atif_message_content(&message.content),
                     reasoning_content: None,
                     tool_calls: None,
                     observation: None,
@@ -233,7 +233,7 @@ fn build_steps(
                     source: AtifStepSource::User,
                     model_name: None,
                     reasoning_effort: None,
-                    message: message.content.clone().into(),
+                    message: to_atif_message_content(&message.content),
                     reasoning_content: None,
                     tool_calls: None,
                     observation: None,
@@ -280,7 +280,7 @@ fn build_steps(
                         .map(ToOwned::to_owned);
                     observation_results.push(AtifObservationResult {
                         source_call_id,
-                        content: Some(tool_message.content.clone().into()),
+                        content: Some(to_atif_message_content(&tool_message.content)),
                         subagent_trajectory_ref: None,
                     });
                     next_index += 1;
@@ -293,7 +293,7 @@ fn build_steps(
                     model_name: model_name.clone(),
                     reasoning_effort: None,
                     message: assistant_step_message(message).into(),
-                    reasoning_content: None,
+                    reasoning_content: message.reasoning_content.clone().map(Into::into),
                     tool_calls,
                     observation: (!observation_results.is_empty()).then_some(AtifObservation {
                         results: observation_results,
@@ -318,7 +318,7 @@ fn build_steps(
                     observation: Some(AtifObservation {
                         results: vec![AtifObservationResult {
                             source_call_id: None,
-                            content: Some(message.content.clone().into()),
+                            content: Some(to_atif_message_content(&message.content)),
                             subagent_trajectory_ref: None,
                         }],
                     }),
@@ -357,7 +357,7 @@ pub(crate) fn completion_events(completed: &CompletedTrajectory) -> Vec<Event> {
 
 fn assistant_step_message(message: &Message) -> String {
     if !message.content.is_empty() {
-        return message.content.clone();
+        return message.content.to_string();
     }
 
     if !message.tool_calls.is_empty() {
@@ -370,6 +370,21 @@ fn assistant_step_message(message: &Message) -> String {
     }
 
     "Assistant turn".to_owned()
+}
+
+fn to_atif_message_content(content: &brain_types::MessageContent) -> atif::MessageContent {
+    match content {
+        brain_types::MessageContent::Text(text) => text.clone().into(),
+        brain_types::MessageContent::Parts(parts) => parts
+            .iter()
+            .map(|part| match part {
+                brain_types::ContentPart::Text { text } => text.clone(),
+                brain_types::ContentPart::ImageUrl { .. } => "[image omitted]".to_owned(),
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+            .into(),
+    }
 }
 
 fn tool_definition_json(tool_def: &brain_types::ToolDef) -> Result<Map<String, Value>, BrainError> {

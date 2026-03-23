@@ -99,6 +99,8 @@ fn parse_api_surface_mode(value: &str) -> Result<OpenAiApiMode, BrainError> {
 fn register_common_runtime_surface(runtime: &Arc<BrainRuntimeNative>) -> Result<(), BrainError> {
     runtime.set_loop("simple", Arc::new(SimpleLoop))?;
     runtime.set_loop("robust", Arc::new(RobustLoop))?;
+    runtime.set_loop("terminus2", Arc::new(Terminus2Loop))?;
+    runtime.set_loop("terminus-kira", Arc::new(TerminusKiraLoop))?;
     for tool in native_tools() {
         let name = tool.definition().name.clone();
         runtime.set_tool(name, tool)?;

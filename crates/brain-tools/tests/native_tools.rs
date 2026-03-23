@@ -324,9 +324,9 @@ async fn list_directory_truncates_large_directories() {
 }
 
 #[tokio::test]
-async fn native_tools_returns_all_nine() {
+async fn native_tools_returns_all_ten() {
     let tools = native_tools();
-    assert_eq!(tools.len(), 9);
+    assert_eq!(tools.len(), 10);
 
     let names: Vec<String> = tools.iter().map(|t| t.definition().name).collect();
     assert!(names.contains(&"echo".to_string()));
@@ -338,6 +338,7 @@ async fn native_tools_returns_all_nine() {
     assert!(names.contains(&"list_directory".to_string()));
     assert!(names.contains(&"glob_search".to_string()));
     assert!(names.contains(&"grep".to_string()));
+    assert!(names.contains(&"terminal_session".to_string()));
 }
 
 #[tokio::test]

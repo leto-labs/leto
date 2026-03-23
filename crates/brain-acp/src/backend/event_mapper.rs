@@ -113,7 +113,7 @@ impl EventMapper {
         let mut updates = Vec::new();
         if !self.streamed_assistant_text && !message.content.is_empty() {
             updates.push(acp::SessionUpdate::AgentMessageChunk(
-                acp::ContentChunk::new(message.content.into()),
+                acp::ContentChunk::new(message.content.to_string().into()),
             ));
         }
 

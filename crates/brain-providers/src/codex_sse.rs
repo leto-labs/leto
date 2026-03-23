@@ -2,7 +2,10 @@ use futures::stream::{self, StreamExt};
 use serde::{Deserialize, Serialize};
 use tracing::warn;
 
-use brain_types::{ChatChunk, ChatStream, InferenceConfig, Message, Role, TokenUsage};
+use brain_types::{
+    ChatChunk, ChatStream, ContentPart, InferenceConfig, Message, MessageContent, Role,
+    TokenUsage,
+};
 
 const DEFAULT_INSTRUCTIONS: &str = "You are a concise and helpful coding assistant.";
 
@@ -46,10 +49,11 @@ pub(crate) enum ResponsesInputItem {
 }
 
 #[derive(Debug, Serialize)]
-pub(crate) struct ResponsesInputContent {
-    #[serde(rename = "type")]
-    pub kind: String,
-    pub text: String,
+#[serde(tag = "type", rename_all = "snake_case")]
+pub(crate) enum ResponsesInputContent {
+    InputText { text: String },
+    InputImage { image_url: String },
+    OutputText { text: String },
 }
 
 #[derive(Debug, Serialize)]
@@ -136,24 +140,18 @@ pub(crate) fn build_responses_input(messages: &[Message]) -> (String, Vec<Respon
 
     for msg in messages {
         match msg.role {
-            Role::System => system_parts.push(&msg.content),
+            Role::System => system_parts.push(msg.content.as_text().unwrap_or_default()),
             Role::User => {
                 input.push(ResponsesInputItem::Message {
                     role: "user".to_owned(),
-                    content: vec![ResponsesInputContent {
-                        kind: "input_text".to_owned(),
-                        text: msg.content.clone(),
-                    }],
+                    content: to_responses_input_content(&msg.content, true),
                 });
             }
             Role::Assistant => {
                 if !msg.content.is_empty() {
                     input.push(ResponsesInputItem::Message {
                         role: "assistant".to_owned(),
-                        content: vec![ResponsesInputContent {
-                            kind: "output_text".to_owned(),
-                            text: msg.content.clone(),
-                        }],
+                        content: to_responses_input_content(&msg.content, false),
                     });
                 }
                 for tool_call in &msg.tool_calls {
@@ -169,7 +167,7 @@ pub(crate) fn build_responses_input(messages: &[Message]) -> (String, Vec<Respon
                 if let Some(call_id) = &msg.tool_call_id {
                     input.push(ResponsesInputItem::FunctionCallOutput {
                         call_id: call_id.clone(),
-                        output: msg.content.clone(),
+                        output: msg.content.to_plain_text_lossy(),
                     });
                 }
             }
@@ -183,6 +181,31 @@ pub(crate) fn build_responses_input(messages: &[Message]) -> (String, Vec<Respon
     };
 
     (instructions, input)
+}
+
+fn to_responses_input_content(content: &MessageContent, is_user: bool) -> Vec<ResponsesInputContent> {
+    match content {
+        MessageContent::Text(text) => vec![if is_user {
+            ResponsesInputContent::InputText { text: text.clone() }
+        } else {
+            ResponsesInputContent::OutputText { text: text.clone() }
+        }],
+        MessageContent::Parts(parts) => parts
+            .iter()
+            .map(|part| match part {
+                ContentPart::Text { text } => {
+                    if is_user {
+                        ResponsesInputContent::InputText { text: text.clone() }
+                    } else {
+                        ResponsesInputContent::OutputText { text: text.clone() }
+                    }
+                }
+                ContentPart::ImageUrl { url } => ResponsesInputContent::InputImage {
+                    image_url: url.clone(),
+                },
+            })
+            .collect(),
+    }
 }
 
 pub(crate) fn build_responses_request(
@@ -226,6 +249,39 @@ fn normalize_reasoning_effort(reasoning: Option<&str>) -> String {
         "minimal" => "low".to_owned(),
         "low" | "medium" | "high" => reasoning.unwrap_or("medium").to_owned(),
         _ => "medium".to_owned(),
+    }
+}
+
+#[cfg(test)]
+mod multimodal_tests {
+    use super::*;
+
+    #[test]
+    fn builds_multimodal_responses_input_for_user_message() {
+        let message = Message::user_parts(vec![
+            ContentPart::Text {
+                text: "inspect".into(),
+            },
+            ContentPart::ImageUrl {
+                url: "data:image/png;base64,abc".into(),
+            },
+        ]);
+
+        let (_instructions, input) = build_responses_input(&[message]);
+        let ResponsesInputItem::Message { content, .. } = &input[0] else {
+            panic!("expected message item");
+        };
+        assert_eq!(content.len(), 2);
+        match &content[0] {
+            ResponsesInputContent::InputText { text } => assert_eq!(text, "inspect"),
+            other => panic!("unexpected first part: {other:?}"),
+        }
+        match &content[1] {
+            ResponsesInputContent::InputImage { image_url } => {
+                assert!(image_url.starts_with("data:image/png;base64,"));
+            }
+            other => panic!("unexpected second part: {other:?}"),
+        }
     }
 }
 
@@ -368,14 +424,14 @@ mod tests {
         match &input[0] {
             ResponsesInputItem::Message { role, content } => {
                 assert_eq!(role, "user");
-                assert_eq!(content[0].kind, "input_text");
+                assert!(matches!(content[0], ResponsesInputContent::InputText { .. }));
             }
             other => panic!("expected user message, got {other:?}"),
         }
         match &input[1] {
             ResponsesInputItem::Message { role, content } => {
                 assert_eq!(role, "assistant");
-                assert_eq!(content[0].kind, "output_text");
+                assert!(matches!(content[0], ResponsesInputContent::OutputText { .. }));
             }
             other => panic!("expected assistant message, got {other:?}"),
         }

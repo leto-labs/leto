@@ -15,7 +15,7 @@ pub fn replay_updates(session: &Session, messages: &[Message]) -> Vec<acp::Sessi
 fn message_update(message: &Message) -> Option<acp::SessionUpdate> {
     let content = match message.role {
         Role::System => format!("[system] {}", message.content),
-        Role::User | Role::Assistant => message.content.clone(),
+        Role::User | Role::Assistant => message.content.to_string(),
         Role::Tool => return None,
     };
 

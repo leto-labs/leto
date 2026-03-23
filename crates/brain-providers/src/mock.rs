@@ -86,7 +86,7 @@ impl Provider for MockProvider {
                 .iter()
                 .rev()
                 .find(|m| m.role == Role::User)
-                .map(|m| m.content.clone())
+                .map(|m| m.content_text_lossy())
                 .unwrap_or_default();
 
             let delay = self.delay_ms;

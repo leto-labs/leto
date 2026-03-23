@@ -1,5 +1,13 @@
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum InferenceErrorKind {
+    Generic,
+    ContextLengthExceeded,
+    OutputLengthExceeded,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum BrainErrorCode {
@@ -65,6 +73,39 @@ impl BrainError {
     pub fn recoverable(&self) -> bool {
         matches!(self, Self::ToolFailed { .. } | Self::Cancelled)
     }
+
+    pub fn inference_kind(&self) -> Option<InferenceErrorKind> {
+        match self {
+            Self::Inference(message) => Some(classify_inference_message(message)),
+            _ => None,
+        }
+    }
+}
+
+fn classify_inference_message(message: &str) -> InferenceErrorKind {
+    let lower = message.to_ascii_lowercase();
+
+    if lower.contains("context length")
+        || lower.contains("context window")
+        || lower.contains("maximum context")
+        || lower.contains("max context")
+        || lower.contains("too many tokens")
+        || lower.contains("prompt is too long")
+    {
+        return InferenceErrorKind::ContextLengthExceeded;
+    }
+
+    if lower.contains("output length")
+        || lower.contains("max_tokens limit")
+        || lower.contains("response was truncated")
+        || lower.contains("maximum output")
+        || lower.contains("max output")
+        || lower.contains("completion length")
+    {
+        return InferenceErrorKind::OutputLengthExceeded;
+    }
+
+    InferenceErrorKind::Generic
 }
 
 #[cfg(test)]
@@ -161,5 +202,29 @@ mod tests {
         assert_eq!(json, r#""tool_failed""#);
         let roundtrip: BrainErrorCode = serde_json::from_str(&json).unwrap();
         assert_eq!(roundtrip, code);
+    }
+
+    #[test]
+    fn classifies_context_length_inference_errors() {
+        let error = BrainError::Inference("maximum context length exceeded".into());
+        assert_eq!(
+            error.inference_kind(),
+            Some(InferenceErrorKind::ContextLengthExceeded)
+        );
+    }
+
+    #[test]
+    fn classifies_output_length_inference_errors() {
+        let error = BrainError::Inference("Model hit max_tokens limit".into());
+        assert_eq!(
+            error.inference_kind(),
+            Some(InferenceErrorKind::OutputLengthExceeded)
+        );
+    }
+
+    #[test]
+    fn defaults_unrecognized_inference_errors_to_generic() {
+        let error = BrainError::Inference("temporary upstream error".into());
+        assert_eq!(error.inference_kind(), Some(InferenceErrorKind::Generic));
     }
 }

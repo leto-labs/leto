@@ -42,9 +42,9 @@ fn openai_catalog_includes_recent_chat_models() {
         .collect::<Vec<_>>();
 
     assert!(model_ids.contains(&"gpt-5.4"));
+    assert!(model_ids.contains(&"gpt-5.3-codex"));
     assert!(model_ids.contains(&"gpt-5.2"));
     assert!(model_ids.contains(&"gpt-5.1"));
-    assert!(!model_ids.iter().any(|id| id.contains("codex")));
     assert!(!model_ids.iter().any(|id| id.contains("embedding")));
 }
 

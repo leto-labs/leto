@@ -9,6 +9,7 @@ pub mod glob_search;
 pub mod grep;
 pub mod list_directory;
 pub mod shell;
+pub mod terminal_session;
 mod truncation;
 
 pub use apply_patch::{ApplyPatchDriver, ApplyPatchTool};
@@ -20,6 +21,10 @@ pub use glob_search::{GlobDriver, GlobTool};
 pub use grep::{GrepDriver, GrepTool};
 pub use list_directory::{ListDirectoryDriver, ListDirectoryTool};
 pub use shell::{ShellDriver, ShellTool};
+pub use terminal_session::{
+    TerminalSessionAction, TerminalSessionDriver, TerminalSessionObservation,
+    TerminalSessionRequest, TerminalSessionTool,
+};
 
 #[cfg(feature = "acp")]
 pub use acp::{
@@ -46,6 +51,8 @@ pub use grep::native::{GrepDriverAuto, GrepDriverNative, GrepDriverRipgrep};
 pub use list_directory::native::ListDirectoryDriverNative;
 #[cfg(feature = "native")]
 pub use shell::native::ShellDriverNative;
+#[cfg(feature = "native")]
+pub use terminal_session::native::TerminalSessionDriverNative;
 
 #[cfg(feature = "native")]
 pub fn native_tools() -> Vec<std::sync::Arc<dyn brain_types::Tool>> {
@@ -57,6 +64,9 @@ pub fn native_tools() -> Vec<std::sync::Arc<dyn brain_types::Tool>> {
         Arc::new(FileEditTool::new(FileEditDriverNative)),
         Arc::new(ApplyPatchTool::new(ApplyPatchDriverNative)),
         Arc::new(ShellTool::new(ShellDriverNative)),
+        Arc::new(TerminalSessionTool::new(
+            TerminalSessionDriverNative::default(),
+        )),
         Arc::new(ListDirectoryTool::new(ListDirectoryDriverNative)),
         Arc::new(GlobTool::new(GlobDriverNative)),
         Arc::new(GrepTool::new(GrepDriverAuto::default())),

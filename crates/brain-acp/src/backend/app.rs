@@ -41,6 +41,12 @@ pub async fn build_default_app() -> Result<BackendApp, acp::Error> {
     runtime
         .set_loop("robust", Arc::new(RobustLoop))
         .map_err(internal_error)?;
+    runtime
+        .set_loop("terminus2", Arc::new(Terminus2Loop))
+        .map_err(internal_error)?;
+    runtime
+        .set_loop("terminus-kira", Arc::new(TerminusKiraLoop))
+        .map_err(internal_error)?;
     for tool in native_tools() {
         let name = tool.definition().name.clone();
         runtime.set_tool(name, tool).map_err(internal_error)?;
