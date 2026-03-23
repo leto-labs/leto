@@ -8,7 +8,7 @@ Harbor in this repo, what currently works, and what the latest runs tell us
 about the `brain` loop.
 
 For benchmark-research framing and the full `terminal-bench@2.0` task matrix,
-see [docs/benchmarks/Harbor.md](/home/leovigna/Documents/projects/leovigna/mauser/docs/benchmarks/Harbor.md).
+see [`research/benchmarks/Harbor.md`](research/benchmarks/Harbor.md).
 
 ## Supported Agent Surfaces
 
@@ -34,7 +34,7 @@ Current maturity:
   improving rather than the stable baseline
 
 For the internal native `ATIF` architecture behind the direct `brain` surface,
-see [docs/atif.md](/home/leovigna/Documents/projects/leovigna/mauser/docs/atif.md).
+see [`architecture/atif.md`](architecture/atif.md).
 
 ## Runner Interface
 
@@ -198,7 +198,7 @@ Harbor task environments usually inherit Harbor's default machine limits:
 - `10G disk`
 
 Some tasks override those limits, especially heavier build or ML tasks. The
-full task matrix in [docs/benchmarks/Harbor.md](/home/leovigna/Documents/projects/leovigna/mauser/docs/benchmarks/Harbor.md)
+full task matrix in [`research/benchmarks/Harbor.md`](research/benchmarks/Harbor.md)
 records those task-level limits.
 
 Operational guidance:
@@ -298,4 +298,4 @@ The next high-value loop improvements are:
 3. tighten completion discipline on harder verifier-driven tasks
 
 For the deeper benchmark-to-loop analysis and the design implications behind
-those priorities, see [docs/benchmarks/LoopDesign.md](/home/leovigna/Documents/projects/leovigna/mauser/docs/benchmarks/LoopDesign.md).
+those priorities, see [`research/benchmarks/LoopDesign.md`](research/benchmarks/LoopDesign.md).

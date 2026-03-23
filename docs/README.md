@@ -1,15 +1,52 @@
-# Internal Docs
+# Brain Docs
 
-This directory holds internal reference material for `brain`.
+This directory is now split into three layers so architecture, operations, and
+research do not blur together:
 
-Top-level docs should prefer current product and operational guidance. The
-subdirectories below are still research-heavy today, and may later move under
-an explicit `docs/research/` namespace once the split is worth the churn.
+| Area | Purpose | Read this when |
+| --- | --- | --- |
+| [`architecture/README.md`](architecture/README.md) | Current-state architecture map for the workspace | You want to understand how the engine is put together today |
+| [`Harbor.md`](Harbor.md) | Operational Harbor runbook and benchmark workflow | You need to run or interpret Harbor jobs |
+| [`research/README.md`](research/README.md) | Source-first exploratory notes and external comparison work | You are evaluating ACP, benchmarks, or adjacent systems |
 
-## Available Docs
+## Recommended Reading Order
 
-- [`Harbor.md`](Harbor.md): operational Harbor guide, runbook, and current
-  benchmark findings.
-- [`competitors/README.md`](competitors/README.md): source-first competitor analysis and feature matrix for adjacent projects.
-- [`acp/README.md`](acp/README.md): source-first research on Agent Client Protocol, its client ecosystem, and what it implies for `brain`.
-- [`benchmarks/README.md`](benchmarks/README.md): source-first research on agent benchmarks, evaluation harnesses, and what is realistically usable for `brain`.
+1. [`architecture/README.md`](architecture/README.md)
+2. [`architecture/types.md`](architecture/types.md)
+3. [`architecture/core/README.md`](architecture/core/README.md)
+4. [`architecture/loops/README.md`](architecture/loops/README.md)
+5. [`Harbor.md`](Harbor.md) and [`architecture/atif.md`](architecture/atif.md) if you are working on benchmarking
+
+## Documentation Rules Of Thumb
+
+| Document type | What it should optimize for | What it should avoid |
+| --- | --- | --- |
+| Architecture docs | clear boundaries, current responsibilities, data flow | speculative product planning |
+| Operational docs | exact commands, prerequisites, current workflows | deep design rationale |
+| Research docs | source-first notes, option analysis, ecosystem mapping | being treated as the current implementation contract |
+
+## Current Information Architecture
+
+```mermaid
+flowchart TD
+    Docs[docs/] --> Arch[architecture/]
+    Docs --> Ops[Operational Pages]
+    Docs --> Research[research/]
+
+    Arch --> ATypes[brain-types]
+    Arch --> ACore[brain-core]
+    Arch --> ALoops[brain-loops]
+    Arch --> AProviders[brain-providers]
+    Arch --> ATools[brain-tools]
+    Arch --> AStores[brain-stores]
+    Arch --> AConfig[brain-config]
+    Arch --> ATransports[brain-transports]
+    Arch --> AAcp[brain-acp]
+    Arch --> ACli[brain-cli]
+    Arch --> AAtif[atif]
+    Arch --> AServer[brain-server]
+
+    Research --> RACP[acp/]
+    Research --> RBench[benchmarks/]
+    Research --> RComp[competitors/]
+```
