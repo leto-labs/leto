@@ -47,6 +47,7 @@ HARBOR_JOB_SUFFIX="${HARBOR_JOB_SUFFIX:-$(date -u +%Y%m%dT%H%M%SZ)}"
 HARBOR_ENV="${HARBOR_ENV:-docker}"
 HARBOR_FORCE_BUILD="${HARBOR_FORCE_BUILD:-true}"
 HARBOR_DELETE="${HARBOR_DELETE:-true}"
+HARBOR_AGENT_KWARGS="${HARBOR_AGENT_KWARGS:-}"
 
 case "${HARBOR_ENV}" in
   docker|daytona|e2b|modal|runloop|gke)
@@ -291,6 +292,16 @@ case "${AGENT}" in
     cmd+=(--agent "${AGENT}")
     ;;
 esac
+
+if [[ -n "${HARBOR_AGENT_KWARGS}" ]]; then
+  # Accept newline-delimited agent kwargs so callers can pass multiple
+  # built-in Harbor agent settings without shell-splitting issues.
+  while IFS= read -r agent_kwarg; do
+    if [[ -n "${agent_kwarg}" ]]; then
+      cmd+=(--ak "${agent_kwarg}")
+    fi
+  done < <(printf '%s\n' "${HARBOR_AGENT_KWARGS}")
+fi
 
 echo "Harbor job artifacts will be written under: ${JOBS_DIR}/${HARBOR_JOB_NAME}"
 PYTHONPATH="${ROOT_DIR}${PYTHONPATH:+:${PYTHONPATH}}" "${cmd[@]}"
