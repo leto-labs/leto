@@ -150,7 +150,18 @@ just harbor-run codex-acp terminal-bench-sample@2.0 chess-best-move
 HARBOR_BRAIN_LOOP=robust just harbor-run brain-acp terminal-bench-sample@2.0 regex-log
 just harbor-run brain-acp terminal-bench@2.0
 just harbor-run codex terminal-bench-sample@2.0 sqlite-with-gcov
+HARBOR_ENV=daytona HARBOR_FORCE_BUILD=false HARBOR_MODEL=openai/gpt-5.3-codex just harbor-run terminus-2 terminal-bench-sample@2.0 configure-git-webserver
 ```
+
+Runner env knobs stay aligned with Harbor's CLI:
+
+- `HARBOR_ENV` -> `--env`
+- `HARBOR_FORCE_BUILD` -> `--force-build` / `--no-force-build`
+- `HARBOR_DELETE` -> `--delete` / `--no-delete`
+
+For the first Daytona smoke run, `configure-git-webserver` is a good target
+because Harbor detects it as a direct single-container task rather than a DinD
+compose task.
 
 Useful discovery command:
 

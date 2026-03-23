@@ -30,11 +30,6 @@ if ! command -v harbor >/dev/null 2>&1; then
   exit 1
 fi
 
-if ! command -v docker >/dev/null 2>&1; then
-  echo "Docker is required for Harbor benchmark runs." >&2
-  exit 1
-fi
-
 HARBOR_DATASET="${HARBOR_DATASET:-${DATASET}}"
 HARBOR_TASK_NAME="${HARBOR_TASK_NAME:-${TASK_NAME}}"
 if [[ -n "${HARBOR_N_TASKS:-}" ]]; then
@@ -49,6 +44,41 @@ HARBOR_N_CONCURRENT="${HARBOR_N_CONCURRENT:-1}"
 HARBOR_TIMEOUT_MULTIPLIER="${HARBOR_TIMEOUT_MULTIPLIER:-1.0}"
 HARBOR_MODEL="${HARBOR_MODEL:-openai/gpt-5.4}"
 HARBOR_JOB_SUFFIX="${HARBOR_JOB_SUFFIX:-$(date -u +%Y%m%dT%H%M%SZ)}"
+HARBOR_ENV="${HARBOR_ENV:-docker}"
+HARBOR_FORCE_BUILD="${HARBOR_FORCE_BUILD:-true}"
+HARBOR_DELETE="${HARBOR_DELETE:-true}"
+
+case "${HARBOR_ENV}" in
+  docker|daytona|e2b|modal|runloop|gke)
+    ;;
+  *)
+    echo "Unsupported HARBOR_ENV '${HARBOR_ENV}'. Expected one of: docker, daytona, e2b, modal, runloop, gke." >&2
+    exit 1
+    ;;
+esac
+
+case "${HARBOR_FORCE_BUILD}" in
+  true|false)
+    ;;
+  *)
+    echo "HARBOR_FORCE_BUILD must be 'true' or 'false'." >&2
+    exit 1
+    ;;
+esac
+
+case "${HARBOR_DELETE}" in
+  true|false)
+    ;;
+  *)
+    echo "HARBOR_DELETE must be 'true' or 'false'." >&2
+    exit 1
+    ;;
+esac
+
+if [[ "${HARBOR_ENV}" == "docker" ]] && ! command -v docker >/dev/null 2>&1; then
+  echo "Docker is required for Harbor benchmark runs when HARBOR_ENV=docker." >&2
+  exit 1
+fi
 
 dataset_slug="$(printf '%s' "${HARBOR_DATASET}" | tr '@/:' '---' | tr -cs '[:alnum:]._-' '-')"
 task_slug=""
@@ -68,10 +98,20 @@ cmd=(
   --n-attempts "${HARBOR_N_ATTEMPTS}"
   --n-concurrent "${HARBOR_N_CONCURRENT}"
   --timeout-multiplier "${HARBOR_TIMEOUT_MULTIPLIER}"
-  --env docker
-  --force-build
-  --delete
+  --env "${HARBOR_ENV}"
 )
+
+if [[ "${HARBOR_FORCE_BUILD}" == "true" ]]; then
+  cmd+=(--force-build)
+else
+  cmd+=(--no-force-build)
+fi
+
+if [[ "${HARBOR_DELETE}" == "true" ]]; then
+  cmd+=(--delete)
+else
+  cmd+=(--no-delete)
+fi
 
 if [[ -n "${resolved_n_tasks}" ]]; then
   cmd+=(--n-tasks "${resolved_n_tasks}")
@@ -91,7 +131,22 @@ case "${AGENT}" in
     if [[ "${HARBOR_PROVIDER}" == "${HARBOR_MODEL}" ]]; then
       HARBOR_PROVIDER="openai"
     fi
-    HARBOR_API_KEY="${HARBOR_API_KEY:-${OPENAI_API_KEY:-}}"
+    case "${HARBOR_PROVIDER}" in
+      gemini)
+        resolved_api_key_default="${GEMINI_API_KEY:-}"
+        ;;
+      openrouter)
+        resolved_api_key_default="${OPENROUTER_API_KEY:-}"
+        ;;
+      xai)
+        resolved_api_key_default="${XAI_API_KEY:-}"
+        ;;
+      *)
+        resolved_api_key_default="${OPENAI_API_KEY:-}"
+        ;;
+    esac
+
+    HARBOR_API_KEY="${HARBOR_API_KEY:-${resolved_api_key_default}}"
     HARBOR_BASE_URL="${HARBOR_BASE_URL:-${OPENAI_BASE_URL:-}}"
 
     if [[ -z "${HARBOR_API_KEY}" ]]; then

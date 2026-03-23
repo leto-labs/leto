@@ -67,6 +67,7 @@ harbor-datasets:
     harbor datasets list
 
 # Run one Harbor agent against one Harbor dataset and optional task name.
+# Override Harbor environment behavior with env vars like HARBOR_ENV=daytona.
 harbor-run agent dataset task_name='':
     bash ./scripts/harbor-run.sh {{agent}} {{dataset}} '{{task_name}}'
 

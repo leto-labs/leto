@@ -58,6 +58,7 @@ Examples:
 ./scripts/harbor-run.sh terminus-2 terminal-bench-sample@2.0 chess-best-move
 just harbor-run codex-acp terminal-bench-sample@2.0 regex-log
 HARBOR_BRAIN_LOOP=robust just harbor-run brain-acp terminal-bench@2.0
+HARBOR_ENV=daytona HARBOR_MODEL=openai/gpt-5.3-codex just harbor-run terminus-2 terminal-bench-sample@2.0 configure-git-webserver
 ```
 
 Behavior defaults:
@@ -71,12 +72,22 @@ Behavior defaults:
 Useful env vars:
 
 - `HARBOR_MODEL`
+- `HARBOR_ENV`
+- `HARBOR_FORCE_BUILD`
+- `HARBOR_DELETE`
 - `HARBOR_JOB_NAME`
 - `HARBOR_JOB_SUFFIX`
 - `HARBOR_N_TASKS`
 - `HARBOR_N_ATTEMPTS`
 - `HARBOR_N_CONCURRENT`
 - `HARBOR_TIMEOUT_MULTIPLIER`
+
+Environment behavior:
+
+- `HARBOR_ENV` maps directly to Harbor's `--env`
+- `HARBOR_FORCE_BUILD` maps to `--force-build` / `--no-force-build`
+- `HARBOR_DELETE` maps to `--delete` / `--no-delete`
+- defaults stay `docker`, `true`, and `true`
 
 Useful discovery command:
 
@@ -100,7 +111,8 @@ just harbor-install
 
 Important local prerequisites:
 
-- Docker must be available and healthy
+- Docker must be available and healthy for `HARBOR_ENV=docker`
+- `DAYTONA_API_KEY` is required for `HARBOR_ENV=daytona`
 - built-in `codex` requires `OPENAI_API_KEY`
 - direct Harbor `brain` uses `OPENAI_API_KEY` by default and does not depend
   on `~/.brain`
@@ -111,6 +123,21 @@ Important local prerequisites:
   `OPENAI_API_KEY`
 - `codex-acp` prefers host Codex auth from `~/.codex/auth.json`
 - `brain-acp` expects `~/.brain/credentials` and optional `~/.brain/config.toml`
+
+Recommended first Daytona validation:
+
+```bash
+HARBOR_ENV=daytona \
+HARBOR_FORCE_BUILD=false \
+HARBOR_MODEL=openai/gpt-5.3-codex \
+HARBOR_N_ATTEMPTS=1 \
+HARBOR_N_CONCURRENT=1 \
+HARBOR_JOB_NAME=terminus-2-daytona-terminal-bench-sample-2.0-configure-git-webserver-gpt-5.3-codex \
+just harbor-run terminus-2 terminal-bench-sample@2.0 configure-git-webserver
+```
+
+That task currently resolves to a single-container Harbor environment, so
+Daytona uses the direct sandbox strategy rather than DinD compose mode.
 
 ## Checkpoint Ladder
 
