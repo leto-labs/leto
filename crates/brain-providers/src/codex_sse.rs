@@ -3,8 +3,7 @@ use serde::{Deserialize, Serialize};
 use tracing::warn;
 
 use brain_types::{
-    ChatChunk, ChatStream, ContentPart, InferenceConfig, Message, MessageContent, Role,
-    TokenUsage,
+    ChatChunk, ChatStream, ContentPart, InferenceConfig, Message, MessageContent, Role, TokenUsage,
 };
 
 const DEFAULT_INSTRUCTIONS: &str = "You are a concise and helpful coding assistant.";
@@ -183,7 +182,10 @@ pub(crate) fn build_responses_input(messages: &[Message]) -> (String, Vec<Respon
     (instructions, input)
 }
 
-fn to_responses_input_content(content: &MessageContent, is_user: bool) -> Vec<ResponsesInputContent> {
+fn to_responses_input_content(
+    content: &MessageContent,
+    is_user: bool,
+) -> Vec<ResponsesInputContent> {
     match content {
         MessageContent::Text(text) => vec![if is_user {
             ResponsesInputContent::InputText { text: text.clone() }
@@ -424,14 +426,20 @@ mod tests {
         match &input[0] {
             ResponsesInputItem::Message { role, content } => {
                 assert_eq!(role, "user");
-                assert!(matches!(content[0], ResponsesInputContent::InputText { .. }));
+                assert!(matches!(
+                    content[0],
+                    ResponsesInputContent::InputText { .. }
+                ));
             }
             other => panic!("expected user message, got {other:?}"),
         }
         match &input[1] {
             ResponsesInputItem::Message { role, content } => {
                 assert_eq!(role, "assistant");
-                assert!(matches!(content[0], ResponsesInputContent::OutputText { .. }));
+                assert!(matches!(
+                    content[0],
+                    ResponsesInputContent::OutputText { .. }
+                ));
             }
             other => panic!("expected assistant message, got {other:?}"),
         }

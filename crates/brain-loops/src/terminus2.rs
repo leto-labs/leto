@@ -1694,10 +1694,12 @@ mod tests {
         assert!(summary.summary_tokens > 0);
         assert_eq!(chat.len(), 3);
         assert!(matches!(chat[0].role, Role::System));
-        assert!(chat[1]
-            .content
-            .to_string()
-            .contains("Summary from Previous Agent"));
+        assert!(
+            chat[1]
+                .content
+                .to_string()
+                .contains("Summary from Previous Agent")
+        );
         assert_eq!(
             chat[2].content,
             MessageContent::text("1. What changed?\n2. What remains?")
@@ -1820,9 +1822,11 @@ mod tests {
             .find(|message| matches!(message.role, Role::Assistant))
             .expect("assistant message should be present on second turn");
         assert!(assistant.tool_calls.is_empty());
-        assert!(assistant
-            .content
-            .to_string()
-            .contains("Analysis: Inspect terminal"));
+        assert!(
+            assistant
+                .content
+                .to_string()
+                .contains("Analysis: Inspect terminal")
+        );
     }
 }

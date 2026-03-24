@@ -6,5 +6,5 @@ pub mod terminus_kira;
 
 pub use robust::RobustLoop;
 pub use simple::SimpleLoop;
-pub use terminus2::Terminus2Loop;
 pub use terminus_kira::TerminusKiraLoop;
+pub use terminus2::Terminus2Loop;

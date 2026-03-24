@@ -12,8 +12,7 @@ use brain_types::*;
 
 use crate::output::truncate_tool_result;
 
-const KIRA_PROMPT_TEMPLATE: &str =
-    include_str!("terminus_kira/templates/terminus-kira.txt");
+const KIRA_PROMPT_TEMPLATE: &str = include_str!("terminus_kira/templates/terminus-kira.txt");
 const TERMINUS_TIMEOUT_TEMPLATE: &str = include_str!("terminus2/templates/timeout.txt");
 const DEFAULT_KIRA_MAX_ITERATIONS: u32 = 1_000_000;
 const BLOCK_TIMEOUT: Duration = Duration::from_secs(30);
@@ -330,7 +329,8 @@ async fn run_inner(
             observation = Some(executed.observation);
         } else if !parsed.is_task_complete {
             let capture =
-                terminal_capture(&*terminal_tool, &session_key, config.tool_output_max_bytes).await?;
+                terminal_capture(&*terminal_tool, &session_key, config.tool_output_max_bytes)
+                    .await?;
             terminal_state_for_completion = capture.terminal_state.clone();
             observation = Some(capture.observation);
         }
@@ -473,18 +473,20 @@ fn parse_tool_calls(tool_calls: &[ToolCall]) -> ParsedToolTurn {
                     .and_then(|value| value.as_array())
                     .cloned()
                     .unwrap_or_default();
-                parsed.commands.extend(commands.into_iter().filter_map(|command| {
-                    let keystrokes = command.get("keystrokes")?.as_str()?.to_owned();
-                    let duration = command
-                        .get("duration")
-                        .and_then(|value| value.as_f64())
-                        .unwrap_or(1.0)
-                        .min(MAX_COMMAND_DURATION_SECONDS);
-                    Some(CommandRequest {
-                        keystrokes,
-                        duration_seconds: duration,
-                    })
-                }));
+                parsed
+                    .commands
+                    .extend(commands.into_iter().filter_map(|command| {
+                        let keystrokes = command.get("keystrokes")?.as_str()?.to_owned();
+                        let duration = command
+                            .get("duration")
+                            .and_then(|value| value.as_f64())
+                            .unwrap_or(1.0)
+                            .min(MAX_COMMAND_DURATION_SECONDS);
+                        Some(CommandRequest {
+                            keystrokes,
+                            duration_seconds: duration,
+                        })
+                    }));
             }
             "task_complete" => {
                 parsed.completion_call_id = Some(tool_call.id.clone());
@@ -823,7 +825,13 @@ async fn terminal_send_keys_with_marker(
             return Ok(latest);
         }
         if Instant::now() >= deadline {
-            let recovered_terminal_state = match terminal_interrupt(terminal_tool, session_key, max_bytes).await {
+            let recovered_terminal_state = match terminal_interrupt(
+                terminal_tool,
+                session_key,
+                max_bytes,
+            )
+            .await
+            {
                 Ok(recovered) => strip_marker(&recovered.terminal_state, &marker),
                 Err(error) => {
                     tracing::warn!(%error, session_key, "failed to interrupt timed out terminal command");
@@ -964,9 +972,11 @@ fn infer_image_mime(path: &str) -> Option<&'static str> {
 }
 
 fn render_template(template: &str, values: &[(&str, &str)]) -> String {
-    values.iter().fold(template.to_owned(), |acc, (key, value)| {
-        acc.replace(&format!("{{{key}}}"), value)
-    })
+    values
+        .iter()
+        .fold(template.to_owned(), |acc, (key, value)| {
+            acc.replace(&format!("{{{key}}}"), value)
+        })
 }
 
 fn effective_max_iterations(config: &AgentConfig) -> u32 {

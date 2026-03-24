@@ -846,10 +846,12 @@ mod tests {
         let _ = run_turn(&runtime, session.id, "hello").await;
 
         let messages = store.messages().list_for_session(session.id).await.unwrap();
-        assert!(messages[1]
-            .content
-            .to_string()
-            .contains("provider=provider-b"));
+        assert!(
+            messages[1]
+                .content
+                .to_string()
+                .contains("provider=provider-b")
+        );
     }
 
     #[tokio::test]
@@ -901,10 +903,12 @@ mod tests {
 
         let _ = run_turn(&runtime, session.id, "hello").await;
         let messages = store.messages().list_for_session(session.id).await.unwrap();
-        assert!(messages[1]
-            .content
-            .to_string()
-            .contains("loop=override-loop"));
+        assert!(
+            messages[1]
+                .content
+                .to_string()
+                .contains("loop=override-loop")
+        );
     }
 
     #[tokio::test]
@@ -1264,10 +1268,7 @@ mod tests {
             .list_for_session(next_session.id)
             .await
             .unwrap();
-        assert!(messages[1]
-            .content
-            .to_string()
-            .contains("provider=second"));
+        assert!(messages[1].content.to_string().contains("provider=second"));
     }
 
     #[tokio::test]

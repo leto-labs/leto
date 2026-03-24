@@ -22,18 +22,12 @@ pub enum AtifEvent {
         agent: atif::Agent,
     },
     /// Emitted when a new transcript step from the current turn is fully known.
-    StepCompleted {
-        step: atif::Step,
-    },
+    StepCompleted { step: atif::Step },
     /// Emitted once per completed turn with aggregate metrics for the current
     /// trajectory view.
-    FinalMetrics {
-        final_metrics: atif::FinalMetrics,
-    },
+    FinalMetrics { final_metrics: atif::FinalMetrics },
     /// Emitted with the full transcript as of the end of the turn.
-    TrajectoryCompleted {
-        trajectory: atif::Trajectory,
-    },
+    TrajectoryCompleted { trajectory: atif::Trajectory },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

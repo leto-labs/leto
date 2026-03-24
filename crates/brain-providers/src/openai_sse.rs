@@ -45,12 +45,8 @@ pub(crate) enum OaiMessageContent {
 #[derive(Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub(crate) enum OaiContentPart {
-    Text {
-        text: String,
-    },
-    ImageUrl {
-        image_url: OaiImageUrlPart,
-    },
+    Text { text: String },
+    ImageUrl { image_url: OaiImageUrlPart },
 }
 
 #[derive(Serialize)]
@@ -239,7 +235,10 @@ mod multimodal_tests {
         let serialized = serde_json::to_value(to_oai_message(&message)).unwrap();
         let content = serialized.get("content").unwrap().as_array().unwrap();
         assert_eq!(content.len(), 2);
-        assert_eq!(content[0].get("type").and_then(|v| v.as_str()), Some("text"));
+        assert_eq!(
+            content[0].get("type").and_then(|v| v.as_str()),
+            Some("text")
+        );
         assert_eq!(
             content[1].get("type").and_then(|v| v.as_str()),
             Some("image_url")
