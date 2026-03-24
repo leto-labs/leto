@@ -3853,6 +3853,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "provider-anthropic"
+version = "0.1.0"
+dependencies = [
+ "async-stream",
+ "dotenvy",
+ "eventsource-stream",
+ "futures",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+]
+
+[[package]]
 name = "provider-openai"
 version = "0.1.0"
 dependencies = [

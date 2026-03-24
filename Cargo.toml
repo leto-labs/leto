@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/atif",
     "crates/brain-types",
+    "crates/provider-anthropic",
     "crates/provider-openai",
     "crates/brain-providers",
     "crates/brain-stores",
@@ -82,6 +83,7 @@ tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
 # Internal
 atif = { path = "crates/atif" }
 brain-types = { path = "crates/brain-types" }
+provider-anthropic = { path = "crates/provider-anthropic" }
 provider-openai = { path = "crates/provider-openai" }
 brain-providers = { path = "crates/brain-providers" }
 brain-stores = { path = "crates/brain-stores" }

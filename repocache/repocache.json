@@ -338,5 +338,13 @@
     "searchPath": "openhands-sdk/openhands/sdk",
     "notes": "OpenHands Software Agent SDK. Start with openhands-sdk/openhands/sdk for conversation, tool, event, critic, and subagent runtime code; pair with the benchmarks repo to understand newer OpenHands evaluation flows.",
     "enabled": true
+  },
+  {
+    "name": "@anthropic-ai/sdk",
+    "url": "https://github.com/anthropics/anthropic-sdk-typescript",
+    "tag": "sdk-v0.80.0",
+    "searchPath": "src",
+    "notes": "Official Anthropic TypeScript SDK. Use for Messages request/response types, SSE event shapes, tool-use blocks, and general API behavior when implementing provider-anthropic.",
+    "enabled": true
   }
 ]
