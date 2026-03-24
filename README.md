@@ -95,3 +95,22 @@ ls openspec/specs/               # current truth (built capabilities)
 ## License
 
 TBD
+## Development Hooks
+
+This repository uses committed [`lefthook`](https://lefthook.dev/) hook
+configuration for local verification.
+
+After cloning, install the hooks locally:
+
+```bash
+lefthook install
+```
+
+Configured hooks:
+
+- `pre-commit`
+  - format staged Rust files with `rustfmt`
+  - restage any formatting changes automatically
+
+The hook intentionally does not run `cargo fmt --all`. It only formats the Rust
+files currently staged for commit.

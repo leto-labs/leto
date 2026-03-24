@@ -1,0 +1,6 @@
+pre-commit:
+  commands:
+    rustfmt-staged:
+      glob: "*.rs"
+      run: scripts/format-staged-rust.sh {staged_files}
+      stage_fixed: true
