@@ -9,6 +9,11 @@ five core abstractions: Provider, Tool, Store, AgentLoop, and Transport.
 ## Architecture
 - Active workspace crates:
   - `brain-types`
+  - `provider`
+  - `provider-openai`
+  - `provider-anthropic`
+  - `provider-mistralrs`
+  - `provider-llamacpp`
   - `brain-providers`
   - `brain-stores`
   - `brain-loops`
@@ -29,6 +34,7 @@ five core abstractions: Provider, Tool, Store, AgentLoop, and Transport.
   - `openai_oauth/` for subscription-backed OAuth access
   - `mistralrs/` for in-process GGUF inference
   - `llamacpp/` for llama.cpp inference
+  - standalone `provider-*` crates for shared v2 provider integrations
 
 ## Language & Toolchain
 - Rust, edition 2024, resolver 2

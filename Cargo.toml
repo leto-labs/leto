@@ -5,6 +5,8 @@ members = [
     "crates/brain-types",
     "crates/provider",
     "crates/provider-anthropic",
+    "crates/provider-llamacpp",
+    "crates/provider-mistralrs",
     "crates/provider-openai",
     "crates/brain-providers",
     "crates/brain-stores",
@@ -34,6 +36,7 @@ agent-client-protocol = "0.10.2"
 # Serialization
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+image = "0.25"
 
 # IDs
 ulid = { version = "1", features = ["serde"] }
@@ -86,6 +89,8 @@ atif = { path = "crates/atif" }
 brain-types = { path = "crates/brain-types" }
 provider = { path = "crates/provider" }
 provider-anthropic = { path = "crates/provider-anthropic" }
+provider-llamacpp = { path = "crates/provider-llamacpp" }
+provider-mistralrs = { path = "crates/provider-mistralrs" }
 provider-openai = { path = "crates/provider-openai" }
 brain-providers = { path = "crates/brain-providers" }
 brain-stores = { path = "crates/brain-stores" }

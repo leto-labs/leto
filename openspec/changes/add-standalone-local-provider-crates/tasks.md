@@ -1,0 +1,6 @@
+- [x] Add workspace manifests and OpenSpec entries for `provider-llamacpp` and `provider-mistralrs`
+- [x] Implement `provider-mistralrs` config, presets, provider adapter, and tests
+- [x] Implement `provider-llamacpp` config, presets, provider adapter, and tests
+- [x] Update docs/specs for the new standalone crates
+- [x] Validate with `openspec validate add-standalone-local-provider-crates --strict`
+- [x] Run `cargo test --workspace`

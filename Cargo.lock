@@ -3881,6 +3881,42 @@ dependencies = [
 ]
 
 [[package]]
+name = "provider-llamacpp"
+version = "0.1.0"
+dependencies = [
+ "async-stream",
+ "base64 0.22.1",
+ "encoding_rs",
+ "futures",
+ "hf-hub",
+ "image",
+ "llama-cpp-2",
+ "provider",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+]
+
+[[package]]
+name = "provider-mistralrs"
+version = "0.1.0"
+dependencies = [
+ "async-stream",
+ "base64 0.22.1",
+ "futures",
+ "image",
+ "mistralrs",
+ "provider",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+]
+
+[[package]]
 name = "provider-openai"
 version = "0.1.0"
 dependencies = [

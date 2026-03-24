@@ -39,6 +39,8 @@ session-aware reasoning engine.
   them. It must not run `cargo fmt --all`.
 - Run `cargo test --workspace` before committing
 - Strive for increased test coverage — add or update tests whenever making changes
+- Add Rust doc comments for new or changed public APIs, following rustdoc and general
+  best practices so generated documentation stays useful over time
 - Use `just coverage` for an HTML coverage report or `just coverage-summary` for
   a quick text summary (requires `cargo-llvm-cov`)
 
@@ -48,6 +50,12 @@ session-aware reasoning engine.
   - `mock` — MockProvider (always available)
   - `openai/` — OpenAiProvider, OpenAiConfig, OpenAiConfigPreset (feature `openai`, on by default)
   - `mistralrs/` — MistralRsProvider, MistralRsConfig, MistralRsModelPreset (feature `mistralrs`, off by default)
+  - `llamacpp/` — LlamaCppProvider, LlamaCppConfig, LlamaCppModelPreset (feature `llamacpp`, off by default)
+- `provider` — shared v2 Provider SDK (request/event/capability/model metadata)
+- `provider-openai` — standalone OpenAI-compatible v2 provider crate
+- `provider-anthropic` — standalone Anthropic v2 provider crate
+- `provider-mistralrs` — standalone mistral.rs local v2 provider crate (feature `mistralrs`, off by default)
+- `provider-llamacpp` — standalone llama.cpp local v2 provider crate (feature `llamacpp`, off by default)
 - `brain-stores` — InMemoryStore, FileStore (session CRUD + message persistence)
 - `brain-tools` — tool implementations using driver trait + adapter pattern:
   - `echo.rs` — EchoTool (platform-independent, no driver)

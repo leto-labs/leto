@@ -43,6 +43,11 @@ The agent loop is a **trait**, not a hardcoded function. Different strategies ar
 crates/
   brain-types/        Data structs + 4 traits (Provider, Tool, Store, AgentLoop)
   brain-providers/    MockProvider, OpenAiProvider (feature-gated)
+  provider/           Shared v2 provider SDK
+  provider-openai/    Standalone OpenAI-compatible v2 provider crate
+  provider-anthropic/ Standalone Anthropic v2 provider crate
+  provider-mistralrs/ Standalone mistral.rs local v2 provider crate
+  provider-llamacpp/  Standalone llama.cpp local v2 provider crate
   brain-stores/       InMemoryStore (FileStore, SqliteStore later)
   brain-loops/        SimpleLoop, EchoTool (PlanLoop, ExploreLoop later)
   brain-core/         Facade — re-exports all crates above
@@ -81,6 +86,8 @@ OPENAI_MODEL=gpt-4o cargo run -p cli-echo          # custom model
 cargo test --workspace                              # run all tests
 cargo build --release                               # release build
 cargo build --no-default-features -p brain-providers # no HTTP deps
+cargo check -p provider-mistralrs --features mistralrs
+cargo check -p provider-llamacpp --features llamacpp
 ```
 
 ## Spec-Driven Development
