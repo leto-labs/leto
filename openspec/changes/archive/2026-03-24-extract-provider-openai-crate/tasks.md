@@ -1,0 +1,8 @@
+- [x] Add the `provider-openai` workspace crate with standalone config, error, client, and Responses types
+- [x] Move the OpenAI Responses parser and stream handling into `provider-openai`
+- [x] Add isolated unit and live integration tests for `provider-openai`
+- [x] Remove `Provider2` and `Response*` ownership from `brain-types`
+- [x] Remove the v2 Responses implementation and tests from `brain-providers`
+- [x] Keep the legacy `OpenAiProvider` path compiling unchanged
+- [x] Validate with `openspec validate extract-provider-openai-crate --strict`
+- [x] Run `cargo test -p provider-openai` and `cargo test --workspace`

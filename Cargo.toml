@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/atif",
     "crates/brain-types",
+    "crates/provider-openai",
     "crates/brain-providers",
     "crates/brain-stores",
     "crates/brain-loops",
@@ -48,6 +49,7 @@ anyhow = "1"
 # HTTP / SSE
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream"] }
 eventsource-stream = "0.2"
+tokio-tungstenite = { version = "0.28", features = ["rustls-tls-webpki-roots"] }
 toml = "0.8"
 
 # Crypto / OAuth
@@ -80,6 +82,7 @@ tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
 # Internal
 atif = { path = "crates/atif" }
 brain-types = { path = "crates/brain-types" }
+provider-openai = { path = "crates/provider-openai" }
 brain-providers = { path = "crates/brain-providers" }
 brain-stores = { path = "crates/brain-stores" }
 brain-loops = { path = "crates/brain-loops" }

@@ -1,0 +1,8 @@
+- [x] Add a new OpenSpec change for the `provider-openai` API-surface refactor
+- [x] Refactor `provider-openai` into explicit `responses` and `chat_completions` modules
+- [x] Add a top-level client façade exposing both surfaces
+- [x] Preserve Responses create/resource/stream support
+- [x] Add Chat Completions create and SSE stream support
+- [x] Add tests for chat-completions parsing/serialization and update live smoke tests
+- [x] Validate with `openspec validate refactor-provider-openai-api-surfaces --strict`
+- [x] Run `cargo test -p provider-openai`
