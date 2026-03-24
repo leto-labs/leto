@@ -1,12 +1,23 @@
+//! Concrete client for the OpenAI Responses API resource family.
+//!
+//! Official references:
+//! - Create a response: <https://developers.openai.com/api/reference/resources/responses/methods/create>
+//! - Retrieve a response: <https://developers.openai.com/api/reference/resources/responses/methods/retrieve>
+//! - List input items: <https://developers.openai.com/api/reference/resources/responses/subresources/input_items/methods/list>
+//! - Count input tokens: <https://developers.openai.com/api/reference/resources/responses/subresources/input_tokens/methods/count>
+//! - Cancel a response: <https://developers.openai.com/api/reference/resources/responses/methods/cancel>
+//! - Compact a response: <https://developers.openai.com/api/reference/resources/responses/methods/compact>
+
 use std::pin::Pin;
 
 use futures::{SinkExt, Stream, StreamExt};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_tungstenite::connect_async;
+use tokio_tungstenite::tungstenite::Message as WsMessage;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::http::HeaderValue;
-use tokio_tungstenite::tungstenite::Message as WsMessage;
 
+use crate::Error;
 use crate::client::Client;
 use crate::responses::parser::{
     parse_response_compaction_value, parse_response_input_token_count_value,
@@ -19,14 +30,18 @@ use crate::responses::types::{
     ResponseRequest, ResponseRetrieveRequest, ResponseStreamEvent,
 };
 use crate::shared::{ensure_success, json_value};
-use crate::Error;
 
+/// Streaming response type returned by [`ResponsesClient::stream`] and
+/// [`ResponsesClient::stream_retrieve`].
 pub type ResponseStream = Pin<Box<dyn Stream<Item = Result<ResponseStreamEvent, Error>> + Send>>;
 
+/// Streaming transport used when creating a streamed response.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ResponseStreamTransport {
+    /// Server-sent events over HTTP.
     Sse,
+    /// WebSocket transport for response creation.
     WebSocket,
 }
 
@@ -45,6 +60,7 @@ struct WebSocketResponseCreateRequest<'a> {
     request: &'a ResponseRequest,
 }
 
+/// Handle for Responses API operations scoped to a parent [`crate::Client`].
 pub struct ResponsesClient<'a> {
     client: &'a Client,
 }
@@ -127,10 +143,7 @@ impl<'a> ResponsesClient<'a> {
         query
     }
 
-    fn response_item_list_query(
-        &self,
-        request: &ResponseItemListRequest,
-    ) -> Vec<(String, String)> {
+    fn response_item_list_query(&self, request: &ResponseItemListRequest) -> Vec<(String, String)> {
         let mut query = Vec::new();
         if let Some(after) = &request.after {
             query.push(("after".to_owned(), after.clone()));
@@ -147,6 +160,12 @@ impl<'a> ResponsesClient<'a> {
         query
     }
 
+    /// Creates a non-streaming response.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error`] if the HTTP request fails or the payload cannot be
+    /// parsed into a [`ResponseObject`].
     pub async fn create(&self, request: &ResponseRequest) -> Result<ResponseObject, Error> {
         let mut body = request.clone();
         self.normalize_response_request(&mut body);
@@ -225,6 +244,7 @@ impl<'a> ResponsesClient<'a> {
         }
     }
 
+    /// Retrieves an existing response by identifier.
     pub async fn retrieve(
         &self,
         response_id: &str,
@@ -244,6 +264,7 @@ impl<'a> ResponsesClient<'a> {
         Ok(parse_response_object_value(json_value(response).await?))
     }
 
+    /// Retrieves an existing response and streams follow-up events over SSE.
     pub async fn stream_retrieve(
         &self,
         response_id: &str,
@@ -264,8 +285,11 @@ impl<'a> ResponsesClient<'a> {
         Ok(sse_stream_from_response(response))
     }
 
+    /// Cancels a background response.
     pub async fn cancel(&self, response_id: &str) -> Result<ResponseObject, Error> {
-        let url = self.client.endpoint_joined_url(&["responses", response_id, "cancel"])?;
+        let url = self
+            .client
+            .endpoint_joined_url(&["responses", response_id, "cancel"])?;
         let response = self
             .client
             .http()
@@ -279,6 +303,7 @@ impl<'a> ResponsesClient<'a> {
         Ok(parse_response_object_value(json_value(response).await?))
     }
 
+    /// Deletes a stored response.
     pub async fn delete(&self, response_id: &str) -> Result<(), Error> {
         let response = self
             .client
@@ -293,6 +318,7 @@ impl<'a> ResponsesClient<'a> {
         Ok(())
     }
 
+    /// Compacts a stored response into a shorter artifact.
     pub async fn compact(
         &self,
         request: &ResponseCompactRequest,
@@ -311,6 +337,7 @@ impl<'a> ResponsesClient<'a> {
         Ok(parse_response_compaction_value(json_value(response).await?))
     }
 
+    /// Lists input items associated with a stored response.
     pub async fn list_input_items(
         &self,
         response_id: &str,
@@ -330,6 +357,7 @@ impl<'a> ResponsesClient<'a> {
         Ok(parse_response_item_page_value(json_value(response).await?))
     }
 
+    /// Counts input tokens for a hypothetical response request.
     pub async fn count_input_tokens(
         &self,
         request: &ResponseInputTokenCountRequest,
@@ -348,7 +376,9 @@ impl<'a> ResponsesClient<'a> {
             .map_err(|e| Error::Inference(e.to_string()))?;
 
         let response = ensure_success(response).await?;
-        Ok(parse_response_input_token_count_value(json_value(response).await?))
+        Ok(parse_response_input_token_count_value(
+            json_value(response).await?,
+        ))
     }
 }
 

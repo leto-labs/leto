@@ -1,9 +1,15 @@
+//! Typed request, response, and chunk models for the Chat Completions API.
+//!
+//! Official reference:
+//! <https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create>
+
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
 use crate::TokenUsage;
 
+/// Request body for `POST /chat/completions`.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 #[serde(default)]
 pub struct ChatCompletionRequest {
@@ -34,6 +40,7 @@ pub struct ChatCompletionRequest {
 }
 
 impl ChatCompletionRequest {
+    /// Creates a minimal chat-completions request with one user text message.
     pub fn user_text(text: impl Into<String>) -> Self {
         Self {
             messages: vec![ChatCompletionMessage::user_text(text)],
@@ -42,6 +49,7 @@ impl ChatCompletionRequest {
     }
 }
 
+/// Message object used by the Chat Completions API.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ChatCompletionMessage {
     pub role: ChatCompletionRole,
@@ -58,6 +66,7 @@ pub struct ChatCompletionMessage {
 }
 
 impl ChatCompletionMessage {
+    /// Creates a user text message.
     pub fn user_text(text: impl Into<String>) -> Self {
         Self {
             role: ChatCompletionRole::User,
@@ -258,7 +267,10 @@ mod tests {
         let serialized = serde_json::to_value(message).unwrap();
         let content = serialized.get("content").unwrap().as_array().unwrap();
         assert_eq!(content.len(), 2);
-        assert_eq!(content[0].get("type").and_then(|v| v.as_str()), Some("text"));
+        assert_eq!(
+            content[0].get("type").and_then(|v| v.as_str()),
+            Some("text")
+        );
         assert_eq!(
             content[1].get("type").and_then(|v| v.as_str()),
             Some("image_url")

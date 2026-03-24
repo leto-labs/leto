@@ -1,10 +1,17 @@
+//! Top-level OpenAI client facade.
+//!
+//! Official references:
+//! - Responses API overview: <https://developers.openai.com/api/reference/responses/overview>
+//! - Chat Completions overview: <https://developers.openai.com/api/reference/chat-completions/overview>
+
 use reqwest::Url;
 
+use crate::Error;
 use crate::chat_completions::ChatCompletionsClient;
 use crate::config::Config;
 use crate::responses::ResponsesClient;
-use crate::Error;
 
+/// Top-level OpenAI wire client that exposes explicit modern API surfaces.
 #[derive(Debug, Clone)]
 pub struct Client {
     config: Config,
@@ -12,6 +19,7 @@ pub struct Client {
 }
 
 impl Client {
+    /// Creates a new client with a default `reqwest` HTTP client.
     pub fn new(config: Config) -> Self {
         Self {
             config,
@@ -19,6 +27,7 @@ impl Client {
         }
     }
 
+    /// Creates a client with a caller-provided HTTP client.
     pub fn with_http_client(config: Config, client: reqwest::Client) -> Self {
         Self {
             config,
@@ -26,14 +35,23 @@ impl Client {
         }
     }
 
+    /// Returns the immutable client configuration.
     pub fn config(&self) -> &Config {
         &self.config
     }
 
+    /// Returns the Responses API surface.
+    ///
+    /// Official reference:
+    /// <https://developers.openai.com/api/reference/resources/responses/methods/create>
     pub fn responses(&self) -> ResponsesClient<'_> {
         ResponsesClient::new(self)
     }
 
+    /// Returns the Chat Completions API surface.
+    ///
+    /// Official reference:
+    /// <https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create>
     pub fn chat_completions(&self) -> ChatCompletionsClient<'_> {
         ChatCompletionsClient::new(self)
     }

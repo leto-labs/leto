@@ -1,3 +1,5 @@
+//! Env-gated live smoke tests for the OpenAI wire client.
+
 use futures::StreamExt;
 use provider_openai::{
     ChatCompletionChunk, ChatCompletionRequest, Client, Config, Error, ResponseCompactRequest,

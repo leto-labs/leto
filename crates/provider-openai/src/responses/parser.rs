@@ -1,3 +1,5 @@
+//! Parsers for OpenAI Responses objects and SSE events.
+
 use async_stream::stream;
 use eventsource_stream::Eventsource;
 use futures::StreamExt;
@@ -13,6 +15,7 @@ use crate::responses::types::{
 };
 use crate::{Error, TokenUsage};
 
+/// Builds a typed SSE stream from an HTTP response.
 pub(crate) fn sse_stream_from_response(response: reqwest::Response) -> ResponseStream {
     let event_source = response.bytes_stream().eventsource();
 
@@ -69,10 +72,12 @@ pub(crate) fn sse_stream_from_response(response: reqwest::Response) -> ResponseS
     Box::pin(s)
 }
 
+/// Parses a response object from raw JSON.
 pub fn parse_response_object_value(raw: Value) -> ResponseObject {
     parse_response_object(Some(&raw.clone()), raw)
 }
 
+/// Parses a response compaction object from raw JSON.
 pub fn parse_response_compaction_value(raw: Value) -> ResponseCompaction {
     let output = raw
         .get("output")
@@ -95,12 +100,19 @@ pub fn parse_response_compaction_value(raw: Value) -> ResponseCompaction {
     }
 }
 
+/// Parses a paginated input-item list from raw JSON.
 pub fn parse_response_item_page_value(raw: Value) -> ResponseItemPage {
     ResponseItemPage {
         data: raw
             .get("data")
             .and_then(Value::as_array)
-            .map(|items| items.iter().cloned().map(parse_response_page_item).collect())
+            .map(|items| {
+                items
+                    .iter()
+                    .cloned()
+                    .map(parse_response_page_item)
+                    .collect()
+            })
             .unwrap_or_default(),
         first_id: optional_string_field(&raw, "first_id"),
         last_id: optional_string_field(&raw, "last_id"),
@@ -112,6 +124,7 @@ pub fn parse_response_item_page_value(raw: Value) -> ResponseItemPage {
     }
 }
 
+/// Parses an input-token-count response from raw JSON.
 pub fn parse_response_input_token_count_value(raw: Value) -> ResponseInputTokenCount {
     ResponseInputTokenCount {
         input_tokens: raw
@@ -122,6 +135,7 @@ pub fn parse_response_input_token_count_value(raw: Value) -> ResponseInputTokenC
     }
 }
 
+/// Parses a single Responses SSE event payload.
 pub fn parse_response_stream_event(raw: Value) -> Result<Option<ResponseStreamEvent>, Error> {
     let sequence_number = raw.get("sequence_number").and_then(Value::as_u64);
     let event_type = raw
@@ -280,7 +294,12 @@ fn parse_response_object(raw_ref: Option<&Value>, raw_owned: Value) -> ResponseO
     let output = raw
         .get("output")
         .and_then(Value::as_array)
-        .map(|items| items.iter().map(|item| parse_output_item(Some(item))).collect())
+        .map(|items| {
+            items
+                .iter()
+                .map(|item| parse_output_item(Some(item)))
+                .collect()
+        })
         .unwrap_or_default();
 
     ResponseObject {
@@ -309,14 +328,14 @@ fn parse_response_object(raw_ref: Option<&Value>, raw_owned: Value) -> ResponseO
                     .map(str::to_owned),
                 event_id: None,
             }),
-        incomplete_details: raw
-            .get("incomplete_details")
-            .map(|details| ResponseIncompleteDetails {
+        incomplete_details: raw.get("incomplete_details").map(|details| {
+            ResponseIncompleteDetails {
                 reason: details
                     .get("reason")
                     .and_then(Value::as_str)
                     .map(str::to_owned),
-            }),
+            }
+        }),
         instructions: optional_string_field(raw, "instructions"),
         output_text: optional_string_field(raw, "output_text"),
         output,
@@ -368,7 +387,12 @@ fn parse_output_item(raw: Option<&Value>) -> ResponseOutputItem {
             content: raw
                 .get("content")
                 .and_then(Value::as_array)
-                .map(|parts| parts.iter().map(|part| parse_output_content_part(Some(part))).collect())
+                .map(|parts| {
+                    parts
+                        .iter()
+                        .map(|part| parse_output_content_part(Some(part)))
+                        .collect()
+                })
                 .unwrap_or_default(),
             raw,
         }),
@@ -377,7 +401,12 @@ fn parse_output_item(raw: Option<&Value>) -> ResponseOutputItem {
             summary: raw
                 .get("summary")
                 .and_then(Value::as_array)
-                .map(|parts| parts.iter().map(|part| parse_reasoning_summary_part(Some(part))).collect())
+                .map(|parts| {
+                    parts
+                        .iter()
+                        .map(|part| parse_reasoning_summary_part(Some(part)))
+                        .collect()
+                })
                 .unwrap_or_default(),
             raw,
         }),

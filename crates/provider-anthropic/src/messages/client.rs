@@ -1,3 +1,9 @@
+//! Concrete client for Anthropic's Messages API.
+//!
+//! Official references:
+//! - Messages create: <https://platform.claude.com/docs/en/api/messages/create>
+//! - Streaming: <https://platform.claude.com/docs/en/build-with-claude/streaming>
+
 use std::pin::Pin;
 
 use futures::Stream;
@@ -8,9 +14,11 @@ use crate::messages::parser::{parse_message_object_value, sse_stream_from_respon
 use crate::messages::types::MessageRequest;
 use crate::shared::{ensure_success, json_value};
 
+/// Streaming type returned by [`MessagesClient::stream`].
 pub type MessageStream =
     Pin<Box<dyn Stream<Item = Result<crate::messages::MessageStreamEvent, Error>> + Send>>;
 
+/// Handle for Messages API operations scoped to a parent [`crate::Client`].
 pub struct MessagesClient<'a> {
     client: &'a Client,
 }
@@ -26,6 +34,7 @@ impl<'a> MessagesClient<'a> {
         }
     }
 
+    /// Creates a non-streaming message response.
     pub async fn create(
         &self,
         request: &MessageRequest,
@@ -50,6 +59,7 @@ impl<'a> MessagesClient<'a> {
         parse_message_object_value(json_value(response).await?)
     }
 
+    /// Creates a streaming message response over server-sent events.
     pub async fn stream(&self, request: &MessageRequest) -> Result<MessageStream, Error> {
         let mut body = request.clone();
         self.normalize_request(&mut body);

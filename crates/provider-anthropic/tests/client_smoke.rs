@@ -1,3 +1,5 @@
+//! Env-gated live smoke tests for the Anthropic wire client.
+
 use futures::StreamExt;
 use provider_anthropic::{
     Client, Config, ContentBlock, CustomToolDefinition, Error, MessageParam, MessageRequest,

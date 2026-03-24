@@ -1,3 +1,5 @@
+//! Shared helpers used by the Anthropic wire client.
+
 use serde_json::Value;
 
 use crate::Error;

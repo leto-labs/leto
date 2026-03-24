@@ -1,18 +1,26 @@
+//! Concrete client for the Chat Completions API surface.
+//!
+//! Official references:
+//! - Create a chat completion: <https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create>
+//! - Chat Completions streaming events: <https://developers.openai.com/api/reference/resources/chat/subresources/completions/streaming-events>
+
 use std::pin::Pin;
 
 use futures::Stream;
 
+use crate::Error;
 use crate::chat_completions::parser::{
     parse_chat_completion_object_value, sse_stream_from_response,
 };
 use crate::chat_completions::types::{ChatCompletionRequest, ChatCompletionStreamOptions};
 use crate::client::Client;
 use crate::shared::{ensure_success, json_value};
-use crate::Error;
 
+/// Streaming type returned by [`ChatCompletionsClient::stream`].
 pub type ChatCompletionStream =
     Pin<Box<dyn Stream<Item = Result<crate::chat_completions::ChatCompletionChunk, Error>> + Send>>;
 
+/// Handle for Chat Completions operations scoped to a parent [`crate::Client`].
 pub struct ChatCompletionsClient<'a> {
     client: &'a Client,
 }
@@ -28,6 +36,7 @@ impl<'a> ChatCompletionsClient<'a> {
         }
     }
 
+    /// Creates a non-streaming chat completion.
     pub async fn create(
         &self,
         request: &ChatCompletionRequest,
@@ -49,6 +58,7 @@ impl<'a> ChatCompletionsClient<'a> {
         parse_chat_completion_object_value(json_value(response).await?)
     }
 
+    /// Creates a streaming chat completion over server-sent events.
     pub async fn stream(
         &self,
         request: &ChatCompletionRequest,
@@ -62,9 +72,9 @@ impl<'a> ChatCompletionsClient<'a> {
         }
 
         let mut payload = serde_json::to_value(&body).map_err(Error::Json)?;
-        let object = payload
-            .as_object_mut()
-            .ok_or_else(|| Error::Internal("chat completions request must serialize to an object".into()))?;
+        let object = payload.as_object_mut().ok_or_else(|| {
+            Error::Internal("chat completions request must serialize to an object".into())
+        })?;
         object.insert("stream".into(), serde_json::Value::Bool(true));
 
         let response = self

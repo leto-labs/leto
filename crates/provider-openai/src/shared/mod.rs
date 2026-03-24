@@ -1,7 +1,10 @@
+//! Shared helpers used by the OpenAI wire client.
+
 use serde_json::Value;
 
 use crate::Error;
 
+/// Token-usage structure shared by Responses and Chat Completions parsing.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
 pub struct TokenUsage {
     pub prompt: u32,
@@ -15,7 +18,9 @@ pub struct TokenUsage {
     pub reasoning: Option<u32>,
 }
 
-pub(crate) async fn ensure_success(response: reqwest::Response) -> Result<reqwest::Response, Error> {
+pub(crate) async fn ensure_success(
+    response: reqwest::Response,
+) -> Result<reqwest::Response, Error> {
     if response.status().is_success() {
         Ok(response)
     } else {

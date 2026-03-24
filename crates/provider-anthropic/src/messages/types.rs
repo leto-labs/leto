@@ -1,7 +1,15 @@
+//! Typed request, response, and streaming-event models for Anthropic Messages.
+//!
+//! Official references:
+//! - Messages create: <https://platform.claude.com/docs/en/api/messages/create>
+//! - Tool use: <https://platform.claude.com/docs/en/agents-and-tools/tool-use/overview>
+//! - Streaming: <https://platform.claude.com/docs/en/build-with-claude/streaming>
+
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+/// Request body for `POST /v1/messages`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct MessageRequest {
@@ -62,6 +70,7 @@ impl Default for MessageRequest {
 }
 
 impl MessageRequest {
+    /// Creates a minimal request with a single user text message.
     pub fn user_text(text: impl Into<String>) -> Self {
         Self {
             messages: vec![MessageParam::user(text)],
@@ -70,6 +79,7 @@ impl MessageRequest {
     }
 }
 
+/// Input message sent to Anthropic.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct MessageParam {
     pub role: MessageRole,
@@ -77,6 +87,7 @@ pub struct MessageParam {
 }
 
 impl MessageParam {
+    /// Creates a user text message.
     pub fn user(text: impl Into<String>) -> Self {
         Self {
             role: MessageRole::User,
@@ -84,6 +95,7 @@ impl MessageParam {
         }
     }
 
+    /// Creates an assistant text message.
     pub fn assistant(text: impl Into<String>) -> Self {
         Self {
             role: MessageRole::Assistant,
@@ -365,6 +377,7 @@ pub struct ServerToolUsage {
     pub web_search_requests: u32,
 }
 
+/// Stream event emitted by Anthropic Messages SSE.
 #[derive(Debug, Clone, PartialEq)]
 pub enum MessageStreamEvent {
     MessageStart {

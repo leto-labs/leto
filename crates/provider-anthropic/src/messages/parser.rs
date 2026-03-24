@@ -1,3 +1,5 @@
+//! Parsers for Anthropic Messages objects and SSE events.
+
 use async_stream::stream;
 use eventsource_stream::Eventsource;
 use futures::StreamExt;
@@ -10,6 +12,7 @@ use crate::messages::types::{
     MessageObject, MessageStreamEvent, MessageUsage, ServerToolUsage, StopReason,
 };
 
+/// Builds a typed SSE stream from an HTTP response.
 pub(crate) fn sse_stream_from_response(response: reqwest::Response) -> MessageStream {
     let event_source = response.bytes_stream().eventsource();
 
@@ -68,6 +71,7 @@ pub(crate) fn sse_stream_from_response(response: reqwest::Response) -> MessageSt
     Box::pin(s)
 }
 
+/// Parses a non-streaming message object from raw JSON.
 pub(crate) fn parse_message_object_value(raw: Value) -> Result<MessageObject, Error> {
     Ok(MessageObject {
         id: optional_string_field(&raw, "id"),
@@ -86,6 +90,7 @@ pub(crate) fn parse_message_object_value(raw: Value) -> Result<MessageObject, Er
     })
 }
 
+/// Parses a single Anthropic Messages SSE payload.
 pub(crate) fn parse_message_stream_event(
     raw: Value,
     event_name: Option<&str>,

@@ -1,9 +1,18 @@
+//! Typed request, response, and streaming-event models for the OpenAI
+//! Responses API.
+//!
+//! Official references:
+//! - Create a response: <https://developers.openai.com/api/reference/resources/responses/methods/create>
+//! - Retrieve a response: <https://developers.openai.com/api/reference/resources/responses/methods/retrieve>
+//! - Responses streaming events: <https://developers.openai.com/api/reference/resources/responses/streaming-events>
+
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
 use crate::TokenUsage;
 
+/// Request body for `POST /responses`.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 #[serde(default)]
 pub struct ResponseRequest {
@@ -68,6 +77,7 @@ pub struct ResponseRequest {
 }
 
 impl ResponseRequest {
+    /// Creates a minimal request with a single user text input.
     pub fn user_text(text: impl Into<String>) -> Self {
         Self {
             input: vec![ResponseInputItem::message(
@@ -78,6 +88,7 @@ impl ResponseRequest {
         }
     }
 
+    /// Returns the most recent user text input, omitting non-text content.
     pub fn last_user_input_text_lossy(&self) -> Option<String> {
         self.input.iter().rev().find_map(|item| match item {
             ResponseInputItem::Message { role, content } if *role == ResponseInputRole::User => {
@@ -471,17 +482,39 @@ pub struct ResponseStreamEvent {
     pub event: ResponseEvent,
 }
 
+/// Stream event emitted by the Responses API.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum ResponseEvent {
-    ResponseCreated { response: ResponseObject },
-    ResponseQueued { response: ResponseObject },
-    ResponseInProgress { response: ResponseObject },
-    ResponseCompleted { response: ResponseObject },
-    ResponseIncomplete { response: ResponseObject },
-    ResponseFailed { response: ResponseObject },
-    Error { error: ResponseErrorInfo, raw: serde_json::Value },
-    OutputItemAdded { output_index: u32, item: ResponseOutputItem },
-    OutputItemDone { output_index: u32, item: ResponseOutputItem },
+    ResponseCreated {
+        response: ResponseObject,
+    },
+    ResponseQueued {
+        response: ResponseObject,
+    },
+    ResponseInProgress {
+        response: ResponseObject,
+    },
+    ResponseCompleted {
+        response: ResponseObject,
+    },
+    ResponseIncomplete {
+        response: ResponseObject,
+    },
+    ResponseFailed {
+        response: ResponseObject,
+    },
+    Error {
+        error: ResponseErrorInfo,
+        raw: serde_json::Value,
+    },
+    OutputItemAdded {
+        output_index: u32,
+        item: ResponseOutputItem,
+    },
+    OutputItemDone {
+        output_index: u32,
+        item: ResponseOutputItem,
+    },
     ContentPartAdded {
         item_id: String,
         output_index: u32,
@@ -506,9 +539,13 @@ pub enum ResponseEvent {
         content_index: u32,
         text: String,
     },
-    OutputAudioDelta { delta: String },
+    OutputAudioDelta {
+        delta: String,
+    },
     OutputAudioDone,
-    OutputAudioTranscriptDelta { delta: String },
+    OutputAudioTranscriptDelta {
+        delta: String,
+    },
     OutputAudioTranscriptDone,
     RefusalDelta {
         item_id: String,

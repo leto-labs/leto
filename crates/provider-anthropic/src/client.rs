@@ -1,6 +1,13 @@
+//! Top-level Anthropic client facade.
+//!
+//! Official references:
+//! - API overview: <https://platform.claude.com/docs/en/api/overview>
+//! - Messages create: <https://platform.claude.com/docs/en/api/messages/create>
+
 use crate::config::Config;
 use crate::messages::MessagesClient;
 
+/// Top-level Anthropic wire client exposing the Messages API surface.
 #[derive(Debug, Clone)]
 pub struct Client {
     config: Config,
@@ -8,6 +15,7 @@ pub struct Client {
 }
 
 impl Client {
+    /// Creates a new client with a default `reqwest` HTTP client.
     pub fn new(config: Config) -> Self {
         Self {
             config,
@@ -15,6 +23,7 @@ impl Client {
         }
     }
 
+    /// Creates a client with a caller-provided HTTP client.
     pub fn with_http_client(config: Config, client: reqwest::Client) -> Self {
         Self {
             config,
@@ -22,10 +31,15 @@ impl Client {
         }
     }
 
+    /// Returns the immutable client configuration.
     pub fn config(&self) -> &Config {
         &self.config
     }
 
+    /// Returns the Messages API surface.
+    ///
+    /// Official reference:
+    /// <https://platform.claude.com/docs/en/api/messages/create>
     pub fn messages(&self) -> MessagesClient<'_> {
         MessagesClient::new(self)
     }

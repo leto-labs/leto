@@ -1,3 +1,5 @@
+//! Parsers for Chat Completions responses and SSE chunks.
+
 use async_stream::stream;
 use eventsource_stream::Eventsource;
 use futures::StreamExt;
@@ -8,8 +10,8 @@ use crate::chat_completions::client::ChatCompletionStream;
 use crate::chat_completions::types::{
     ChatCompletionChunk, ChatCompletionChunkChoice, ChatCompletionChunkDelta,
     ChatCompletionFunctionCall, ChatCompletionFunctionCallChunk, ChatCompletionMessage,
-    ChatCompletionMessageContent, ChatCompletionObject, ChatCompletionRole,
-    ChatCompletionToolCall, ChatCompletionToolCallChunk,
+    ChatCompletionMessageContent, ChatCompletionObject, ChatCompletionRole, ChatCompletionToolCall,
+    ChatCompletionToolCallChunk,
 };
 use crate::{Error, TokenUsage};
 
@@ -118,7 +120,10 @@ struct CompletionTokenDetails {
     reasoning_tokens: Option<u32>,
 }
 
-pub(crate) fn parse_chat_completion_object_value(raw: Value) -> Result<ChatCompletionObject, Error> {
+/// Parses a non-streaming chat completion from raw JSON.
+pub(crate) fn parse_chat_completion_object_value(
+    raw: Value,
+) -> Result<ChatCompletionObject, Error> {
     let wire: WireChatCompletionObject = serde_json::from_value(raw.clone())?;
     Ok(ChatCompletionObject {
         id: wire.id,
@@ -131,6 +136,7 @@ pub(crate) fn parse_chat_completion_object_value(raw: Value) -> Result<ChatCompl
     })
 }
 
+/// Parses a streamed chat-completions chunk from raw JSON.
 pub(crate) fn parse_chat_completion_chunk_value(raw: Value) -> Result<ChatCompletionChunk, Error> {
     let wire: WireChatCompletionChunk = serde_json::from_value(raw.clone())?;
     Ok(ChatCompletionChunk {
@@ -144,6 +150,7 @@ pub(crate) fn parse_chat_completion_chunk_value(raw: Value) -> Result<ChatComple
     })
 }
 
+/// Builds a typed chunk stream from a streaming HTTP response.
 pub(crate) fn sse_stream_from_response(response: reqwest::Response) -> ChatCompletionStream {
     let event_source = response.bytes_stream().eventsource();
 
@@ -202,7 +209,12 @@ fn map_choice(wire: WireChatCompletionChoice) -> crate::chat_completions::ChatCo
                 .unwrap_or(ChatCompletionRole::Assistant),
             content: wire.message.content.map(ChatCompletionMessageContent::Text),
             name: None,
-            tool_calls: wire.message.tool_calls.into_iter().map(map_tool_call).collect(),
+            tool_calls: wire
+                .message
+                .tool_calls
+                .into_iter()
+                .map(map_tool_call)
+                .collect(),
             tool_call_id: None,
             extra: Default::default(),
         },
@@ -216,7 +228,12 @@ fn map_chunk_choice(wire: WireChunkChoice) -> ChatCompletionChunkChoice {
         delta: ChatCompletionChunkDelta {
             role: wire.delta.role.as_deref().map(map_role),
             content: wire.delta.content,
-            tool_calls: wire.delta.tool_calls.into_iter().map(map_tool_call_chunk).collect(),
+            tool_calls: wire
+                .delta
+                .tool_calls
+                .into_iter()
+                .map(map_tool_call_chunk)
+                .collect(),
         },
         finish_reason: wire.finish_reason,
     }
@@ -237,10 +254,12 @@ fn map_tool_call_chunk(wire: WireToolCallChunk) -> ChatCompletionToolCallChunk {
     ChatCompletionToolCallChunk {
         index: wire.index,
         id: wire.id,
-        function: wire.function.map(|function| ChatCompletionFunctionCallChunk {
-            name: function.name,
-            arguments: function.arguments,
-        }),
+        function: wire
+            .function
+            .map(|function| ChatCompletionFunctionCallChunk {
+                name: function.name,
+                arguments: function.arguments,
+            }),
     }
 }
 
@@ -295,6 +314,9 @@ mod tests {
         let parsed = parse_chat_completion_chunk_value(raw).unwrap();
         assert_eq!(parsed.id.as_deref(), Some("chatcmpl-123"));
         assert_eq!(parsed.choices[0].delta.content.as_deref(), Some("hel"));
-        assert_eq!(parsed.choices[0].delta.role, Some(ChatCompletionRole::Assistant));
+        assert_eq!(
+            parsed.choices[0].delta.role,
+            Some(ChatCompletionRole::Assistant)
+        );
     }
 }
