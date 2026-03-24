@@ -30,6 +30,9 @@ session-aware reasoning engine.
 - Library code never reads env vars — config is passed as data
 - Greenfield project — prefer clean code over backward compatibility. Breaking
   changes are fine; confirm with user if unsure rather than adding compat shims.
+- NEVER run `cargo fmt --all` in this repo. It can reformat unrelated files and
+  create noisy diffs outside the intended change scope. Format only the files
+  you intentionally edited.
 - Run `cargo test --workspace` before committing
 - Strive for increased test coverage — add or update tests whenever making changes
 - Use `just coverage` for an HTML coverage report or `just coverage-summary` for
