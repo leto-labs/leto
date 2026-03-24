@@ -1,8 +1,9 @@
 use std::cmp::Reverse;
 use std::ffi::OsStr;
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 use anyhow::{Context, Result, bail};
 use clap::Parser;
@@ -623,18 +624,50 @@ fn write_outputs(output_dir: &Path, files: &[(String, String)], check: bool) -> 
     }
 
     for (name, content) in files {
+        let formatted = format_rust_source(content)
+            .with_context(|| format!("format generated file {}", name))?;
         let path = output_dir.join(name);
         if check {
             let existing = fs::read_to_string(&path)
                 .with_context(|| format!("missing generated file {}", path.display()))?;
-            if existing != *content {
+            if existing != formatted {
                 bail!("generated file out of date: {}", path.display());
             }
         } else {
-            fs::write(&path, content)?;
+            fs::write(&path, formatted)?;
         }
     }
     Ok(())
+}
+
+fn format_rust_source(source: &str) -> Result<String> {
+    let mut child = Command::new("rustfmt")
+        .args(["--edition", "2024", "--emit", "stdout"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .context("failed to spawn rustfmt")?;
+
+    {
+        let stdin = child
+            .stdin
+            .as_mut()
+            .context("failed to open rustfmt stdin")?;
+        stdin
+            .write_all(source.as_bytes())
+            .context("failed to write source to rustfmt")?;
+    }
+
+    let output = child
+        .wait_with_output()
+        .context("failed to wait for rustfmt")?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        bail!("rustfmt failed: {stderr}");
+    }
+
+    String::from_utf8(output.stdout).context("rustfmt output was not valid UTF-8")
 }
 
 #[cfg(test)]

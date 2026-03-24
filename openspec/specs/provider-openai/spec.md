@@ -152,12 +152,13 @@ The system SHALL provide a workspace Rust generator that emits the checked-in
   `models.dev` checkout
 - **AND** emit the checked-in preset modules under `provider-openai`
 - **AND** generate model catalogs using the shared `provider` model metadata
+- **AND** format the emitted Rust source before writing it
 
 #### Scenario: Verify generated provider-openai presets are current
 
 - **WHEN** the generator runs with `--check`
 - **THEN** it SHALL fail if any checked-in generated preset file differs from
-  the current generated output
+  the current formatted generated output
 
 ### Requirement: Provider-OpenAI Smoke Tests Cover The Built-In Preset Matrix
 
