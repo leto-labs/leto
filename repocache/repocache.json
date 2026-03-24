@@ -63,6 +63,14 @@
     "enabled": true
   },
   {
+    "name": "openai-node",
+    "url": "https://github.com/openai/openai-node",
+    "tag": "v6.32.0",
+    "searchPath": "src",
+    "notes": "Official OpenAI Node SDK. Use root api.md for the documented SDK surface, then inspect src/resources/responses and related generated request/streaming types for concrete create-response request fields and event coverage. Treat this as a validation source for the Responses API surface, not a replacement for the official docs when the SDK lags.",
+    "enabled": true
+  },
+  {
     "name": "rig",
     "url": "https://github.com/0xPlaygrounds/rig",
     "tag": "main",
