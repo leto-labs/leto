@@ -61,17 +61,3 @@ impl ProviderCapabilities {
         }
     }
 }
-
-/// Lightweight model metadata used by the shared provider surface.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ModelInfo {
-    /// Stable model identifier as understood by the provider.
-    pub id: String,
-    /// Optional human-friendly display name.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub name: Option<String>,
-    /// Optional model-specific capabilities when they differ from provider-wide
-    /// defaults.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub capabilities: Option<ProviderCapabilities>,
-}

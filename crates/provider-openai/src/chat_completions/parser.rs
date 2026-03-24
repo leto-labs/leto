@@ -3,7 +3,7 @@
 use async_stream::stream;
 use eventsource_stream::Eventsource;
 use futures::StreamExt;
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 use serde_json::Value;
 
 use crate::chat_completions::client::ChatCompletionStream;
@@ -21,7 +21,7 @@ struct WireChatCompletionObject {
     object: Option<String>,
     created: Option<i64>,
     model: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     choices: Vec<WireChatCompletionChoice>,
     usage: Option<WireChunkUsage>,
 }
@@ -37,7 +37,7 @@ struct WireChatCompletionChoice {
 struct WireChatCompletionMessage {
     role: Option<String>,
     content: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     tool_calls: Vec<WireToolCall>,
 }
 
@@ -47,7 +47,7 @@ struct WireChatCompletionChunk {
     object: Option<String>,
     created: Option<i64>,
     model: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     choices: Vec<WireChunkChoice>,
     usage: Option<WireChunkUsage>,
 }
@@ -63,7 +63,7 @@ struct WireChunkChoice {
 struct WireChunkDelta {
     role: Option<String>,
     content: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     tool_calls: Vec<WireToolCallChunk>,
 }
 
@@ -118,6 +118,14 @@ struct PromptTokenDetails {
 struct CompletionTokenDetails {
     #[serde(default)]
     reasoning_tokens: Option<u32>,
+}
+
+fn deserialize_null_default<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de> + Default,
+{
+    Ok(Option::<T>::deserialize(deserializer)?.unwrap_or_default())
 }
 
 /// Parses a non-streaming chat completion from raw JSON.
@@ -318,5 +326,27 @@ mod tests {
             parsed.choices[0].delta.role,
             Some(ChatCompletionRole::Assistant)
         );
+    }
+
+    #[test]
+    fn parses_null_tool_call_arrays() {
+        let raw = serde_json::json!({
+            "id": "chatcmpl-123",
+            "object": "chat.completion",
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": "hello",
+                        "tool_calls": null
+                    },
+                    "finish_reason": "stop"
+                }
+            ]
+        });
+
+        let parsed = parse_chat_completion_object_value(raw).unwrap();
+        assert!(parsed.choices[0].message.tool_calls.is_empty());
     }
 }

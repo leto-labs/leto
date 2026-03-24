@@ -1,8 +1,11 @@
-//! Shared-provider adapter built on top of the OpenAI Responses API.
+//! Shared-provider adapter built on top of the supported OpenAI-compatible API
+//! surfaces.
 //!
 //! Official references:
 //! - Responses create: <https://developers.openai.com/api/reference/resources/responses/methods/create>
 //! - Responses streaming events: <https://developers.openai.com/api/reference/resources/responses/streaming-events>
+//! - Chat Completions create: <https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create>
+//! - Chat Completions streaming events: <https://developers.openai.com/api/reference/resources/chat/subresources/completions/streaming-events>
 
 use std::collections::{HashMap, HashSet};
 
@@ -14,15 +17,21 @@ use provider::{
     ToolChoice, Usage,
 };
 
+use crate::chat_completions::{
+    ChatCompletionContentPart, ChatCompletionFunctionCall, ChatCompletionImageUrlPart,
+    ChatCompletionMessage, ChatCompletionMessageContent, ChatCompletionRequest, ChatCompletionRole,
+    ChatCompletionTool, ChatCompletionToolCall,
+};
 use crate::responses::{
     ResponseEvent, ResponseInputContentPart, ResponseInputItem, ResponseInputRole,
     ResponseOutputContentPart, ResponseOutputItem, ResponseReasoningConfig,
     ResponseReasoningSummaryPart, ResponseRequest, ResponseStreamTransport, ResponseTextConfig,
     ResponseTool, ResponseToolCallItem,
 };
-use crate::{Client, Config, Error};
+use crate::{Client, Config, Error, OpenAiApiSurface};
 
-/// Shared [`provider::Provider`] adapter backed by the OpenAI Responses API.
+/// Shared [`provider::Provider`] adapter backed by the resolved
+/// OpenAI-compatible API surface.
 #[derive(Debug, Clone)]
 pub struct OpenAiProvider {
     client: Client,
@@ -49,10 +58,10 @@ impl OpenAiProvider {
         self
     }
 
-    fn map_request(request: &Request) -> Result<ResponseRequest, ProviderError> {
+    fn map_responses_request(request: &Request) -> Result<ResponseRequest, ProviderError> {
         let mut input = Vec::new();
         for message in &request.messages {
-            input.extend(map_message(message)?);
+            input.extend(map_responses_message(message)?);
         }
 
         let tools = request
@@ -101,6 +110,502 @@ impl OpenAiProvider {
             ..ResponseRequest::default()
         })
     }
+
+    fn map_chat_completions_request(
+        request: &Request,
+    ) -> Result<ChatCompletionRequest, ProviderError> {
+        let mut messages = Vec::new();
+        for message in &request.messages {
+            messages.push(map_chat_completions_message(message)?);
+        }
+
+        let tools = request
+            .tools
+            .iter()
+            .map(|tool| {
+                ChatCompletionTool::function(
+                    tool.name.clone(),
+                    tool.description.clone().unwrap_or_default(),
+                    tool.input_schema.clone(),
+                )
+            })
+            .collect();
+
+        Ok(ChatCompletionRequest {
+            model: request.model.clone(),
+            messages,
+            tools,
+            tool_choice: request
+                .options
+                .tool_choice
+                .as_ref()
+                .map(map_tool_choice_value),
+            parallel_tool_calls: request.options.parallel_tool_calls,
+            reasoning_effort: request
+                .options
+                .reasoning
+                .as_ref()
+                .and_then(|reasoning| reasoning.effort.clone()),
+            max_tokens: request.options.max_output_tokens,
+            temperature: request.options.temperature.map(|value| value as f32),
+            top_p: request.options.top_p.map(|value| value as f32),
+            ..ChatCompletionRequest::default()
+        })
+    }
+
+    async fn stream_responses<'a>(
+        &'a self,
+        request: &'a Request,
+    ) -> Result<EventStream<'a>, ProviderError> {
+        let mapped_request = Self::map_responses_request(request)?;
+        let response_stream = self
+            .client
+            .responses()
+            .stream(&mapped_request, self.transport)
+            .await
+            .map_err(map_openai_error)?;
+
+        let initial_model = request
+            .model
+            .clone()
+            .or_else(|| Some(self.client.config().default_model.clone()));
+
+        let output_stream = stream! {
+            let mut stream = response_stream;
+            let mut started = HashMap::<String, Block>::new();
+            let mut saw_delta = HashSet::<String>::new();
+
+            yield Ok(Event::ResponseStart {
+                response_id: None,
+                model: initial_model,
+            });
+
+            while let Some(event) = stream.next().await {
+                let event = match event {
+                    Ok(event) => event.event,
+                    Err(err) => {
+                        yield Err(map_openai_error(err));
+                        break;
+                    }
+                };
+
+                match event {
+                    ResponseEvent::ResponseCreated { .. } => {}
+                    ResponseEvent::ResponseQueued { .. }
+                    | ResponseEvent::ResponseInProgress { .. } => {}
+                    ResponseEvent::ResponseCompleted { response } => {
+                        if let Some(usage) = map_openai_usage(response.usage.as_ref()) {
+                            yield Ok(Event::Usage { usage });
+                        }
+                        yield Ok(Event::Completed {
+                            response_id: response.id.clone(),
+                            finish_reason: Some(FinishReason::Stop),
+                        });
+                    }
+                    ResponseEvent::ResponseIncomplete { response } => {
+                        if let Some(usage) = map_openai_usage(response.usage.as_ref()) {
+                            yield Ok(Event::Usage { usage });
+                        }
+                        let finish_reason = response
+                            .incomplete_details
+                            .as_ref()
+                            .and_then(|details| details.reason.clone())
+                            .map(map_openai_finish_reason)
+                            .or(Some(FinishReason::Incomplete));
+                        yield Ok(Event::Completed {
+                            response_id: response.id.clone(),
+                            finish_reason,
+                        });
+                    }
+                    ResponseEvent::ResponseFailed { response } => {
+                        if let Some(usage) = map_openai_usage(response.usage.as_ref()) {
+                            yield Ok(Event::Usage { usage });
+                        }
+                        yield Ok(Event::Completed {
+                            response_id: response.id.clone(),
+                            finish_reason: Some(FinishReason::Error),
+                        });
+                    }
+                    ResponseEvent::Error { error, .. } => {
+                        let message = error.message.unwrap_or_else(|| "OpenAI stream error".into());
+                        yield Err(ProviderError::Remote(message));
+                        break;
+                    }
+                    ResponseEvent::OutputItemAdded { output_index, item } => {
+                        if let Some(block) = map_openai_output_item_start(output_index, &item) {
+                            if let Some(start_event) = start_block_if_needed(&mut started, block) {
+                                yield Ok(start_event);
+                            }
+                        }
+                    }
+                    ResponseEvent::OutputItemDone { output_index, item } => {
+                        if let Some(block) = map_openai_output_item_start(output_index, &item) {
+                            let block_id = block.id.clone();
+                            if let Some(start_event) = start_block_if_needed(&mut started, block) {
+                                yield Ok(start_event);
+                            }
+                            if let Some(final_delta) = map_openai_item_done_delta(&item, saw_delta.contains(&block_id)) {
+                                saw_delta.insert(block_id.clone());
+                                yield Ok(Event::BlockDelta { id: block_id.clone(), delta: final_delta });
+                            }
+                            if started.remove(&block_id).is_some() {
+                                yield Ok(Event::BlockStop { id: block_id });
+                            }
+                        }
+                    }
+                    ResponseEvent::ContentPartAdded { item_id, output_index, content_index, part } => {
+                        let block = map_openai_content_part_start(&item_id, output_index, content_index, &part);
+                        if let Some(start_event) = start_block_if_needed(&mut started, block) {
+                            yield Ok(start_event);
+                        }
+                    }
+                    ResponseEvent::ContentPartDone { item_id, content_index, part, .. } => {
+                        let block_id = openai_content_block_id(&item_id, content_index, &part);
+                        if let Some(delta) = map_openai_content_done_delta(&part, saw_delta.contains(&block_id)) {
+                            saw_delta.insert(block_id.clone());
+                            yield Ok(Event::BlockDelta { id: block_id.clone(), delta });
+                        }
+                        if started.remove(&block_id).is_some() {
+                            yield Ok(Event::BlockStop { id: block_id });
+                        }
+                    }
+                    ResponseEvent::OutputTextDelta { item_id, content_index, delta, .. } => {
+                        let block_id = openai_text_block_id(&item_id, content_index);
+                        if let Some(start_event) = start_block_if_needed(
+                            &mut started,
+                            Block {
+                                id: block_id.clone(),
+                                output_index: 0,
+                                kind: BlockKind::Text,
+                                item_id: Some(item_id.clone()),
+                            },
+                        ) {
+                            yield Ok(start_event);
+                        }
+                        saw_delta.insert(block_id.clone());
+                        yield Ok(Event::BlockDelta { id: block_id, delta: BlockDelta::Text { text: delta } });
+                    }
+                    ResponseEvent::OutputTextDone { item_id, content_index, text, .. } => {
+                        let block_id = openai_text_block_id(&item_id, content_index);
+                        if !saw_delta.contains(&block_id) && !text.is_empty() {
+                            saw_delta.insert(block_id.clone());
+                            yield Ok(Event::BlockDelta { id: block_id.clone(), delta: BlockDelta::Text { text } });
+                        }
+                        if started.remove(&block_id).is_some() {
+                            yield Ok(Event::BlockStop { id: block_id });
+                        }
+                    }
+                    ResponseEvent::RefusalDelta { item_id, content_index, delta, .. } => {
+                        let block_id = openai_refusal_block_id(&item_id, content_index);
+                        if let Some(start_event) = start_block_if_needed(
+                            &mut started,
+                            Block {
+                                id: block_id.clone(),
+                                output_index: 0,
+                                kind: BlockKind::Refusal,
+                                item_id: Some(item_id.clone()),
+                            },
+                        ) {
+                            yield Ok(start_event);
+                        }
+                        saw_delta.insert(block_id.clone());
+                        yield Ok(Event::BlockDelta { id: block_id, delta: BlockDelta::Refusal { text: delta } });
+                    }
+                    ResponseEvent::RefusalDone { item_id, content_index, refusal, .. } => {
+                        let block_id = openai_refusal_block_id(&item_id, content_index);
+                        if !saw_delta.contains(&block_id) && !refusal.is_empty() {
+                            saw_delta.insert(block_id.clone());
+                            yield Ok(Event::BlockDelta { id: block_id.clone(), delta: BlockDelta::Refusal { text: refusal } });
+                        }
+                        if started.remove(&block_id).is_some() {
+                            yield Ok(Event::BlockStop { id: block_id });
+                        }
+                    }
+                    ResponseEvent::FunctionCallArgumentsDelta { item_id, output_index, delta } => {
+                        let block_id = openai_tool_call_block_id(&item_id);
+                        if let Some(start_event) = start_block_if_needed(
+                            &mut started,
+                            Block {
+                                id: block_id.clone(),
+                                output_index,
+                                kind: BlockKind::ToolCall {
+                                    name: None,
+                                    call_id: None,
+                                },
+                                item_id: Some(item_id.clone()),
+                            },
+                        ) {
+                            yield Ok(start_event);
+                        }
+                        saw_delta.insert(block_id.clone());
+                        yield Ok(Event::BlockDelta { id: block_id, delta: BlockDelta::Json { partial_json: delta } });
+                    }
+                    ResponseEvent::FunctionCallArgumentsDone { item_id, arguments, .. } => {
+                        let block_id = openai_tool_call_block_id(&item_id);
+                        if !saw_delta.contains(&block_id) && !arguments.is_empty() {
+                            saw_delta.insert(block_id.clone());
+                            yield Ok(Event::BlockDelta { id: block_id.clone(), delta: BlockDelta::Json { partial_json: arguments } });
+                        }
+                        if started.remove(&block_id).is_some() {
+                            yield Ok(Event::BlockStop { id: block_id });
+                        }
+                    }
+                    ResponseEvent::ReasoningSummaryPartAdded { item_id, output_index, summary_index, part } => {
+                        let block = Block {
+                            id: openai_reasoning_block_id(&item_id, summary_index),
+                            output_index,
+                            kind: BlockKind::Reasoning,
+                            item_id: Some(item_id.clone()),
+                        };
+                        let block_id = block.id.clone();
+                        if let Some(start_event) = start_block_if_needed(&mut started, block) {
+                            yield Ok(start_event);
+                        }
+                        if let Some(delta) = map_openai_reasoning_part_delta(&part) {
+                            saw_delta.insert(block_id.clone());
+                            yield Ok(Event::BlockDelta { id: block_id, delta });
+                        }
+                    }
+                    ResponseEvent::ReasoningSummaryTextDelta { item_id, summary_index, delta, .. } => {
+                        let block_id = openai_reasoning_block_id(&item_id, summary_index);
+                        if let Some(start_event) = start_block_if_needed(
+                            &mut started,
+                            Block {
+                                id: block_id.clone(),
+                                output_index: 0,
+                                kind: BlockKind::Reasoning,
+                                item_id: Some(item_id.clone()),
+                            },
+                        ) {
+                            yield Ok(start_event);
+                        }
+                        saw_delta.insert(block_id.clone());
+                        yield Ok(Event::BlockDelta { id: block_id, delta: BlockDelta::Reasoning { text: delta } });
+                    }
+                    ResponseEvent::ReasoningSummaryTextDone { item_id, summary_index, text, .. } => {
+                        let block_id = openai_reasoning_block_id(&item_id, summary_index);
+                        if !saw_delta.contains(&block_id) && !text.is_empty() {
+                            saw_delta.insert(block_id.clone());
+                            yield Ok(Event::BlockDelta { id: block_id.clone(), delta: BlockDelta::Reasoning { text } });
+                        }
+                        if started.remove(&block_id).is_some() {
+                            yield Ok(Event::BlockStop { id: block_id });
+                        }
+                    }
+                    ResponseEvent::ReasoningSummaryPartDone { item_id, summary_index, part, .. } => {
+                        let block_id = openai_reasoning_block_id(&item_id, summary_index);
+                        if let Some(delta) = map_openai_reasoning_part_delta(&part) {
+                            if !saw_delta.contains(&block_id) {
+                                saw_delta.insert(block_id.clone());
+                                yield Ok(Event::BlockDelta { id: block_id.clone(), delta });
+                            }
+                        }
+                        if started.remove(&block_id).is_some() {
+                            yield Ok(Event::BlockStop { id: block_id });
+                        }
+                    }
+                    ResponseEvent::WebSearchCallSearching { item_id, output_index }
+                    | ResponseEvent::FileSearchSearching { item_id, output_index } => {
+                        let block_id = openai_tool_call_block_id(&item_id);
+                        if !started.contains_key(&block_id) {
+                            let block = Block {
+                                id: block_id.clone(),
+                                output_index,
+                                kind: BlockKind::Unknown { kind: "hosted_tool".into() },
+                                item_id: Some(item_id),
+                            };
+                            if let Some(start_event) = start_block_if_needed(&mut started, block) {
+                                yield Ok(start_event);
+                            }
+                        }
+                    }
+                    ResponseEvent::CodeInterpreterCodeDelta { item_id, output_index, delta } => {
+                        let block_id = openai_tool_call_block_id(&item_id);
+                        if !started.contains_key(&block_id) {
+                            let block = Block {
+                                id: block_id.clone(),
+                                output_index,
+                                kind: BlockKind::Unknown { kind: "code_interpreter".into() },
+                                item_id: Some(item_id.clone()),
+                            };
+                            if let Some(start_event) = start_block_if_needed(&mut started, block) {
+                                yield Ok(start_event);
+                            }
+                        }
+                        saw_delta.insert(block_id.clone());
+                        yield Ok(Event::BlockDelta { id: block_id, delta: BlockDelta::Unknown { raw: serde_json::json!({ "code": delta }) } });
+                    }
+                    ResponseEvent::CodeInterpreterCodeDone { item_id, code, .. } => {
+                        let block_id = openai_tool_call_block_id(&item_id);
+                        if !saw_delta.contains(&block_id) && !code.is_empty() {
+                            saw_delta.insert(block_id.clone());
+                            yield Ok(Event::BlockDelta { id: block_id.clone(), delta: BlockDelta::Unknown { raw: serde_json::json!({ "code": code }) } });
+                        }
+                        if started.remove(&block_id).is_some() {
+                            yield Ok(Event::BlockStop { id: block_id });
+                        }
+                    }
+                    ResponseEvent::OutputAudioDelta { .. }
+                    | ResponseEvent::OutputAudioDone
+                    | ResponseEvent::OutputAudioTranscriptDelta { .. }
+                    | ResponseEvent::OutputAudioTranscriptDone
+                    | ResponseEvent::Unknown { .. } => {}
+                }
+            }
+        };
+
+        Ok(Box::pin(output_stream) as EventStream<'a>)
+    }
+
+    async fn stream_chat_completions<'a>(
+        &'a self,
+        request: &'a Request,
+    ) -> Result<EventStream<'a>, ProviderError> {
+        let mapped_request = Self::map_chat_completions_request(request)?;
+        let completion_stream = self
+            .client
+            .chat_completions()
+            .stream(&mapped_request)
+            .await
+            .map_err(map_openai_error)?;
+
+        let initial_model = request
+            .model
+            .clone()
+            .or_else(|| Some(self.client.config().default_model.clone()));
+
+        let output_stream = stream! {
+            let mut stream = completion_stream;
+            let mut started = HashMap::<String, Block>::new();
+            let mut finish_reason = None;
+            let mut response_id = None;
+            let mut tool_states = HashMap::<(u32, u32), ChatToolCallState>::new();
+
+            yield Ok(Event::ResponseStart {
+                response_id: None,
+                model: initial_model,
+            });
+
+            while let Some(chunk) = stream.next().await {
+                let chunk = match chunk {
+                    Ok(chunk) => chunk,
+                    Err(err) => {
+                        yield Err(map_openai_error(err));
+                        break;
+                    }
+                };
+
+                if response_id.is_none() {
+                    response_id = chunk.id.clone();
+                }
+
+                for choice in chunk.choices {
+                    if let Some(text) = choice.delta.content {
+                        let block_id = openai_chat_text_block_id(choice.index);
+                        if let Some(start_event) = start_block_if_needed(
+                            &mut started,
+                            Block {
+                                id: block_id.clone(),
+                                output_index: choice.index,
+                                kind: BlockKind::Text,
+                                item_id: None,
+                            },
+                        ) {
+                            yield Ok(start_event);
+                        }
+                        yield Ok(Event::BlockDelta {
+                            id: block_id,
+                            delta: BlockDelta::Text { text },
+                        });
+                    }
+
+                    for tool_call in choice.delta.tool_calls {
+                        let tool_index = tool_call.index.unwrap_or(0);
+                        let state = tool_states
+                            .entry((choice.index, tool_index))
+                            .or_default();
+
+                        if let Some(id) = tool_call.id {
+                            state.call_id = Some(id);
+                        }
+
+                        if let Some(function) = tool_call.function {
+                            if let Some(name) = function.name {
+                                state.name = Some(name);
+                            }
+
+                            let block_id = openai_chat_tool_call_block_id(choice.index, tool_index);
+                            if let Some(start_event) = start_block_if_needed(
+                                &mut started,
+                                Block {
+                                    id: block_id.clone(),
+                                    output_index: choice.index,
+                                    kind: BlockKind::ToolCall {
+                                        name: state.name.clone(),
+                                        call_id: state.call_id.clone(),
+                                    },
+                                    item_id: state.call_id.clone(),
+                                },
+                            ) {
+                                yield Ok(start_event);
+                            }
+
+                            if let Some(arguments) = function.arguments.filter(|arguments| !arguments.is_empty()) {
+                                yield Ok(Event::BlockDelta {
+                                    id: block_id,
+                                    delta: BlockDelta::Json {
+                                        partial_json: arguments,
+                                    },
+                                });
+                            }
+                        } else {
+                            let block_id = openai_chat_tool_call_block_id(choice.index, tool_index);
+                            if let Some(start_event) = start_block_if_needed(
+                                &mut started,
+                                Block {
+                                    id: block_id,
+                                    output_index: choice.index,
+                                    kind: BlockKind::ToolCall {
+                                        name: state.name.clone(),
+                                        call_id: state.call_id.clone(),
+                                    },
+                                    item_id: state.call_id.clone(),
+                                },
+                            ) {
+                                yield Ok(start_event);
+                            }
+                        }
+                    }
+
+                    if let Some(choice_finish_reason) = choice.finish_reason {
+                        if finish_reason.is_none() {
+                            finish_reason = Some(map_openai_finish_reason(choice_finish_reason));
+                        }
+
+                        for block_id in openai_chat_choice_block_ids(&started, choice.index) {
+                            started.remove(&block_id);
+                            yield Ok(Event::BlockStop { id: block_id });
+                        }
+                    }
+                }
+
+                if let Some(usage) = map_openai_usage(chunk.usage.as_ref()) {
+                    yield Ok(Event::Usage { usage });
+                }
+            }
+
+            for block_id in openai_chat_all_block_ids(&started) {
+                yield Ok(Event::BlockStop { id: block_id });
+            }
+
+            yield Ok(Event::Completed {
+                response_id,
+                finish_reason,
+            });
+        };
+
+        Ok(Box::pin(output_stream) as EventStream<'a>)
+    }
 }
 
 impl Provider for OpenAiProvider {
@@ -109,320 +614,31 @@ impl Provider for OpenAiProvider {
         request: &'a Request,
     ) -> BoxFuture<'a, Result<EventStream<'a>, ProviderError>> {
         Box::pin(async move {
-            let mapped_request = Self::map_request(request)?;
-            let response_stream = self
-                .client
-                .responses()
-                .stream(&mapped_request, self.transport)
-                .await
-                .map_err(map_openai_error)?;
-
-            let output_stream = stream! {
-                let mut stream = response_stream;
-                let mut started = HashMap::<String, Block>::new();
-                let mut saw_delta = HashSet::<String>::new();
-
-                yield Ok(Event::ResponseStart {
-                    response_id: None,
-                    model: request.model.clone(),
-                });
-
-                while let Some(event) = stream.next().await {
-                    let event = match event {
-                        Ok(event) => event.event,
-                        Err(err) => {
-                            yield Err(map_openai_error(err));
-                            break;
-                        }
-                    };
-
-                    match event {
-                        ResponseEvent::ResponseCreated { .. } => {}
-                        ResponseEvent::ResponseQueued { .. }
-                        | ResponseEvent::ResponseInProgress { .. } => {}
-                        ResponseEvent::ResponseCompleted { response } => {
-                            if let Some(usage) = map_openai_usage(response.usage.as_ref()) {
-                                yield Ok(Event::Usage { usage });
-                            }
-                            yield Ok(Event::Completed {
-                                response_id: response.id.clone(),
-                                finish_reason: Some(FinishReason::Stop),
-                            });
-                        }
-                        ResponseEvent::ResponseIncomplete { response } => {
-                            if let Some(usage) = map_openai_usage(response.usage.as_ref()) {
-                                yield Ok(Event::Usage { usage });
-                            }
-                            let finish_reason = response
-                                .incomplete_details
-                                .as_ref()
-                                .and_then(|details| details.reason.clone())
-                                .map(map_openai_finish_reason)
-                                .or(Some(FinishReason::Incomplete));
-                            yield Ok(Event::Completed {
-                                response_id: response.id.clone(),
-                                finish_reason,
-                            });
-                        }
-                        ResponseEvent::ResponseFailed { response } => {
-                            if let Some(usage) = map_openai_usage(response.usage.as_ref()) {
-                                yield Ok(Event::Usage { usage });
-                            }
-                            yield Ok(Event::Completed {
-                                response_id: response.id.clone(),
-                                finish_reason: Some(FinishReason::Error),
-                            });
-                        }
-                        ResponseEvent::Error { error, .. } => {
-                            let message = error.message.unwrap_or_else(|| "OpenAI stream error".into());
-                            yield Err(ProviderError::Remote(message));
-                            break;
-                        }
-                        ResponseEvent::OutputItemAdded { output_index, item } => {
-                            if let Some(block) = map_openai_output_item_start(output_index, &item) {
-                                if let Some(start_event) = start_block_if_needed(&mut started, block) {
-                                    yield Ok(start_event);
-                                }
-                            }
-                        }
-                        ResponseEvent::OutputItemDone { output_index, item } => {
-                            if let Some(block) = map_openai_output_item_start(output_index, &item) {
-                                let block_id = block.id.clone();
-                                if let Some(start_event) = start_block_if_needed(&mut started, block) {
-                                    yield Ok(start_event);
-                                }
-                                if let Some(final_delta) = map_openai_item_done_delta(&item, saw_delta.contains(&block_id)) {
-                                    saw_delta.insert(block_id.clone());
-                                    yield Ok(Event::BlockDelta { id: block_id.clone(), delta: final_delta });
-                                }
-                                if started.remove(&block_id).is_some() {
-                                    yield Ok(Event::BlockStop { id: block_id });
-                                }
-                            }
-                        }
-                        ResponseEvent::ContentPartAdded { item_id, output_index, content_index, part } => {
-                            let block = map_openai_content_part_start(&item_id, output_index, content_index, &part);
-                            if let Some(start_event) = start_block_if_needed(&mut started, block) {
-                                yield Ok(start_event);
-                            }
-                        }
-                        ResponseEvent::ContentPartDone { item_id, content_index, part, .. } => {
-                            let block_id = openai_content_block_id(&item_id, content_index, &part);
-                            if let Some(delta) = map_openai_content_done_delta(&part, saw_delta.contains(&block_id)) {
-                                saw_delta.insert(block_id.clone());
-                                yield Ok(Event::BlockDelta { id: block_id.clone(), delta });
-                            }
-                            if started.remove(&block_id).is_some() {
-                                yield Ok(Event::BlockStop { id: block_id });
-                            }
-                        }
-                        ResponseEvent::OutputTextDelta { item_id, content_index, delta, .. } => {
-                            let block_id = openai_text_block_id(&item_id, content_index);
-                            if let Some(start_event) = start_block_if_needed(
-                                &mut started,
-                                Block {
-                                    id: block_id.clone(),
-                                    output_index: 0,
-                                    kind: BlockKind::Text,
-                                    item_id: Some(item_id.clone()),
-                                },
-                            ) {
-                                yield Ok(start_event);
-                            }
-                            saw_delta.insert(block_id.clone());
-                            yield Ok(Event::BlockDelta { id: block_id, delta: BlockDelta::Text { text: delta } });
-                        }
-                        ResponseEvent::OutputTextDone { item_id, content_index, text, .. } => {
-                            let block_id = openai_text_block_id(&item_id, content_index);
-                            if !saw_delta.contains(&block_id) && !text.is_empty() {
-                                saw_delta.insert(block_id.clone());
-                                yield Ok(Event::BlockDelta { id: block_id.clone(), delta: BlockDelta::Text { text } });
-                            }
-                            if started.remove(&block_id).is_some() {
-                                yield Ok(Event::BlockStop { id: block_id });
-                            }
-                        }
-                        ResponseEvent::RefusalDelta { item_id, content_index, delta, .. } => {
-                            let block_id = openai_refusal_block_id(&item_id, content_index);
-                            if let Some(start_event) = start_block_if_needed(
-                                &mut started,
-                                Block {
-                                    id: block_id.clone(),
-                                    output_index: 0,
-                                    kind: BlockKind::Refusal,
-                                    item_id: Some(item_id.clone()),
-                                },
-                            ) {
-                                yield Ok(start_event);
-                            }
-                            saw_delta.insert(block_id.clone());
-                            yield Ok(Event::BlockDelta { id: block_id, delta: BlockDelta::Refusal { text: delta } });
-                        }
-                        ResponseEvent::RefusalDone { item_id, content_index, refusal, .. } => {
-                            let block_id = openai_refusal_block_id(&item_id, content_index);
-                            if !saw_delta.contains(&block_id) && !refusal.is_empty() {
-                                saw_delta.insert(block_id.clone());
-                                yield Ok(Event::BlockDelta { id: block_id.clone(), delta: BlockDelta::Refusal { text: refusal } });
-                            }
-                            if started.remove(&block_id).is_some() {
-                                yield Ok(Event::BlockStop { id: block_id });
-                            }
-                        }
-                        ResponseEvent::FunctionCallArgumentsDelta { item_id, output_index, delta } => {
-                            let block_id = openai_tool_call_block_id(&item_id);
-                            if let Some(start_event) = start_block_if_needed(
-                                &mut started,
-                                Block {
-                                    id: block_id.clone(),
-                                    output_index,
-                                    kind: BlockKind::ToolCall {
-                                        name: None,
-                                        call_id: None,
-                                    },
-                                    item_id: Some(item_id.clone()),
-                                },
-                            ) {
-                                yield Ok(start_event);
-                            }
-                            saw_delta.insert(block_id.clone());
-                            yield Ok(Event::BlockDelta { id: block_id, delta: BlockDelta::Json { partial_json: delta } });
-                        }
-                        ResponseEvent::FunctionCallArgumentsDone { item_id, arguments, .. } => {
-                            let block_id = openai_tool_call_block_id(&item_id);
-                            if !saw_delta.contains(&block_id) && !arguments.is_empty() {
-                                saw_delta.insert(block_id.clone());
-                                yield Ok(Event::BlockDelta { id: block_id.clone(), delta: BlockDelta::Json { partial_json: arguments } });
-                            }
-                            if started.remove(&block_id).is_some() {
-                                yield Ok(Event::BlockStop { id: block_id });
-                            }
-                        }
-                        ResponseEvent::ReasoningSummaryPartAdded { item_id, output_index, summary_index, part } => {
-                            let block = Block {
-                                id: openai_reasoning_block_id(&item_id, summary_index),
-                                output_index,
-                                kind: BlockKind::Reasoning,
-                                item_id: Some(item_id.clone()),
-                            };
-                            let block_id = block.id.clone();
-                            if let Some(start_event) = start_block_if_needed(&mut started, block) {
-                                yield Ok(start_event);
-                            }
-                            if let Some(delta) = map_openai_reasoning_part_delta(&part) {
-                                saw_delta.insert(block_id.clone());
-                                yield Ok(Event::BlockDelta { id: block_id, delta });
-                            }
-                        }
-                        ResponseEvent::ReasoningSummaryTextDelta { item_id, summary_index, delta, .. } => {
-                            let block_id = openai_reasoning_block_id(&item_id, summary_index);
-                            if let Some(start_event) = start_block_if_needed(
-                                &mut started,
-                                Block {
-                                    id: block_id.clone(),
-                                    output_index: 0,
-                                    kind: BlockKind::Reasoning,
-                                    item_id: Some(item_id.clone()),
-                                },
-                            ) {
-                                yield Ok(start_event);
-                            }
-                            saw_delta.insert(block_id.clone());
-                            yield Ok(Event::BlockDelta { id: block_id, delta: BlockDelta::Reasoning { text: delta } });
-                        }
-                        ResponseEvent::ReasoningSummaryTextDone { item_id, summary_index, text, .. } => {
-                            let block_id = openai_reasoning_block_id(&item_id, summary_index);
-                            if !saw_delta.contains(&block_id) && !text.is_empty() {
-                                saw_delta.insert(block_id.clone());
-                                yield Ok(Event::BlockDelta { id: block_id.clone(), delta: BlockDelta::Reasoning { text } });
-                            }
-                            if started.remove(&block_id).is_some() {
-                                yield Ok(Event::BlockStop { id: block_id });
-                            }
-                        }
-                        ResponseEvent::ReasoningSummaryPartDone { item_id, summary_index, part, .. } => {
-                            let block_id = openai_reasoning_block_id(&item_id, summary_index);
-                            if let Some(delta) = map_openai_reasoning_part_delta(&part) {
-                                if !saw_delta.contains(&block_id) {
-                                    saw_delta.insert(block_id.clone());
-                                    yield Ok(Event::BlockDelta { id: block_id.clone(), delta });
-                                }
-                            }
-                            if started.remove(&block_id).is_some() {
-                                yield Ok(Event::BlockStop { id: block_id });
-                            }
-                        }
-                        ResponseEvent::WebSearchCallSearching { item_id, output_index }
-                        | ResponseEvent::FileSearchSearching { item_id, output_index } => {
-                            let block_id = openai_tool_call_block_id(&item_id);
-                            if !started.contains_key(&block_id) {
-                                let block = Block {
-                                    id: block_id.clone(),
-                                    output_index,
-                                    kind: BlockKind::Unknown { kind: "hosted_tool".into() },
-                                    item_id: Some(item_id),
-                                };
-                                if let Some(start_event) = start_block_if_needed(&mut started, block) {
-                                    yield Ok(start_event);
-                                }
-                            }
-                        }
-                        ResponseEvent::CodeInterpreterCodeDelta { item_id, output_index, delta } => {
-                            let block_id = openai_tool_call_block_id(&item_id);
-                            if !started.contains_key(&block_id) {
-                                let block = Block {
-                                    id: block_id.clone(),
-                                    output_index,
-                                    kind: BlockKind::Unknown { kind: "code_interpreter".into() },
-                                    item_id: Some(item_id.clone()),
-                                };
-                                if let Some(start_event) = start_block_if_needed(&mut started, block) {
-                                    yield Ok(start_event);
-                                }
-                            }
-                            saw_delta.insert(block_id.clone());
-                            yield Ok(Event::BlockDelta { id: block_id, delta: BlockDelta::Unknown { raw: serde_json::json!({ "code": delta }) } });
-                        }
-                        ResponseEvent::CodeInterpreterCodeDone { item_id, code, .. } => {
-                            let block_id = openai_tool_call_block_id(&item_id);
-                            if !saw_delta.contains(&block_id) && !code.is_empty() {
-                                saw_delta.insert(block_id.clone());
-                                yield Ok(Event::BlockDelta { id: block_id.clone(), delta: BlockDelta::Unknown { raw: serde_json::json!({ "code": code }) } });
-                            }
-                            if started.remove(&block_id).is_some() {
-                                yield Ok(Event::BlockStop { id: block_id });
-                            }
-                        }
-                        ResponseEvent::OutputAudioDelta { .. }
-                        | ResponseEvent::OutputAudioDone
-                        | ResponseEvent::OutputAudioTranscriptDelta { .. }
-                        | ResponseEvent::OutputAudioTranscriptDone
-                        | ResponseEvent::Unknown { .. } => {}
-                    }
-                }
-            };
-
-            Ok(Box::pin(output_stream) as EventStream<'a>)
+            match self.client.config().resolved_api_surface().ok_or_else(|| {
+                ProviderError::Configuration(
+                    "OpenAI config resolved no supported API surface".into(),
+                )
+            })? {
+                OpenAiApiSurface::Responses => self.stream_responses(request).await,
+                OpenAiApiSurface::ChatCompletions => self.stream_chat_completions(request).await,
+            }
         })
     }
 
     fn info(&self) -> ProviderInfo {
+        let surface = self
+            .client
+            .config()
+            .resolved_api_surface()
+            .or_else(|| self.client.config().supported_api_surfaces.first().copied());
+
         ProviderInfo {
-            name: "openai".into(),
-            default_model: Some(self.client.config().default_model.clone()),
-            capabilities: ProviderCapabilities {
-                system_messages: true,
-                developer_messages: true,
-                input_text: true,
-                input_image_urls: true,
-                tool_calls: true,
-                tool_results: true,
-                reasoning_blocks: true,
-                refusal_blocks: true,
-                tool_call_argument_deltas: true,
-                parallel_tool_calls: true,
-                stream_granularity: StreamGranularity::Block,
-            },
-            models: Vec::new(),
+            name: self.client.config().name.clone(),
+            default_model_id: Some(self.client.config().default_model.clone()),
+            capabilities: surface
+                .map(capabilities_for_surface)
+                .unwrap_or_else(ProviderCapabilities::text_only),
+            models: self.client.config().models.to_vec(),
         }
     }
 }
@@ -435,7 +651,7 @@ fn map_openai_error(err: Error) -> ProviderError {
     }
 }
 
-fn map_message(message: &Message) -> Result<Vec<ResponseInputItem>, ProviderError> {
+fn map_responses_message(message: &Message) -> Result<Vec<ResponseInputItem>, ProviderError> {
     let has_tool_result = message
         .content
         .iter()
@@ -514,12 +730,116 @@ fn map_message(message: &Message) -> Result<Vec<ResponseInputItem>, ProviderErro
     )])
 }
 
+fn map_chat_completions_message(message: &Message) -> Result<ChatCompletionMessage, ProviderError> {
+    let has_tool_result = message
+        .content
+        .iter()
+        .any(|block| matches!(block, provider::ContentBlock::ToolResult { .. }));
+    if has_tool_result {
+        if message.content.len() != 1 {
+            return Err(ProviderError::Unsupported(
+                "OpenAI chat-completions adapter requires tool-result messages to contain a single tool_result block"
+                    .into(),
+            ));
+        }
+
+        if let provider::ContentBlock::ToolResult {
+            call_id, output, ..
+        } = &message.content[0]
+        {
+            return Ok(ChatCompletionMessage {
+                role: ChatCompletionRole::Tool,
+                content: Some(ChatCompletionMessageContent::Text(json_value_to_string(
+                    output,
+                ))),
+                name: None,
+                tool_calls: Vec::new(),
+                tool_call_id: Some(call_id.clone()),
+                extra: Default::default(),
+            });
+        }
+    }
+
+    let mut tool_calls = Vec::new();
+    let mut content_parts = Vec::new();
+
+    for block in &message.content {
+        match block {
+            provider::ContentBlock::Text { text }
+            | provider::ContentBlock::Reasoning { text }
+            | provider::ContentBlock::Refusal { text } => {
+                content_parts.push(ChatCompletionContentPart::Text { text: text.clone() });
+            }
+            provider::ContentBlock::ImageUrl { url } => {
+                content_parts.push(ChatCompletionContentPart::ImageUrl {
+                    image_url: ChatCompletionImageUrlPart { url: url.clone() },
+                });
+            }
+            provider::ContentBlock::ToolCall { id, name, input } => {
+                tool_calls.push(ChatCompletionToolCall {
+                    id: id.clone(),
+                    call_type: "function".into(),
+                    function: ChatCompletionFunctionCall {
+                        name: name.clone(),
+                        arguments: serde_json::to_string(input)?,
+                    },
+                });
+            }
+            provider::ContentBlock::ToolResult { .. } => {
+                return Err(ProviderError::Unsupported(
+                    "OpenAI chat-completions adapter could not mix tool_result blocks with standard message content".into(),
+                ));
+            }
+        }
+    }
+
+    if !tool_calls.is_empty() && message.role != MessageRole::Assistant {
+        return Err(ProviderError::Unsupported(
+            "OpenAI chat-completions adapter requires tool_call blocks to appear on assistant messages".into(),
+        ));
+    }
+
+    Ok(ChatCompletionMessage {
+        role: map_chat_role(message.role),
+        content: map_chat_content(content_parts),
+        name: None,
+        tool_calls,
+        tool_call_id: None,
+        extra: Default::default(),
+    })
+}
+
+fn map_chat_content(
+    content_parts: Vec<ChatCompletionContentPart>,
+) -> Option<ChatCompletionMessageContent> {
+    if content_parts.is_empty() {
+        return None;
+    }
+
+    if content_parts.len() == 1 {
+        if let ChatCompletionContentPart::Text { text } = &content_parts[0] {
+            return Some(ChatCompletionMessageContent::Text(text.clone()));
+        }
+    }
+
+    Some(ChatCompletionMessageContent::Parts(content_parts))
+}
+
 fn map_role(role: MessageRole) -> ResponseInputRole {
     match role {
         MessageRole::System => ResponseInputRole::System,
         MessageRole::Developer => ResponseInputRole::Developer,
         MessageRole::User => ResponseInputRole::User,
         MessageRole::Assistant => ResponseInputRole::Assistant,
+    }
+}
+
+fn map_chat_role(role: MessageRole) -> ChatCompletionRole {
+    match role {
+        MessageRole::System => ChatCompletionRole::System,
+        MessageRole::Developer => ChatCompletionRole::Developer,
+        MessageRole::User => ChatCompletionRole::User,
+        MessageRole::Assistant => ChatCompletionRole::Assistant,
     }
 }
 
@@ -554,9 +874,11 @@ fn map_openai_usage(usage: Option<&crate::TokenUsage>) -> Option<Usage> {
 
 fn map_openai_finish_reason(reason: String) -> FinishReason {
     match reason.as_str() {
+        "length" => FinishReason::MaxTokens,
         "max_output_tokens" | "max_tokens" => FinishReason::MaxTokens,
         "tool_calls" | "tool_call" => FinishReason::ToolCall,
         "stop_sequence" => FinishReason::StopSequence,
+        "content_filter" | "content_filtered" => FinishReason::Refusal,
         "refusal" => FinishReason::Refusal,
         "pause_turn" => FinishReason::Pause,
         "completed" | "stop" => FinishReason::Stop,
@@ -702,6 +1024,64 @@ fn openai_reasoning_block_id(item_id: &str, summary_index: u32) -> String {
     format!("openai-reasoning:{item_id}:{summary_index}")
 }
 
+fn openai_chat_text_block_id(choice_index: u32) -> String {
+    format!("openai-chat-text:{choice_index}")
+}
+
+fn openai_chat_tool_call_block_id(choice_index: u32, tool_index: u32) -> String {
+    format!("openai-chat-tool-call:{choice_index}:{tool_index}")
+}
+
+fn openai_chat_choice_block_ids(
+    started: &HashMap<String, Block>,
+    choice_index: u32,
+) -> Vec<String> {
+    let mut ids = started
+        .values()
+        .filter(|block| block.output_index == choice_index)
+        .map(|block| block.id.clone())
+        .collect::<Vec<_>>();
+    ids.sort();
+    ids
+}
+
+fn openai_chat_all_block_ids(started: &HashMap<String, Block>) -> Vec<String> {
+    let mut ids = started.keys().cloned().collect::<Vec<_>>();
+    ids.sort();
+    ids
+}
+
+fn capabilities_for_surface(surface: OpenAiApiSurface) -> ProviderCapabilities {
+    match surface {
+        OpenAiApiSurface::Responses => ProviderCapabilities {
+            system_messages: true,
+            developer_messages: true,
+            input_text: true,
+            input_image_urls: true,
+            tool_calls: true,
+            tool_results: true,
+            reasoning_blocks: true,
+            refusal_blocks: true,
+            tool_call_argument_deltas: true,
+            parallel_tool_calls: true,
+            stream_granularity: StreamGranularity::Block,
+        },
+        OpenAiApiSurface::ChatCompletions => ProviderCapabilities {
+            system_messages: true,
+            developer_messages: true,
+            input_text: true,
+            input_image_urls: true,
+            tool_calls: true,
+            tool_results: true,
+            reasoning_blocks: false,
+            refusal_blocks: false,
+            tool_call_argument_deltas: true,
+            parallel_tool_calls: true,
+            stream_granularity: StreamGranularity::Block,
+        },
+    }
+}
+
 fn openai_content_block_id(
     item_id: &str,
     content_index: u32,
@@ -723,6 +1103,12 @@ fn openai_content_block_id(
     }
 }
 
+#[derive(Debug, Clone, Default)]
+struct ChatToolCallState {
+    name: Option<String>,
+    call_id: Option<String>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -737,11 +1123,49 @@ mod tests {
             )],
         );
 
-        let mapped = map_message(&message).unwrap();
+        let mapped = map_responses_message(&message).unwrap();
         assert!(matches!(
             mapped[0],
             ResponseInputItem::FunctionCallOutput { .. }
         ));
+    }
+
+    #[test]
+    fn maps_chat_completions_assistant_tool_calls_with_text() {
+        let message = Message::new(
+            MessageRole::Assistant,
+            vec![
+                provider::ContentBlock::text("calling tool"),
+                provider::ContentBlock::tool_call(
+                    "call-1",
+                    "lookup_weather",
+                    serde_json::json!({ "city": "Paris" }),
+                ),
+            ],
+        );
+
+        let mapped = map_chat_completions_message(&message).unwrap();
+        assert_eq!(mapped.role, ChatCompletionRole::Assistant);
+        assert_eq!(mapped.tool_calls.len(), 1);
+        assert!(matches!(
+            mapped.content,
+            Some(ChatCompletionMessageContent::Text(_))
+        ));
+    }
+
+    #[test]
+    fn maps_chat_completions_tool_result_messages() {
+        let message = Message::new(
+            MessageRole::User,
+            vec![provider::ContentBlock::tool_result(
+                "call-1",
+                serde_json::json!({ "ok": true }),
+            )],
+        );
+
+        let mapped = map_chat_completions_message(&message).unwrap();
+        assert_eq!(mapped.role, ChatCompletionRole::Tool);
+        assert_eq!(mapped.tool_call_id.as_deref(), Some("call-1"));
     }
 
     #[test]
@@ -754,12 +1178,36 @@ mod tests {
             ],
         );
 
-        let mapped = map_message(&message).unwrap();
+        let mapped = map_responses_message(&message).unwrap();
         match &mapped[0] {
             ResponseInputItem::Message { content, .. } => {
                 assert_eq!(content.len(), 2);
             }
             _ => panic!("expected message item"),
         }
+    }
+
+    #[test]
+    fn reports_surface_specific_capabilities() {
+        let responses = OpenAiProvider::new(
+            Config::new("test").with_api_surface_mode(crate::OpenAiApiMode::Responses),
+        );
+        let chat = OpenAiProvider::new(
+            crate::OpenAiConfigPreset::GEMINI
+                .into_config("test")
+                .with_api_surface_mode(crate::OpenAiApiMode::ChatCompletions),
+        );
+
+        assert!(responses.info().capabilities.reasoning_blocks);
+        assert!(!chat.info().capabilities.reasoning_blocks);
+        assert!(chat.info().capabilities.tool_call_argument_deltas);
+    }
+
+    #[test]
+    fn maps_chat_finish_reason_length_to_max_tokens() {
+        assert_eq!(
+            map_openai_finish_reason("length".into()),
+            FinishReason::MaxTokens
+        );
     }
 }

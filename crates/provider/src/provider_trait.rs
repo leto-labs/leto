@@ -4,7 +4,7 @@ use std::pin::Pin;
 
 use futures::Stream;
 use futures::future::BoxFuture;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 use crate::{Error, Event, ModelInfo, ProviderCapabilities, Request};
 
@@ -12,18 +12,28 @@ use crate::{Error, Event, ModelInfo, ProviderCapabilities, Request};
 pub type EventStream<'a> = Pin<Box<dyn Stream<Item = Result<Event, Error>> + Send + 'a>>;
 
 /// Metadata describing a concrete provider implementation.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ProviderInfo {
     /// Stable provider name.
     pub name: String,
     /// Default model identifier selected when a request omits `model`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub default_model: Option<String>,
+    pub default_model_id: Option<String>,
     /// Shared capability summary for the provider.
     pub capabilities: ProviderCapabilities,
     /// Optional advertised model list.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub models: Vec<ModelInfo>,
+}
+
+impl ProviderInfo {
+    /// Resolves the configured default model from the published catalog.
+    pub fn default_model(&self) -> Option<&ModelInfo> {
+        let default_model_id = self.default_model_id.as_deref()?;
+        self.models
+            .iter()
+            .find(|model| model.id == default_model_id)
+    }
 }
 
 /// Stream-first provider contract used by the shared SDK.

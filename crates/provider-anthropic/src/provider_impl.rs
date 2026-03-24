@@ -229,7 +229,7 @@ impl Provider for AnthropicProvider {
     fn info(&self) -> ProviderInfo {
         ProviderInfo {
             name: "anthropic".into(),
-            default_model: Some(self.client.config().default_model.clone()),
+            default_model_id: Some(self.client.config().default_model.clone()),
             capabilities: ProviderCapabilities {
                 system_messages: true,
                 developer_messages: true,

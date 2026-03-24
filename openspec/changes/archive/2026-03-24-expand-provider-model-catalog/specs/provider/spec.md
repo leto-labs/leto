@@ -1,8 +1,5 @@
-# provider Specification
+## MODIFIED Requirements
 
-## Purpose
-TBD - created by archiving change add-provider-sdk. Update Purpose after archive.
-## Requirements
 ### Requirement: Shared Provider SDK Crate
 
 The system SHALL provide a standalone `provider` crate that owns the shared
@@ -64,6 +61,8 @@ trait without network or model dependencies.
 - **WHEN** the request text starts with `tool:` and tools are available
 - **THEN** the mock provider SHALL emit a shared tool-call block
 
+## ADDED Requirements
+
 ### Requirement: Shared Provider Crate Owns Rich Model Catalog Metadata
 
 The shared `provider` crate SHALL define reusable model catalog types rich
@@ -88,4 +87,3 @@ also exposing the provider's full shared model catalog.
   catalog entry
 - **THEN** callers SHALL be able to resolve the default model metadata from the
   shared catalog without duplicating the full model object in `ProviderInfo`
-

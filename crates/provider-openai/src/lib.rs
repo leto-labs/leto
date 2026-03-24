@@ -14,20 +14,22 @@
 //!
 //! The protocol-native [`Client`] is the primary wire abstraction.
 //! [`OpenAiProvider`] is an optional adapter that exposes the shared
-//! [`provider::Provider`] trait on top of the Responses API.
+//! [`provider::Provider`] trait on top of the resolved supported API surface.
 
 pub mod chat_completions;
 pub mod client;
 pub mod config;
 pub mod error;
+pub mod presets;
 pub mod provider_impl;
 pub mod responses;
 mod shared;
 
 pub use chat_completions::*;
 pub use client::Client;
-pub use config::Config;
+pub use config::{Config, OpenAiApiMode, OpenAiApiSurface};
 pub use error::Error;
+pub use presets::OpenAiConfigPreset;
 pub use provider_impl::OpenAiProvider;
 pub use responses::*;
 pub use shared::TokenUsage;

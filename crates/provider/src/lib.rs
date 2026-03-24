@@ -6,6 +6,7 @@
 //! - [`Request`] and transcript/content types for shared inputs
 //! - [`Event`] and related block types for shared streamed outputs
 //! - [`ProviderCapabilities`] and [`ProviderInfo`] for capability discovery
+//! - [`ModelInfo`] and related catalog types for static model metadata
 //! - [`MockProvider`] for deterministic tests and local integration work
 //!
 //! The crate intentionally does not model agent-runtime concerns such as tool
@@ -28,6 +29,7 @@ pub mod capability;
 pub mod error;
 pub mod event;
 pub mod mock;
+pub mod model;
 pub mod provider_trait;
 pub mod request;
 pub mod tool;
@@ -37,6 +39,7 @@ pub use capability::*;
 pub use error::*;
 pub use event::*;
 pub use mock::*;
+pub use model::*;
 pub use provider_trait::*;
 pub use request::*;
 pub use tool::*;

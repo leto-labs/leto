@@ -78,3 +78,18 @@ fn shared_request_preserves_tool_result_blocks() {
     assert_eq!(value["messages"][0]["content"][0]["type"], "tool_result");
     assert_eq!(value["messages"][0]["content"][0]["call_id"], "call-1");
 }
+
+#[test]
+fn provider_info_resolves_default_model_from_catalog() {
+    let info = MockProvider::new().info();
+
+    assert_eq!(info.default_model_id.as_deref(), Some("mock-echo"));
+    assert_eq!(
+        info.default_model().map(|model| model.id.as_ref()),
+        Some("mock-echo")
+    );
+    assert_eq!(
+        info.default_model().map(|model| model.name.as_ref()),
+        Some("Mock Echo")
+    );
+}

@@ -1,5 +1,6 @@
 //! Deterministic mock implementation of the shared [`crate::Provider`] trait.
 
+use std::borrow::Cow;
 use std::time::Duration;
 
 use async_stream::stream;
@@ -116,7 +117,7 @@ impl Provider for MockProvider {
     fn info(&self) -> ProviderInfo {
         ProviderInfo {
             name: "mock".into(),
-            default_model: Some("mock-echo".into()),
+            default_model_id: Some("mock-echo".into()),
             capabilities: ProviderCapabilities {
                 system_messages: true,
                 developer_messages: true,
@@ -131,8 +132,23 @@ impl Provider for MockProvider {
                 stream_granularity: crate::StreamGranularity::Block,
             },
             models: vec![ModelInfo {
-                id: "mock-echo".into(),
-                name: Some("Mock Echo".into()),
+                id: Cow::Borrowed("mock-echo"),
+                name: Cow::Borrowed("Mock Echo"),
+                family: Some(Cow::Borrowed("mock")),
+                reasoning_efforts: Cow::Borrowed(&[]),
+                tool_call: true,
+                attachment: false,
+                structured_output: Some(false),
+                temperature: Some(true),
+                knowledge: None,
+                release_date: None,
+                last_updated: None,
+                open_weights: None,
+                input_modalities: Cow::Borrowed(&["text"]),
+                output_modalities: Cow::Borrowed(&["text"]),
+                cost: None,
+                limit: None,
+                status: None,
                 capabilities: None,
             }],
         }
