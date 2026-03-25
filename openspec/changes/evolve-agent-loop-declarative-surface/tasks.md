@@ -1,0 +1,6 @@
+- [x] Add bounded runtime-native loop effects for provider subcalls and safe transcript edits
+- [x] Expose typed loop-visible operation results in `SessionState`
+- [x] Add runtime events and tests covering multi-tick advanced-loop behavior
+- [x] Update architecture docs with the bounded declarative rule and PTY future direction
+- [x] Update competitor/loop research with the advanced-loop support matrix
+- [x] Add OpenSpec requirements for the bounded declarative loop surface

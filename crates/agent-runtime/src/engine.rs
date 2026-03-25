@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt::Write as _;
 use std::sync::{Arc, Mutex as StdMutex};
 
@@ -16,13 +16,17 @@ use ulid::Ulid;
 use crate::{
     ActiveWait, AgentCommand, AgentListScope, AgentMessage, AgentMessageDelivery,
     AgentMessageFilter, AgentMessageKind, ApprovalDecision, ApprovalRequest, ChildReport,
-    ChildReportKind, ChildResult, ChildRuntimeState, ChildStatus, ControlEvent, Envelope,
-    EnvelopeKind, HistoryMode, InputDelivery, InterruptMode, LoopContext, LoopDecision,
-    LoopStrategy, ParentRef, PendingInput, PendingSteering, ResultMode, RuntimeConfig,
-    RuntimeError, RuntimeEvent, RuntimeId, SessionBoundary, SessionCommand, SessionPhase,
-    SessionState, SpawnId, SpawnMode, SpawnRequest, SteerWhen, ToolApproval, ToolCall,
-    ToolExecutionResult, ToolExecutor, WaitOutcome, WaitRequest, WaitResult, WaitTargetOutcome,
-    WaitTimeoutAction,
+    ChildReportKind, ChildResult, ChildRuntimeState, ChildStatus, ContextPressure, ControlEvent,
+    DeliveredPtyEvent, DoomLoopState, Envelope, EnvelopeKind, HistoryMode, InputDelivery,
+    InterruptMode, LoopContext, LoopDecision, LoopStrategy, OpenPtyRequest, ParentRef,
+    PendingInput, PendingSteering, PtyCaptureMode, PtyCaptureRequest, PtyCaptureResult, PtyCommand,
+    PtyEvent, PtyEventFilter, PtyEventKind, PtyExecRequest, PtyExecResult, PtyHandle, PtyId,
+    PtySessionState, PtySubscription, PtySubscriptionDelivery, ResultMode, RuntimeConfig,
+    RuntimeError, RuntimeEvent, RuntimeId, RuntimeOperationResult, SessionBoundary, SessionCommand,
+    SessionPhase, SessionState, SpawnId, SpawnMode, SpawnRequest, SteerWhen, SubcallRequest,
+    SubcallResult, ToolApproval, ToolCall, ToolExecutionResult, ToolExecutor, TranscriptAppend,
+    TranscriptAppendResult, TranscriptRewrite, TranscriptRewriteResult, WaitOutcome, WaitRequest,
+    WaitResult, WaitTargetOutcome, WaitTimeoutAction,
 };
 
 #[derive(Debug, Clone)]
@@ -95,6 +99,7 @@ struct RuntimeRegistryState {
     parent_to_children: BTreeMap<RuntimeId, BTreeSet<RuntimeId>>,
     child_to_parent: BTreeMap<RuntimeId, ParentRef>,
     profiles: BTreeMap<String, RuntimeProfile>,
+    ptys: BTreeMap<PtyId, Arc<PtyHandle>>,
 }
 
 struct RuntimeRegistryInner {
@@ -104,6 +109,7 @@ struct RuntimeRegistryInner {
 enum EngineCommand {
     External(SessionCommand),
     ProviderFinished(Result<InferenceStep, RuntimeError>),
+    SubcallFinished(SubcallResult),
     ToolFinished {
         call: ToolCall,
         result: Result<ToolExecutionResult, RuntimeError>,
@@ -111,6 +117,7 @@ enum EngineCommand {
     InboundEnvelope(Envelope),
     ChildUpdate(ChildUpdate),
     WaitTimedOut(WaitResult),
+    PtyEventReceived(DeliveredPtyEvent),
 }
 
 enum ChildUpdate {
@@ -128,6 +135,8 @@ enum ChildUpdate {
     },
 }
 
+const MAX_RECENT_RUNTIME_OPERATIONS: usize = 8;
+
 struct EngineRuntime {
     runtime_id: RuntimeId,
     provider: Arc<dyn Provider>,
@@ -140,6 +149,9 @@ struct EngineRuntime {
     event_tx: broadcast::Sender<RuntimeEvent>,
     registry: Arc<RuntimeRegistryInner>,
     active_provider_cancel: Option<CancellationToken>,
+    recent_tool_signatures: VecDeque<String>,
+    handled_doom_signatures: BTreeSet<String>,
+    compaction_attempted_turn: Option<u64>,
 }
 
 impl SessionEngine {
@@ -198,6 +210,9 @@ impl SessionEngine {
             event_tx: event_tx.clone(),
             registry: registry.clone(),
             active_provider_cancel: None,
+            recent_tool_signatures: VecDeque::new(),
+            handled_doom_signatures: BTreeSet::new(),
+            compaction_attempted_turn: None,
         };
         tokio::spawn(async move {
             runtime.run().await;
@@ -232,13 +247,23 @@ impl SessionEngine {
 
     /// Returns provider-visible tool definitions for this session.
     pub fn tool_definitions(&self) -> Vec<provider::ToolDefinition> {
-        merge_tool_definitions(self.tools.definitions(), native_agent_tool_definitions())
+        merge_tool_definitions(self.tools.definitions(), native_runtime_tool_definitions())
     }
 
     /// Returns the currently known direct child snapshots.
     pub async fn children(&self) -> Vec<ChildRuntimeState> {
         let state = self.state.lock().await;
         state.children.values().cloned().collect()
+    }
+
+    /// Returns the currently known PTY snapshots from the shared registry.
+    pub async fn ptys(&self) -> Vec<PtySessionState> {
+        self.registry.list_ptys().unwrap_or_default()
+    }
+
+    /// Returns one PTY snapshot by id from the shared registry.
+    pub async fn pty(&self, pty_id: PtyId) -> Result<PtySessionState, RuntimeError> {
+        self.registry.pty(pty_id)?.snapshot_state()
     }
 
     /// Submits a command into the long-lived session engine.
@@ -361,6 +386,190 @@ impl SessionEngine {
         Ok(child_id)
     }
 
+    async fn open_pty_tool(
+        &self,
+        request: OpenPtyRequest,
+    ) -> Result<PtySessionState, RuntimeError> {
+        let handle = Arc::new(PtyHandle::open(self.session_id, request)?);
+        let pty = handle.snapshot_state()?;
+        self.registry.register_pty(handle);
+        {
+            let mut state = self.state.lock().await;
+            state.ptys.insert(pty.pty_id, pty.clone());
+        }
+        self.emit(RuntimeEvent::PtyOpened { pty: pty.clone() });
+        Ok(pty)
+    }
+
+    async fn write_pty_tool(
+        &self,
+        pty_id: PtyId,
+        input: String,
+        wait_ms: Option<u64>,
+    ) -> Result<PtyExecResult, RuntimeError> {
+        let handle = self.registry.pty(pty_id)?;
+        let result = handle.write_input(input, wait_ms, false, false).await?;
+        let pty = handle.snapshot_state()?;
+        {
+            let mut state = self.state.lock().await;
+            state.ptys.insert(pty_id, pty.clone());
+            state.last_pty_capture = Some(PtyCaptureResult {
+                pty_id,
+                snapshot: result.snapshot.clone(),
+            });
+        }
+        self.emit(RuntimeEvent::PtyUpdated { pty });
+        Ok(result)
+    }
+
+    async fn execute_pty_tool(
+        &self,
+        request: PtyExecRequest,
+    ) -> Result<PtyExecResult, RuntimeError> {
+        let handle = self.registry.pty(request.pty_id)?;
+        let result = handle.execute_batch(request).await?;
+        let pty = handle.snapshot_state()?;
+        {
+            let mut state = self.state.lock().await;
+            state.ptys.insert(pty.pty_id, pty.clone());
+            state.last_pty_capture = Some(PtyCaptureResult {
+                pty_id: pty.pty_id,
+                snapshot: result.snapshot.clone(),
+            });
+        }
+        self.emit(RuntimeEvent::PtyUpdated { pty });
+        Ok(result)
+    }
+
+    async fn capture_pty_tool(
+        &self,
+        request: PtyCaptureRequest,
+    ) -> Result<PtyCaptureResult, RuntimeError> {
+        let handle = self.registry.pty(request.pty_id)?;
+        let result = handle.capture(request).await?;
+        let pty = handle.snapshot_state()?;
+        {
+            let mut state = self.state.lock().await;
+            state.ptys.insert(pty.pty_id, pty.clone());
+            state.last_pty_capture = Some(result.clone());
+        }
+        self.emit(RuntimeEvent::PtyCaptured {
+            result: result.clone(),
+        });
+        Ok(result)
+    }
+
+    async fn resize_pty_tool(
+        &self,
+        pty_id: PtyId,
+        rows: u16,
+        cols: u16,
+    ) -> Result<PtySessionState, RuntimeError> {
+        let handle = self.registry.pty(pty_id)?;
+        let pty = handle.resize(rows, cols).await?;
+        {
+            let mut state = self.state.lock().await;
+            state.ptys.insert(pty_id, pty.clone());
+        }
+        self.emit(RuntimeEvent::PtyUpdated { pty: pty.clone() });
+        Ok(pty)
+    }
+
+    async fn interrupt_pty_tool(&self, pty_id: PtyId) -> Result<PtySessionState, RuntimeError> {
+        let handle = self.registry.pty(pty_id)?;
+        let pty = handle.interrupt().await?;
+        {
+            let mut state = self.state.lock().await;
+            state.ptys.insert(pty_id, pty.clone());
+        }
+        self.emit(RuntimeEvent::PtyUpdated { pty: pty.clone() });
+        Ok(pty)
+    }
+
+    async fn background_pty_tool(&self, pty_id: PtyId) -> Result<PtySessionState, RuntimeError> {
+        let handle = self.registry.pty(pty_id)?;
+        let pty = handle.background()?;
+        {
+            let mut state = self.state.lock().await;
+            state.ptys.insert(pty_id, pty.clone());
+        }
+        self.emit(RuntimeEvent::PtyUpdated { pty: pty.clone() });
+        Ok(pty)
+    }
+
+    async fn close_pty_tool(&self, pty_id: PtyId) -> Result<PtySessionState, RuntimeError> {
+        let handle = self.registry.pty(pty_id)?;
+        let pty = handle.close()?;
+        {
+            let mut state = self.state.lock().await;
+            state.ptys.insert(pty_id, pty.clone());
+        }
+        self.emit(RuntimeEvent::PtyUpdated { pty: pty.clone() });
+        Ok(pty)
+    }
+
+    async fn subscribe_pty_tool(&self, subscription: PtySubscription) -> Result<(), RuntimeError> {
+        let handle = self.registry.pty(subscription.pty_id)?;
+        {
+            let mut state = self.state.lock().await;
+            if state
+                .pty_subscriptions
+                .iter()
+                .any(|existing| existing == &subscription)
+            {
+                return Ok(());
+            }
+            state.pty_subscriptions.push(subscription.clone());
+            state
+                .ptys
+                .insert(subscription.pty_id, handle.snapshot_state()?);
+        }
+        self.emit(RuntimeEvent::PtySubscribed {
+            runtime_id: self.session_id,
+            subscription: subscription.clone(),
+        });
+
+        let mut receiver = handle.subscribe();
+        let command_tx = self.command_tx.clone();
+        tokio::spawn(async move {
+            loop {
+                let event = match receiver.recv().await {
+                    Ok(event) => event,
+                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(broadcast::error::RecvError::Closed) => break,
+                };
+                if !subscription_matches_event(&subscription, &event) {
+                    continue;
+                }
+                if command_tx
+                    .send(EngineCommand::PtyEventReceived(DeliveredPtyEvent {
+                        event,
+                        subscription: subscription.clone(),
+                    }))
+                    .await
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        });
+        Ok(())
+    }
+
+    async fn unsubscribe_pty_tool(&self, pty_id: PtyId) -> Result<(), RuntimeError> {
+        {
+            let mut state = self.state.lock().await;
+            state
+                .pty_subscriptions
+                .retain(|subscription| subscription.pty_id != pty_id);
+        }
+        self.emit(RuntimeEvent::PtyUnsubscribed {
+            runtime_id: self.session_id,
+            pty_id,
+        });
+        Ok(())
+    }
+
     async fn spawn_child_runtime_from_handle(
         &self,
         request: SpawnRequest,
@@ -447,6 +656,7 @@ impl RuntimeRegistryInner {
                 parent_to_children: BTreeMap::new(),
                 child_to_parent: BTreeMap::new(),
                 profiles: BTreeMap::new(),
+                ptys: BTreeMap::new(),
             }),
         }
     }
@@ -487,6 +697,34 @@ impl RuntimeRegistryInner {
             .ok_or_else(|| RuntimeError::Internal(format!("unknown runtime id: {runtime_id}")))
     }
 
+    fn register_pty(&self, handle: Arc<PtyHandle>) {
+        self.state
+            .lock()
+            .expect("runtime registry poisoned")
+            .ptys
+            .insert(handle.pty_id(), handle);
+    }
+
+    fn pty(&self, pty_id: PtyId) -> Result<Arc<PtyHandle>, RuntimeError> {
+        self.state
+            .lock()
+            .expect("runtime registry poisoned")
+            .ptys
+            .get(&pty_id)
+            .cloned()
+            .ok_or_else(|| RuntimeError::Internal(format!("unknown PTY id: {pty_id}")))
+    }
+
+    fn list_ptys(&self) -> Result<Vec<PtySessionState>, RuntimeError> {
+        self.state
+            .lock()
+            .expect("runtime registry poisoned")
+            .ptys
+            .values()
+            .map(|pty| pty.snapshot_state())
+            .collect()
+    }
+
     fn link_child(&self, parent_id: RuntimeId, child_id: RuntimeId, spawn_id: SpawnId) {
         let mut state = self.state.lock().expect("runtime registry poisoned");
         state
@@ -525,6 +763,9 @@ impl EngineRuntime {
                 EngineCommand::ProviderFinished(result) => {
                     self.handle_provider_finished(result).await
                 }
+                EngineCommand::SubcallFinished(result) => {
+                    self.handle_subcall_finished(result).await
+                }
                 EngineCommand::ToolFinished { call, result } => {
                     self.handle_tool_finished(call, result).await
                 }
@@ -533,6 +774,9 @@ impl EngineRuntime {
                 }
                 EngineCommand::ChildUpdate(update) => self.handle_child_update(update).await,
                 EngineCommand::WaitTimedOut(result) => self.handle_wait_timed_out(result).await,
+                EngineCommand::PtyEventReceived(delivered) => {
+                    self.handle_delivered_pty_event(delivered).await
+                }
             };
 
             if let Err(error) = result {
@@ -576,9 +820,33 @@ impl EngineRuntime {
             }
             SessionCommand::Agent(command) => {
                 self.emit(RuntimeEvent::AgentQueued);
-                self.handle_agent_command(command).await?;
+                if let Some(decision) = loop_decision_from_agent_command(&command) {
+                    self.queue_runtime_action(decision).await;
+                } else {
+                    self.handle_agent_command(command).await?;
+                }
                 self.drive().await
             }
+            SessionCommand::Pty(command) => {
+                if let Some(decision) = loop_decision_from_pty_command(&command) {
+                    self.queue_runtime_action(decision).await;
+                } else {
+                    self.handle_pty_command(command).await?;
+                }
+                self.drive().await
+            }
+        }
+    }
+
+    async fn queue_runtime_action(&mut self, decision: LoopDecision) {
+        let mut state = self.state.lock().await;
+        state.pending_runtime_actions.push_back(decision);
+    }
+
+    async fn consume_pending_runtime_action(&mut self) {
+        let mut state = self.state.lock().await;
+        if state.pending_runtime_actions.front().is_some() {
+            state.pending_runtime_actions.pop_front();
         }
     }
 
@@ -643,6 +911,80 @@ impl EngineRuntime {
         Ok(())
     }
 
+    async fn handle_pty_command(&mut self, command: PtyCommand) -> Result<(), RuntimeError> {
+        match command {
+            PtyCommand::OpenPty { request } => {
+                let pty = self.open_pty(request).await?;
+                self.emit(RuntimeEvent::PtyOpened { pty });
+            }
+            PtyCommand::ListPtys => {
+                let _ = self.registry.list_ptys()?;
+            }
+            PtyCommand::GetPty { pty_id } => {
+                let pty = self.registry.pty(pty_id)?.snapshot_state()?;
+                self.remember_pty(pty).await;
+            }
+            PtyCommand::WritePtyInput {
+                pty_id,
+                input,
+                wait_ms,
+            } => {
+                let result = self.write_pty_input(pty_id, input, wait_ms).await?;
+                self.record_runtime_operation(RuntimeOperationResult::PtyExecution {
+                    result: result.clone(),
+                })
+                .await;
+                self.emit(RuntimeEvent::PtyUpdated {
+                    pty: self.registry.pty(pty_id)?.snapshot_state()?,
+                });
+            }
+            PtyCommand::ExecutePtyBatch { request } => {
+                let result = self.execute_pty_batch(request).await?;
+                self.record_runtime_operation(RuntimeOperationResult::PtyExecution {
+                    result: result.clone(),
+                })
+                .await;
+                self.emit(RuntimeEvent::PtyUpdated {
+                    pty: self.registry.pty(result.pty_id)?.snapshot_state()?,
+                });
+            }
+            PtyCommand::CapturePty { request } => {
+                let result = self.capture_pty(request).await?;
+                self.record_runtime_operation(RuntimeOperationResult::PtyCapture {
+                    result: result.clone(),
+                })
+                .await;
+                self.emit(RuntimeEvent::PtyCaptured { result });
+            }
+            PtyCommand::ResizePty { pty_id, rows, cols } => {
+                let pty = self.resize_pty(pty_id, rows, cols).await?;
+                self.emit(RuntimeEvent::PtyUpdated { pty });
+            }
+            PtyCommand::InterruptPty { pty_id } => {
+                let pty = self.interrupt_pty(pty_id).await?;
+                self.emit(RuntimeEvent::PtyUpdated { pty });
+            }
+            PtyCommand::BackgroundPty { pty_id } => {
+                let pty = self.background_pty(pty_id).await?;
+                self.emit(RuntimeEvent::PtyUpdated { pty });
+            }
+            PtyCommand::ClosePty { pty_id } => {
+                let pty = self.close_pty(pty_id).await?;
+                self.emit(RuntimeEvent::PtyUpdated { pty });
+            }
+            PtyCommand::SubscribePty { subscription } => {
+                self.subscribe_pty(subscription).await?;
+            }
+            PtyCommand::UnsubscribePty { pty_id } => {
+                self.unsubscribe_pty(pty_id).await?;
+            }
+            PtyCommand::ReadPtyEvents { filter } => {
+                let _ = self.read_pty_events(filter).await;
+            }
+        }
+        Ok(())
+    }
+
     async fn handle_control(&mut self, control: ControlEvent) -> Result<(), RuntimeError> {
         match control {
             ControlEvent::Interrupt { mode } => {
@@ -657,14 +999,7 @@ impl EngineRuntime {
                 }
             }
             ControlEvent::Steer { message, when } => {
-                {
-                    let mut state = self.state.lock().await;
-                    state.pending_steering.push(PendingSteering {
-                        message: message.clone(),
-                        when,
-                    });
-                }
-                self.emit(RuntimeEvent::SteeringQueued { message, when });
+                self.queue_local_steering(message, when).await?;
             }
             ControlEvent::Pause => {
                 let phase = self.state.lock().await.phase;
@@ -987,6 +1322,28 @@ impl EngineRuntime {
         self.drive().await
     }
 
+    async fn handle_subcall_finished(&mut self, result: SubcallResult) -> Result<(), RuntimeError> {
+        self.active_provider_cancel = None;
+        self.set_phase_and_boundary(SessionPhase::Idle, None)
+            .await?;
+
+        self.record_runtime_operation(RuntimeOperationResult::Subcall {
+            result: result.clone(),
+        })
+        .await;
+        self.emit(RuntimeEvent::SubcallFinished {
+            result: result.clone(),
+        });
+        if let Some(error) = &result.error {
+            self.emit(RuntimeEvent::Error {
+                message: error.clone(),
+                recoverable: true,
+            });
+        }
+
+        self.drive().await
+    }
+
     async fn handle_tool_finished(
         &mut self,
         call: ToolCall,
@@ -1015,9 +1372,18 @@ impl EngineRuntime {
                 };
                 self.commit_messages(vec![tool_result_message]).await?;
                 self.emit(RuntimeEvent::ToolCallFinished {
-                    call,
+                    call: call.clone(),
                     result: result.clone(),
                 });
+                if let Err(error) = self.observe_tool_call_for_doom(&call).await {
+                    {
+                        let mut state = self.state.lock().await;
+                        state.pending_tool_calls.clear();
+                        state.pending_completion = true;
+                        state.last_finish_reason = Some(FinishReason::Error);
+                    }
+                    return Err(error);
+                }
             }
             Err(error) => {
                 {
@@ -1052,6 +1418,11 @@ impl EngineRuntime {
             if self.apply_pending_child_reports().await? {
                 continue;
             }
+            if self.apply_pending_promoted_pty_events().await? {
+                continue;
+            }
+
+            self.refresh_runtime_advice().await?;
 
             let snapshot = self.state.lock().await.clone();
             match snapshot.phase {
@@ -1063,26 +1434,42 @@ impl EngineRuntime {
                 SessionPhase::Idle => {}
             }
 
-            let decision = self
-                .strategy
-                .decide(LoopContext::new(
-                    self.provider.info(),
-                    self.config.clone(),
-                    snapshot,
-                ))
-                .await?;
+            let queued_action = snapshot.pending_runtime_actions.front().cloned();
+            let (decision, should_consume_pending_decision) = if let Some(action) = queued_action {
+                (action, true)
+            } else {
+                (
+                    self.strategy
+                        .decide(LoopContext::new(
+                            self.provider.info(),
+                            self.config.clone(),
+                            snapshot,
+                        ))
+                        .await?,
+                    false,
+                )
+            };
 
             match decision {
                 LoopDecision::RunProvider => {
+                    if should_consume_pending_decision {
+                        self.consume_pending_runtime_action().await;
+                    }
                     self.spawn_provider_step().await?;
                     break;
                 }
                 LoopDecision::ExecuteToolBatch => {
+                    if should_consume_pending_decision {
+                        self.consume_pending_runtime_action().await;
+                    }
                     if self.spawn_next_tool_call().await? {
                         break;
                     }
                 }
                 LoopDecision::RequestToolApproval { request } => {
+                    if should_consume_pending_decision {
+                        self.consume_pending_runtime_action().await;
+                    }
                     {
                         let mut state = self.state.lock().await;
                         if state.pending_approval.is_none() {
@@ -1098,6 +1485,9 @@ impl EngineRuntime {
                     break;
                 }
                 LoopDecision::WaitForInput => {
+                    if should_consume_pending_decision {
+                        self.consume_pending_runtime_action().await;
+                    }
                     self.set_phase_and_boundary(
                         SessionPhase::Idle,
                         Some(SessionBoundary::AwaitingInput),
@@ -1106,10 +1496,16 @@ impl EngineRuntime {
                     break;
                 }
                 LoopDecision::FinishTurn => {
+                    if should_consume_pending_decision {
+                        self.consume_pending_runtime_action().await;
+                    }
                     self.finish_turn().await?;
                     continue;
                 }
                 LoopDecision::SpawnAgent { request, wait } => {
+                    if should_consume_pending_decision {
+                        self.consume_pending_runtime_action().await;
+                    }
                     let child_id = self.spawn_child_runtime(request).await?;
                     if let Some(wait) = wait {
                         self.start_wait(vec![child_id], wait).await?;
@@ -1118,6 +1514,9 @@ impl EngineRuntime {
                     continue;
                 }
                 LoopDecision::WaitForAgents { ids, wait } => {
+                    if should_consume_pending_decision {
+                        self.consume_pending_runtime_action().await;
+                    }
                     if self.start_wait(ids, wait).await? {
                         break;
                     }
@@ -1127,31 +1526,158 @@ impl EngineRuntime {
                     input,
                     delivery,
                 } => {
+                    if should_consume_pending_decision {
+                        self.consume_pending_runtime_action().await;
+                    }
                     self.send_agent_input(runtime_id, input, delivery).await?;
                     continue;
                 }
+                LoopDecision::RunSubcall { request } => {
+                    if should_consume_pending_decision {
+                        self.consume_pending_runtime_action().await;
+                    }
+                    self.spawn_subcall(request).await?;
+                    break;
+                }
+                LoopDecision::RewriteTranscript { rewrite } => {
+                    if should_consume_pending_decision {
+                        self.consume_pending_runtime_action().await;
+                    }
+                    self.rewrite_transcript(rewrite).await?;
+                    continue;
+                }
+                LoopDecision::AppendTranscriptMessages { append } => {
+                    if should_consume_pending_decision {
+                        self.consume_pending_runtime_action().await;
+                    }
+                    self.append_transcript_messages(append).await?;
+                    continue;
+                }
+                LoopDecision::QueueSteering { message, when } => {
+                    if should_consume_pending_decision {
+                        self.consume_pending_runtime_action().await;
+                    }
+                    self.queue_local_steering(message, when).await?;
+                    continue;
+                }
+                LoopDecision::OpenPty { request } => {
+                    if should_consume_pending_decision {
+                        self.consume_pending_runtime_action().await;
+                    }
+                    self.handle_pty_command(PtyCommand::OpenPty { request })
+                        .await?;
+                    continue;
+                }
+                LoopDecision::WritePtyInput {
+                    pty_id,
+                    input,
+                    wait_ms,
+                } => {
+                    if should_consume_pending_decision {
+                        self.consume_pending_runtime_action().await;
+                    }
+                    self.handle_pty_command(PtyCommand::WritePtyInput {
+                        pty_id,
+                        input,
+                        wait_ms,
+                    })
+                    .await?;
+                    continue;
+                }
+                LoopDecision::ExecutePtyBatch { request } => {
+                    if should_consume_pending_decision {
+                        self.consume_pending_runtime_action().await;
+                    }
+                    self.handle_pty_command(PtyCommand::ExecutePtyBatch { request })
+                        .await?;
+                    continue;
+                }
+                LoopDecision::CapturePty { request } => {
+                    if should_consume_pending_decision {
+                        self.consume_pending_runtime_action().await;
+                    }
+                    self.handle_pty_command(PtyCommand::CapturePty { request })
+                        .await?;
+                    continue;
+                }
+                LoopDecision::ResizePty { pty_id, rows, cols } => {
+                    if should_consume_pending_decision {
+                        self.consume_pending_runtime_action().await;
+                    }
+                    self.handle_pty_command(PtyCommand::ResizePty { pty_id, rows, cols })
+                        .await?;
+                    continue;
+                }
+                LoopDecision::InterruptPty { pty_id } => {
+                    if should_consume_pending_decision {
+                        self.consume_pending_runtime_action().await;
+                    }
+                    self.handle_pty_command(PtyCommand::InterruptPty { pty_id })
+                        .await?;
+                    continue;
+                }
+                LoopDecision::BackgroundPty { pty_id } => {
+                    if should_consume_pending_decision {
+                        self.consume_pending_runtime_action().await;
+                    }
+                    self.handle_pty_command(PtyCommand::BackgroundPty { pty_id })
+                        .await?;
+                    continue;
+                }
+                LoopDecision::ClosePty { pty_id } => {
+                    if should_consume_pending_decision {
+                        self.consume_pending_runtime_action().await;
+                    }
+                    self.handle_pty_command(PtyCommand::ClosePty { pty_id })
+                        .await?;
+                    continue;
+                }
+                LoopDecision::SubscribePty { subscription } => {
+                    if should_consume_pending_decision {
+                        self.consume_pending_runtime_action().await;
+                    }
+                    self.handle_pty_command(PtyCommand::SubscribePty { subscription })
+                        .await?;
+                    continue;
+                }
+                LoopDecision::UnsubscribePty { pty_id } => {
+                    if should_consume_pending_decision {
+                        self.consume_pending_runtime_action().await;
+                    }
+                    self.handle_pty_command(PtyCommand::UnsubscribePty { pty_id })
+                        .await?;
+                    continue;
+                }
                 LoopDecision::InterruptAgent { runtime_id, mode } => {
+                    if should_consume_pending_decision {
+                        self.consume_pending_runtime_action().await;
+                    }
                     self.handle_agent_command(AgentCommand::InterruptAgent { runtime_id, mode })
                         .await?;
                     continue;
                 }
                 LoopDecision::PauseAgent { runtime_id } => {
+                    if should_consume_pending_decision {
+                        self.consume_pending_runtime_action().await;
+                    }
                     self.handle_agent_command(AgentCommand::PauseAgent { runtime_id })
                         .await?;
                     continue;
                 }
                 LoopDecision::ResumeAgent { runtime_id } => {
+                    if should_consume_pending_decision {
+                        self.consume_pending_runtime_action().await;
+                    }
                     self.handle_agent_command(AgentCommand::ResumeAgent { runtime_id })
                         .await?;
                     continue;
                 }
                 LoopDecision::CompactContext => {
-                    let original_messages = self.state.lock().await.transcript.len();
-                    self.emit(RuntimeEvent::Compaction {
-                        original_messages,
-                        summary_tokens: 0,
-                    });
-                    break;
+                    if should_consume_pending_decision {
+                        self.consume_pending_runtime_action().await;
+                    }
+                    self.compact_context().await?;
+                    continue;
                 }
             }
         }
@@ -1401,6 +1927,223 @@ impl EngineRuntime {
         messages
     }
 
+    async fn open_pty(&mut self, request: OpenPtyRequest) -> Result<PtySessionState, RuntimeError> {
+        let handle = Arc::new(PtyHandle::open(self.runtime_id, request)?);
+        let state = handle.snapshot_state()?;
+        self.registry.register_pty(handle);
+        self.remember_pty(state.clone()).await;
+        Ok(state)
+    }
+
+    async fn remember_pty(&self, pty: PtySessionState) {
+        let mut state = self.state.lock().await;
+        state.ptys.insert(pty.pty_id, pty);
+    }
+
+    async fn write_pty_input(
+        &mut self,
+        pty_id: PtyId,
+        input: String,
+        wait_ms: Option<u64>,
+    ) -> Result<PtyExecResult, RuntimeError> {
+        let handle = self.registry.pty(pty_id)?;
+        let result = handle.write_input(input, wait_ms, false, false).await?;
+        self.remember_pty(handle.snapshot_state()?).await;
+        Ok(result)
+    }
+
+    async fn execute_pty_batch(
+        &mut self,
+        request: PtyExecRequest,
+    ) -> Result<PtyExecResult, RuntimeError> {
+        let handle = self.registry.pty(request.pty_id)?;
+        let result = handle.execute_batch(request).await?;
+        self.remember_pty(handle.snapshot_state()?).await;
+        Ok(result)
+    }
+
+    async fn capture_pty(
+        &mut self,
+        request: PtyCaptureRequest,
+    ) -> Result<PtyCaptureResult, RuntimeError> {
+        let handle = self.registry.pty(request.pty_id)?;
+        let result = handle.capture(request).await?;
+        {
+            let mut state = self.state.lock().await;
+            state.last_pty_capture = Some(result.clone());
+        }
+        self.remember_pty(handle.snapshot_state()?).await;
+        Ok(result)
+    }
+
+    async fn resize_pty(
+        &mut self,
+        pty_id: PtyId,
+        rows: u16,
+        cols: u16,
+    ) -> Result<PtySessionState, RuntimeError> {
+        let handle = self.registry.pty(pty_id)?;
+        let pty = handle.resize(rows, cols).await?;
+        self.remember_pty(pty.clone()).await;
+        Ok(pty)
+    }
+
+    async fn interrupt_pty(&mut self, pty_id: PtyId) -> Result<PtySessionState, RuntimeError> {
+        let handle = self.registry.pty(pty_id)?;
+        let pty = handle.interrupt().await?;
+        self.remember_pty(pty.clone()).await;
+        Ok(pty)
+    }
+
+    async fn background_pty(&mut self, pty_id: PtyId) -> Result<PtySessionState, RuntimeError> {
+        let handle = self.registry.pty(pty_id)?;
+        let pty = handle.background()?;
+        self.remember_pty(pty.clone()).await;
+        Ok(pty)
+    }
+
+    async fn close_pty(&mut self, pty_id: PtyId) -> Result<PtySessionState, RuntimeError> {
+        let handle = self.registry.pty(pty_id)?;
+        let pty = handle.close()?;
+        self.remember_pty(pty.clone()).await;
+        Ok(pty)
+    }
+
+    async fn subscribe_pty(&mut self, subscription: PtySubscription) -> Result<(), RuntimeError> {
+        let already_subscribed = {
+            let state = self.state.lock().await;
+            state
+                .pty_subscriptions
+                .iter()
+                .any(|existing| existing == &subscription)
+        };
+        if already_subscribed {
+            return Ok(());
+        }
+
+        let handle = self.registry.pty(subscription.pty_id)?;
+        self.remember_pty(handle.snapshot_state()?).await;
+        {
+            let mut state = self.state.lock().await;
+            state.pty_subscriptions.push(subscription.clone());
+        }
+        self.emit(RuntimeEvent::PtySubscribed {
+            runtime_id: self.runtime_id,
+            subscription: subscription.clone(),
+        });
+
+        let mut receiver = handle.subscribe();
+        let command_tx = self.command_tx.clone();
+        tokio::spawn(async move {
+            loop {
+                let event = match receiver.recv().await {
+                    Ok(event) => event,
+                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(broadcast::error::RecvError::Closed) => break,
+                };
+                if !subscription_matches_event(&subscription, &event) {
+                    continue;
+                }
+                if command_tx
+                    .send(EngineCommand::PtyEventReceived(DeliveredPtyEvent {
+                        event,
+                        subscription: subscription.clone(),
+                    }))
+                    .await
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        });
+        Ok(())
+    }
+
+    async fn unsubscribe_pty(&mut self, pty_id: PtyId) -> Result<(), RuntimeError> {
+        {
+            let mut state = self.state.lock().await;
+            state
+                .pty_subscriptions
+                .retain(|subscription| subscription.pty_id != pty_id);
+        }
+        self.emit(RuntimeEvent::PtyUnsubscribed {
+            runtime_id: self.runtime_id,
+            pty_id,
+        });
+        Ok(())
+    }
+
+    async fn read_pty_events(&self, filter: PtyEventFilter) -> Vec<DeliveredPtyEvent> {
+        let state = self.state.lock().await;
+        let mut events = state
+            .recent_pty_events
+            .iter()
+            .filter(|delivered| delivered_event_matches_filter(delivered, &filter))
+            .cloned()
+            .collect::<Vec<_>>();
+        if let Some(limit) = filter.limit {
+            events.truncate(limit);
+        }
+        events
+    }
+
+    async fn handle_delivered_pty_event(
+        &mut self,
+        delivered: DeliveredPtyEvent,
+    ) -> Result<(), RuntimeError> {
+        let still_subscribed = {
+            let state = self.state.lock().await;
+            state
+                .pty_subscriptions
+                .iter()
+                .any(|subscription| subscription == &delivered.subscription)
+        };
+        if !still_subscribed {
+            return Ok(());
+        }
+
+        {
+            let mut state = self.state.lock().await;
+            state.recent_pty_events.push_back(delivered.clone());
+            while state.recent_pty_events.len() > 128 {
+                state.recent_pty_events.pop_front();
+            }
+            if delivered.subscription.delivery == PtySubscriptionDelivery::PromoteToDeveloper {
+                state.pending_promoted_pty_events.push(delivered.clone());
+            }
+        }
+        if let Ok(pty) = self
+            .registry
+            .pty(delivered.event.pty_id)
+            .and_then(|pty| pty.snapshot_state())
+        {
+            self.remember_pty(pty).await;
+        }
+        self.emit(RuntimeEvent::PtyEventDelivered {
+            delivered: delivered.clone(),
+        });
+        self.drive().await
+    }
+
+    async fn apply_pending_promoted_pty_events(&mut self) -> Result<bool, RuntimeError> {
+        let delivered_events = {
+            let mut state = self.state.lock().await;
+            if !matches!(state.phase, SessionPhase::Idle)
+                || state.pending_promoted_pty_events.is_empty()
+            {
+                return Ok(false);
+            }
+            std::mem::take(&mut state.pending_promoted_pty_events)
+        };
+
+        for delivered in delivered_events {
+            let message = render_pty_event_message(&delivered)?;
+            self.commit_messages(vec![message.clone()]).await?;
+            self.emit(RuntimeEvent::PtyEventInjected { delivered, message });
+        }
+        Ok(true)
+    }
+
     async fn apply_pending_child_reports(&mut self) -> Result<bool, RuntimeError> {
         let reports = {
             let mut state = self.state.lock().await;
@@ -1613,6 +2356,11 @@ impl EngineRuntime {
             state.last_finish_reason = None;
             state.pending_tool_calls.clear();
             state.pending_approval = None;
+            state.doom_loop = None;
+            state.recent_operations.clear();
+            state.last_subcall = None;
+            state.last_transcript_rewrite = None;
+            state.last_transcript_append = None;
 
             let session_id = state.session_id;
             let turn_index = state.turn_index;
@@ -1633,6 +2381,10 @@ impl EngineRuntime {
         if !messages.is_empty() {
             self.commit_messages(messages).await?;
         }
+
+        self.recent_tool_signatures.clear();
+        self.handled_doom_signatures.clear();
+        self.compaction_attempted_turn = None;
 
         Ok(())
     }
@@ -1714,7 +2466,7 @@ impl EngineRuntime {
                 messages: state.transcript.clone(),
                 tools: merge_tool_definitions(
                     self.tools.definitions(),
-                    native_agent_tool_definitions(),
+                    native_runtime_tool_definitions(),
                 ),
                 options: self.config.request.clone(),
             }
@@ -1733,6 +2485,54 @@ impl EngineRuntime {
             let result = run_provider_step(provider, config, request, Some(event_tx), cancel).await;
             let _ = command_tx
                 .send(EngineCommand::ProviderFinished(result))
+                .await;
+        });
+
+        Ok(())
+    }
+
+    async fn spawn_subcall(&mut self, request: SubcallRequest) -> Result<(), RuntimeError> {
+        {
+            let mut state = self.state.lock().await;
+            state.iteration_count = state.iteration_count.saturating_add(1);
+        }
+
+        let provider_request = Request {
+            model: request
+                .model_override
+                .clone()
+                .or_else(|| self.config.model.clone()),
+            messages: request.messages.clone(),
+            tools: Vec::new(),
+            options: request_options_without_tools(&self.config.request),
+        };
+
+        let cancel = CancellationToken::new();
+        self.active_provider_cancel = Some(cancel.clone());
+        self.set_phase_and_boundary(SessionPhase::RunningProvider, None)
+            .await?;
+
+        let provider = self.provider.clone();
+        let config = self.config.clone();
+        let command_tx = self.command_tx.clone();
+        tokio::spawn(async move {
+            let result =
+                match run_provider_step(provider, config, provider_request, None, cancel).await {
+                    Ok(step) => SubcallResult {
+                        purpose: request.purpose,
+                        message: step.message,
+                        finish_reason: step.finish_reason,
+                        error: None,
+                    },
+                    Err(error) => SubcallResult {
+                        purpose: request.purpose,
+                        message: None,
+                        finish_reason: Some(FinishReason::Error),
+                        error: Some(error.to_string()),
+                    },
+                };
+            let _ = command_tx
+                .send(EngineCommand::SubcallFinished(result))
                 .await;
         });
 
@@ -1768,8 +2568,8 @@ impl EngineRuntime {
         };
         let command_tx = self.command_tx.clone();
         tokio::spawn(async move {
-            let result = if is_native_agent_tool(&call.name) {
-                execute_native_agent_tool(engine, call.clone()).await
+            let result = if is_native_runtime_tool(&call.name) {
+                execute_native_runtime_tool(engine, call.clone()).await
             } else {
                 tools.execute(call.clone()).await
             };
@@ -1809,6 +2609,323 @@ impl EngineRuntime {
             finish_reason: finished.2,
         });
         Ok(())
+    }
+
+    async fn refresh_runtime_advice(&mut self) -> Result<(), RuntimeError> {
+        let provider_info = self.provider.info();
+        let (transcript, turn_index, active_turn) = {
+            let state = self.state.lock().await;
+            (
+                state.transcript.clone(),
+                state.turn_index,
+                state.active_turn,
+            )
+        };
+
+        let context_pressure = compute_context_pressure(
+            &provider_info,
+            self.config.as_ref(),
+            &transcript,
+            active_turn,
+            turn_index,
+            self.compaction_attempted_turn,
+        );
+
+        let mut state = self.state.lock().await;
+        state.context_pressure = context_pressure;
+        if !self.config.doom_loop.enabled {
+            state.doom_loop = None;
+        } else if let Some(doom_loop) = state.doom_loop.as_mut() {
+            doom_loop.handled = self.handled_doom_signatures.contains(&doom_loop.signature);
+        }
+        Ok(())
+    }
+
+    async fn queue_local_steering(
+        &mut self,
+        message: Message,
+        when: SteerWhen,
+    ) -> Result<(), RuntimeError> {
+        let handled_signature = {
+            let mut state = self.state.lock().await;
+            state.pending_steering.push(PendingSteering {
+                message: message.clone(),
+                when,
+            });
+            if let Some(doom_loop) = state.doom_loop.as_mut() {
+                doom_loop.handled = true;
+                Some(doom_loop.signature.clone())
+            } else {
+                None
+            }
+        };
+        if let Some(signature) = handled_signature {
+            self.handled_doom_signatures.insert(signature);
+        }
+        self.emit(RuntimeEvent::SteeringQueued { message, when });
+        Ok(())
+    }
+
+    async fn compact_context(&mut self) -> Result<bool, RuntimeError> {
+        let (turn_index, transcript, pressure) = {
+            let state = self.state.lock().await;
+            (
+                state.turn_index,
+                state.transcript.clone(),
+                state.context_pressure.clone(),
+            )
+        };
+        self.compaction_attempted_turn = Some(turn_index);
+
+        let Some(pressure) = pressure else {
+            return Ok(false);
+        };
+        if !pressure.should_compact {
+            return Ok(false);
+        }
+
+        let leading_instructions = transcript
+            .iter()
+            .take_while(|message| {
+                matches!(message.role, MessageRole::System | MessageRole::Developer)
+            })
+            .count();
+        let trailing = self
+            .config
+            .compaction
+            .preserve_recent_messages
+            .min(transcript.len().saturating_sub(leading_instructions));
+        if transcript.len() <= leading_instructions + trailing + 1 {
+            return Ok(false);
+        }
+
+        let compact_end = transcript.len() - trailing;
+        let to_compact = transcript[leading_instructions..compact_end].to_vec();
+        if to_compact.is_empty() {
+            return Ok(false);
+        }
+
+        let summary = match self.summarize_messages(&to_compact).await {
+            Ok(summary) => summary,
+            Err(error) => {
+                self.emit(RuntimeEvent::Error {
+                    message: error.to_string(),
+                    recoverable: error.recoverable(),
+                });
+                return Ok(false);
+            }
+        };
+
+        let mut compacted = Vec::with_capacity(leading_instructions + trailing + 1);
+        compacted.extend(transcript[..leading_instructions].iter().cloned());
+        compacted.push(Message::developer_text(format!(
+            "<compaction_summary>\n{}\n</compaction_summary>",
+            summary
+        )));
+        compacted.extend(transcript[compact_end..].iter().cloned());
+
+        self.rewrite_transcript(TranscriptRewrite {
+            purpose: "compact_context".into(),
+            messages: compacted,
+        })
+        .await?;
+        self.emit(RuntimeEvent::Compaction {
+            original_messages: to_compact.len(),
+            summary_tokens: estimate_text_tokens(&summary),
+        });
+        Ok(true)
+    }
+
+    async fn summarize_messages(&self, messages: &[Message]) -> Result<String, RuntimeError> {
+        let transcript = messages
+            .iter()
+            .map(render_message_for_summary)
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        let request = Request {
+            model: self
+                .config
+                .compaction
+                .summary_model
+                .clone()
+                .or_else(|| self.config.model.clone()),
+            messages: vec![
+                Message::system_text(
+                    "Summarize the following conversation history for future continuation. Preserve goals, files touched, tool outcomes, child-agent state, and unresolved next steps. Keep it concise and factual.",
+                ),
+                Message::user_text(transcript),
+            ],
+            tools: Vec::new(),
+            options: request_options_without_tools(&self.config.request),
+        };
+
+        let step = run_provider_step(
+            self.provider.clone(),
+            self.config.clone(),
+            request,
+            None,
+            CancellationToken::new(),
+        )
+        .await?;
+
+        let summary = step
+            .message
+            .map(|message| message.plain_text_lossy())
+            .unwrap_or_default();
+        if summary.trim().is_empty() {
+            return Err(RuntimeError::Internal(
+                "compaction summary generation returned empty output".into(),
+            ));
+        }
+        Ok(summary.trim().to_owned())
+    }
+
+    async fn rewrite_transcript(
+        &mut self,
+        rewrite: TranscriptRewrite,
+    ) -> Result<TranscriptRewriteResult, RuntimeError> {
+        let result = {
+            let mut state = self.state.lock().await;
+            let previous_message_count = state.transcript.len();
+            state.transcript = rewrite.messages;
+            TranscriptRewriteResult {
+                purpose: rewrite.purpose,
+                previous_message_count,
+                new_message_count: state.transcript.len(),
+            }
+        };
+        self.record_runtime_operation(RuntimeOperationResult::TranscriptRewrite {
+            result: result.clone(),
+        })
+        .await;
+        self.emit(RuntimeEvent::TranscriptRewritten {
+            result: result.clone(),
+        });
+        Ok(result)
+    }
+
+    async fn append_transcript_messages(
+        &mut self,
+        append: TranscriptAppend,
+    ) -> Result<TranscriptAppendResult, RuntimeError> {
+        if append
+            .messages
+            .iter()
+            .any(|message| message.role == MessageRole::Assistant)
+        {
+            return Err(RuntimeError::Internal(
+                "loop-authored transcript appends may not fabricate assistant messages".into(),
+            ));
+        }
+
+        let appended_messages = append.messages.len();
+        self.commit_messages(append.messages).await?;
+        let transcript_message_count = self.state.lock().await.transcript.len();
+        let result = TranscriptAppendResult {
+            purpose: append.purpose,
+            appended_messages,
+            transcript_message_count,
+        };
+        self.record_runtime_operation(RuntimeOperationResult::TranscriptAppend {
+            result: result.clone(),
+        })
+        .await;
+        self.emit(RuntimeEvent::TranscriptMessagesAppended {
+            result: result.clone(),
+        });
+        Ok(result)
+    }
+
+    async fn observe_tool_call_for_doom(&mut self, call: &ToolCall) -> Result<(), RuntimeError> {
+        if !self.config.doom_loop.enabled {
+            let mut state = self.state.lock().await;
+            state.doom_loop = None;
+            return Ok(());
+        }
+
+        let signature = format!(
+            "{}:{}",
+            call.name,
+            serde_json::to_string(&call.input).unwrap_or_default()
+        );
+        self.recent_tool_signatures.push_back(signature.clone());
+        let window = self.config.doom_loop.signature_window.max(1);
+        while self.recent_tool_signatures.len() > window {
+            self.recent_tool_signatures.pop_front();
+        }
+
+        let repetitions = self
+            .recent_tool_signatures
+            .iter()
+            .rev()
+            .take_while(|entry| *entry == &signature)
+            .count() as u32;
+
+        if repetitions < self.config.doom_loop.threshold.max(1) {
+            let mut state = self.state.lock().await;
+            state.doom_loop = None;
+            return Ok(());
+        }
+
+        let handled = self.handled_doom_signatures.contains(&signature);
+        {
+            let mut state = self.state.lock().await;
+            state.doom_loop = Some(DoomLoopState {
+                tool_name: call.name.clone(),
+                signature: signature.clone(),
+                repetitions,
+                handled,
+            });
+        }
+        self.emit(RuntimeEvent::DoomLoopWarning {
+            tool_name: call.name.clone(),
+            repetitions,
+        });
+
+        if handled && self.config.doom_loop.error_after_handled_repetition {
+            return Err(RuntimeError::Internal(format!(
+                "doom loop persisted for tool '{}' after steering",
+                call.name
+            )));
+        }
+
+        if self
+            .config
+            .doom_loop
+            .hard_error_threshold
+            .is_some_and(|threshold| repetitions >= threshold.max(1))
+        {
+            return Err(RuntimeError::Internal(format!(
+                "doom loop detected for tool '{}' after {repetitions} repetitions",
+                call.name
+            )));
+        }
+
+        Ok(())
+    }
+
+    async fn record_runtime_operation(&mut self, operation: RuntimeOperationResult) {
+        let mut state = self.state.lock().await;
+        match &operation {
+            RuntimeOperationResult::Subcall { result } => {
+                state.last_subcall = Some(result.clone());
+            }
+            RuntimeOperationResult::TranscriptRewrite { result } => {
+                state.last_transcript_rewrite = Some(result.clone());
+            }
+            RuntimeOperationResult::TranscriptAppend { result } => {
+                state.last_transcript_append = Some(result.clone());
+            }
+            RuntimeOperationResult::PtyExecution { .. } => {}
+            RuntimeOperationResult::PtyCapture { result } => {
+                state.last_pty_capture = Some(result.clone());
+            }
+        }
+        state.recent_operations.push_back(operation);
+        while state.recent_operations.len() > MAX_RECENT_RUNTIME_OPERATIONS {
+            state.recent_operations.pop_front();
+        }
     }
 
     async fn commit_messages(&self, messages: Vec<Message>) -> Result<(), RuntimeError> {
@@ -1886,6 +3003,19 @@ const READ_AGENT_MAIL_TOOL: &str = "read_agent_mail";
 const INTERRUPT_AGENT_TOOL: &str = "interrupt_agent";
 const LIST_AGENTS_TOOL: &str = "list_agents";
 const WAIT_AGENT_TOOL: &str = "wait_agent";
+const OPEN_PTY_TOOL: &str = "open_pty";
+const LIST_PTYS_TOOL: &str = "list_ptys";
+const GET_PTY_TOOL: &str = "get_pty";
+const WRITE_PTY_TOOL: &str = "write_pty";
+const EXECUTE_PTY_TOOL: &str = "execute_pty";
+const CAPTURE_PTY_TOOL: &str = "capture_pty";
+const RESIZE_PTY_TOOL: &str = "resize_pty";
+const INTERRUPT_PTY_TOOL: &str = "interrupt_pty";
+const BACKGROUND_PTY_TOOL: &str = "background_pty";
+const CLOSE_PTY_TOOL: &str = "close_pty";
+const SUBSCRIBE_PTY_TOOL: &str = "subscribe_pty";
+const UNSUBSCRIBE_PTY_TOOL: &str = "unsubscribe_pty";
+const READ_PTY_EVENTS_TOOL: &str = "read_pty_events";
 
 #[derive(Debug, Deserialize)]
 struct SpawnAgentToolInput {
@@ -1954,7 +3084,84 @@ struct ReadAgentMailToolInput {
     limit: Option<usize>,
 }
 
-fn native_agent_tool_definitions() -> Vec<provider::ToolDefinition> {
+#[derive(Debug, Deserialize)]
+struct OpenPtyToolInput {
+    #[serde(default)]
+    label: Option<String>,
+    #[serde(default)]
+    cwd: Option<String>,
+    #[serde(default)]
+    rows: Option<u16>,
+    #[serde(default)]
+    cols: Option<u16>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GetPtyToolInput {
+    pty_id: PtyId,
+}
+
+#[derive(Debug, Deserialize)]
+struct WritePtyToolInput {
+    pty_id: PtyId,
+    input: String,
+    #[serde(default)]
+    wait_ms: Option<u64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ExecutePtyToolInput {
+    pty_id: PtyId,
+    commands: Vec<String>,
+    #[serde(default)]
+    wait_ms: Option<u64>,
+    #[serde(default)]
+    background: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct CapturePtyToolInput {
+    pty_id: PtyId,
+    #[serde(default)]
+    mode: Option<PtyCaptureMode>,
+    #[serde(default)]
+    since_cursor: Option<u64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ResizePtyToolInput {
+    pty_id: PtyId,
+    rows: u16,
+    cols: u16,
+}
+
+#[derive(Debug, Deserialize)]
+struct SubscribePtyToolInput {
+    pty_id: PtyId,
+    #[serde(default)]
+    kinds: Vec<PtyEventKind>,
+    #[serde(default)]
+    delivery: Option<PtySubscriptionDelivery>,
+}
+
+#[derive(Debug, Deserialize)]
+struct UnsubscribePtyToolInput {
+    pty_id: PtyId,
+}
+
+#[derive(Debug, Deserialize)]
+struct ReadPtyEventsToolInput {
+    #[serde(default)]
+    pty_id: Option<PtyId>,
+    #[serde(default)]
+    kinds: Vec<PtyEventKind>,
+    #[serde(default)]
+    since_sequence: Option<u64>,
+    #[serde(default)]
+    limit: Option<usize>,
+}
+
+fn native_runtime_tool_definitions() -> Vec<provider::ToolDefinition> {
     vec![
         provider::ToolDefinition::new(
             SPAWN_AGENT_TOOL,
@@ -2055,6 +3262,160 @@ fn native_agent_tool_definitions() -> Vec<provider::ToolDefinition> {
                 "required": ["agent_ids"]
             }),
         ),
+        provider::ToolDefinition::new(
+            OPEN_PTY_TOOL,
+            "Open a new managed PTY session and return its stable PTY id.",
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "label": { "type": "string" },
+                    "cwd": { "type": "string" },
+                    "rows": { "type": "integer", "minimum": 1 },
+                    "cols": { "type": "integer", "minimum": 1 }
+                }
+            }),
+        ),
+        provider::ToolDefinition::new(
+            LIST_PTYS_TOOL,
+            "List all runtime-managed PTY sessions currently known to the registry.",
+            serde_json::json!({ "type": "object", "properties": {} }),
+        ),
+        provider::ToolDefinition::new(
+            GET_PTY_TOOL,
+            "Get metadata for a single managed PTY by PTY id.",
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "pty_id": { "type": "string" }
+                },
+                "required": ["pty_id"]
+            }),
+        ),
+        provider::ToolDefinition::new(
+            WRITE_PTY_TOOL,
+            "Write raw input into a managed PTY session and wait briefly for new output.",
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "pty_id": { "type": "string" },
+                    "input": { "type": "string" },
+                    "wait_ms": { "type": "integer", "minimum": 0 }
+                },
+                "required": ["pty_id", "input"]
+            }),
+        ),
+        provider::ToolDefinition::new(
+            EXECUTE_PTY_TOOL,
+            "Execute one or more newline-terminated commands inside a managed PTY session.",
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "pty_id": { "type": "string" },
+                    "commands": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "minItems": 1
+                    },
+                    "wait_ms": { "type": "integer", "minimum": 0 },
+                    "background": { "type": "boolean" }
+                },
+                "required": ["pty_id", "commands"]
+            }),
+        ),
+        provider::ToolDefinition::new(
+            CAPTURE_PTY_TOOL,
+            "Capture the current visible PTY screen and optional incremental output.",
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "pty_id": { "type": "string" },
+                    "mode": { "type": "string", "enum": ["visible_screen", "incremental"] },
+                    "since_cursor": { "type": "integer", "minimum": 0 }
+                },
+                "required": ["pty_id"]
+            }),
+        ),
+        provider::ToolDefinition::new(
+            RESIZE_PTY_TOOL,
+            "Resize a managed PTY session.",
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "pty_id": { "type": "string" },
+                    "rows": { "type": "integer", "minimum": 1 },
+                    "cols": { "type": "integer", "minimum": 1 }
+                },
+                "required": ["pty_id", "rows", "cols"]
+            }),
+        ),
+        provider::ToolDefinition::new(
+            INTERRUPT_PTY_TOOL,
+            "Send ctrl-c to the foreground workload inside a managed PTY session.",
+            serde_json::json!({
+                "type": "object",
+                "properties": { "pty_id": { "type": "string" } },
+                "required": ["pty_id"]
+            }),
+        ),
+        provider::ToolDefinition::new(
+            BACKGROUND_PTY_TOOL,
+            "Mark a managed PTY session as backgrounded while keeping it alive.",
+            serde_json::json!({
+                "type": "object",
+                "properties": { "pty_id": { "type": "string" } },
+                "required": ["pty_id"]
+            }),
+        ),
+        provider::ToolDefinition::new(
+            CLOSE_PTY_TOOL,
+            "Close a managed PTY session.",
+            serde_json::json!({
+                "type": "object",
+                "properties": { "pty_id": { "type": "string" } },
+                "required": ["pty_id"]
+            }),
+        ),
+        provider::ToolDefinition::new(
+            SUBSCRIBE_PTY_TOOL,
+            "Subscribe the current runtime to PTY events and optionally promote them to developer messages.",
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "pty_id": { "type": "string" },
+                    "kinds": {
+                        "type": "array",
+                        "items": { "type": "string", "enum": ["output", "execution_started", "execution_completed", "status_changed", "resized", "interrupted", "closed", "failed"] }
+                    },
+                    "delivery": { "type": "string", "enum": ["stream_only", "promote_to_developer"] }
+                },
+                "required": ["pty_id"]
+            }),
+        ),
+        provider::ToolDefinition::new(
+            UNSUBSCRIBE_PTY_TOOL,
+            "Remove a PTY event subscription for the current runtime.",
+            serde_json::json!({
+                "type": "object",
+                "properties": { "pty_id": { "type": "string" } },
+                "required": ["pty_id"]
+            }),
+        ),
+        provider::ToolDefinition::new(
+            READ_PTY_EVENTS_TOOL,
+            "Read PTY events previously delivered to the current runtime through explicit subscriptions.",
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "pty_id": { "type": "string" },
+                    "kinds": {
+                        "type": "array",
+                        "items": { "type": "string", "enum": ["output", "execution_started", "execution_completed", "status_changed", "resized", "interrupted", "closed", "failed"] }
+                    },
+                    "since_sequence": { "type": "integer", "minimum": 0 },
+                    "limit": { "type": "integer", "minimum": 1 }
+                }
+            }),
+        ),
     ]
 }
 
@@ -2066,7 +3427,7 @@ fn merge_tool_definitions(
     application_tools
 }
 
-fn is_native_agent_tool(name: &str) -> bool {
+fn is_native_runtime_tool(name: &str) -> bool {
     matches!(
         name,
         SPAWN_AGENT_TOOL
@@ -2075,10 +3436,98 @@ fn is_native_agent_tool(name: &str) -> bool {
             | INTERRUPT_AGENT_TOOL
             | LIST_AGENTS_TOOL
             | WAIT_AGENT_TOOL
+            | OPEN_PTY_TOOL
+            | LIST_PTYS_TOOL
+            | GET_PTY_TOOL
+            | WRITE_PTY_TOOL
+            | EXECUTE_PTY_TOOL
+            | CAPTURE_PTY_TOOL
+            | RESIZE_PTY_TOOL
+            | INTERRUPT_PTY_TOOL
+            | BACKGROUND_PTY_TOOL
+            | CLOSE_PTY_TOOL
+            | SUBSCRIBE_PTY_TOOL
+            | UNSUBSCRIBE_PTY_TOOL
+            | READ_PTY_EVENTS_TOOL
     )
 }
 
-async fn execute_native_agent_tool(
+fn loop_decision_from_agent_command(command: &AgentCommand) -> Option<LoopDecision> {
+    match command {
+        AgentCommand::SpawnAgent { request, wait } => Some(LoopDecision::SpawnAgent {
+            request: request.clone(),
+            wait: wait.clone(),
+        }),
+        AgentCommand::SendAgentInput {
+            runtime_id,
+            input,
+            delivery,
+        } => Some(LoopDecision::SendAgentInput {
+            runtime_id: *runtime_id,
+            input: input.clone(),
+            delivery: *delivery,
+        }),
+        AgentCommand::InterruptAgent { runtime_id, mode } => Some(LoopDecision::InterruptAgent {
+            runtime_id: *runtime_id,
+            mode: *mode,
+        }),
+        AgentCommand::PauseAgent { runtime_id } => Some(LoopDecision::PauseAgent {
+            runtime_id: *runtime_id,
+        }),
+        AgentCommand::ResumeAgent { runtime_id } => Some(LoopDecision::ResumeAgent {
+            runtime_id: *runtime_id,
+        }),
+        AgentCommand::WaitForAgents { ids, wait } => Some(LoopDecision::WaitForAgents {
+            ids: ids.clone(),
+            wait: wait.clone(),
+        }),
+        AgentCommand::SendAgentMessage { .. }
+        | AgentCommand::ReadAgentMessages { .. }
+        | AgentCommand::ListAgents { .. } => None,
+    }
+}
+
+fn loop_decision_from_pty_command(command: &PtyCommand) -> Option<LoopDecision> {
+    match command {
+        PtyCommand::OpenPty { request } => Some(LoopDecision::OpenPty {
+            request: request.clone(),
+        }),
+        PtyCommand::WritePtyInput {
+            pty_id,
+            input,
+            wait_ms,
+        } => Some(LoopDecision::WritePtyInput {
+            pty_id: *pty_id,
+            input: input.clone(),
+            wait_ms: *wait_ms,
+        }),
+        PtyCommand::ExecutePtyBatch { request } => Some(LoopDecision::ExecutePtyBatch {
+            request: request.clone(),
+        }),
+        PtyCommand::CapturePty { request } => Some(LoopDecision::CapturePty {
+            request: request.clone(),
+        }),
+        PtyCommand::ResizePty { pty_id, rows, cols } => Some(LoopDecision::ResizePty {
+            pty_id: *pty_id,
+            rows: *rows,
+            cols: *cols,
+        }),
+        PtyCommand::InterruptPty { pty_id } => Some(LoopDecision::InterruptPty { pty_id: *pty_id }),
+        PtyCommand::BackgroundPty { pty_id } => {
+            Some(LoopDecision::BackgroundPty { pty_id: *pty_id })
+        }
+        PtyCommand::ClosePty { pty_id } => Some(LoopDecision::ClosePty { pty_id: *pty_id }),
+        PtyCommand::SubscribePty { subscription } => Some(LoopDecision::SubscribePty {
+            subscription: subscription.clone(),
+        }),
+        PtyCommand::UnsubscribePty { pty_id } => {
+            Some(LoopDecision::UnsubscribePty { pty_id: *pty_id })
+        }
+        PtyCommand::ListPtys | PtyCommand::GetPty { .. } | PtyCommand::ReadPtyEvents { .. } => None,
+    }
+}
+
+async fn execute_native_runtime_tool(
     engine: SessionEngine,
     call: ToolCall,
 ) -> Result<ToolExecutionResult, RuntimeError> {
@@ -2197,11 +3646,195 @@ async fn execute_native_agent_tool(
                     .map_err(|error| RuntimeError::Tool(format!("invalid wait result: {error}")))?,
             ))
         }
+        OPEN_PTY_TOOL => {
+            let input: OpenPtyToolInput = serde_json::from_value(call.input)
+                .map_err(|error| RuntimeError::Tool(format!("invalid open_pty input: {error}")))?;
+            let mut request = OpenPtyRequest::default();
+            request.label = input.label;
+            request.cwd = input.cwd;
+            request.rows = input.rows.unwrap_or(request.rows);
+            request.cols = input.cols.unwrap_or(request.cols);
+            let pty = engine.open_pty_tool(request).await?;
+            Ok(ToolExecutionResult::success(
+                serde_json::to_value(pty).map_err(|error| {
+                    RuntimeError::Tool(format!("invalid open_pty output: {error}"))
+                })?,
+            ))
+        }
+        LIST_PTYS_TOOL => Ok(ToolExecutionResult::success(
+            serde_json::to_value(engine.ptys().await).map_err(|error| {
+                RuntimeError::Tool(format!("invalid list_ptys output: {error}"))
+            })?,
+        )),
+        GET_PTY_TOOL => {
+            let input: GetPtyToolInput = serde_json::from_value(call.input)
+                .map_err(|error| RuntimeError::Tool(format!("invalid get_pty input: {error}")))?;
+            let pty = engine.pty(input.pty_id).await?;
+            Ok(ToolExecutionResult::success(
+                serde_json::to_value(pty).map_err(|error| {
+                    RuntimeError::Tool(format!("invalid get_pty output: {error}"))
+                })?,
+            ))
+        }
+        WRITE_PTY_TOOL => {
+            let input: WritePtyToolInput = serde_json::from_value(call.input)
+                .map_err(|error| RuntimeError::Tool(format!("invalid write_pty input: {error}")))?;
+            let result = engine
+                .write_pty_tool(input.pty_id, input.input, input.wait_ms)
+                .await?;
+            Ok(ToolExecutionResult::success(
+                serde_json::to_value(result).map_err(|error| {
+                    RuntimeError::Tool(format!("invalid write_pty output: {error}"))
+                })?,
+            ))
+        }
+        EXECUTE_PTY_TOOL => {
+            let input: ExecutePtyToolInput =
+                serde_json::from_value(call.input).map_err(|error| {
+                    RuntimeError::Tool(format!("invalid execute_pty input: {error}"))
+                })?;
+            let result = engine
+                .execute_pty_tool(PtyExecRequest {
+                    pty_id: input.pty_id,
+                    steps: input.commands,
+                    wait_ms: input.wait_ms,
+                    background: input.background,
+                })
+                .await?;
+            Ok(ToolExecutionResult::success(
+                serde_json::to_value(result).map_err(|error| {
+                    RuntimeError::Tool(format!("invalid execute_pty output: {error}"))
+                })?,
+            ))
+        }
+        CAPTURE_PTY_TOOL => {
+            let input: CapturePtyToolInput =
+                serde_json::from_value(call.input).map_err(|error| {
+                    RuntimeError::Tool(format!("invalid capture_pty input: {error}"))
+                })?;
+            let result = engine
+                .capture_pty_tool(PtyCaptureRequest {
+                    pty_id: input.pty_id,
+                    mode: input.mode.unwrap_or(PtyCaptureMode::VisibleScreen),
+                    since_cursor: input.since_cursor,
+                })
+                .await?;
+            Ok(ToolExecutionResult::success(
+                serde_json::to_value(result).map_err(|error| {
+                    RuntimeError::Tool(format!("invalid capture_pty output: {error}"))
+                })?,
+            ))
+        }
+        RESIZE_PTY_TOOL => {
+            let input: ResizePtyToolInput =
+                serde_json::from_value(call.input).map_err(|error| {
+                    RuntimeError::Tool(format!("invalid resize_pty input: {error}"))
+                })?;
+            let pty = engine
+                .resize_pty_tool(input.pty_id, input.rows, input.cols)
+                .await?;
+            Ok(ToolExecutionResult::success(
+                serde_json::to_value(pty).map_err(|error| {
+                    RuntimeError::Tool(format!("invalid resize_pty output: {error}"))
+                })?,
+            ))
+        }
+        INTERRUPT_PTY_TOOL => {
+            let input: GetPtyToolInput = serde_json::from_value(call.input).map_err(|error| {
+                RuntimeError::Tool(format!("invalid interrupt_pty input: {error}"))
+            })?;
+            let pty = engine.interrupt_pty_tool(input.pty_id).await?;
+            Ok(ToolExecutionResult::success(
+                serde_json::to_value(pty).map_err(|error| {
+                    RuntimeError::Tool(format!("invalid interrupt_pty output: {error}"))
+                })?,
+            ))
+        }
+        BACKGROUND_PTY_TOOL => {
+            let input: GetPtyToolInput = serde_json::from_value(call.input).map_err(|error| {
+                RuntimeError::Tool(format!("invalid background_pty input: {error}"))
+            })?;
+            let pty = engine.background_pty_tool(input.pty_id).await?;
+            Ok(ToolExecutionResult::success(
+                serde_json::to_value(pty).map_err(|error| {
+                    RuntimeError::Tool(format!("invalid background_pty output: {error}"))
+                })?,
+            ))
+        }
+        CLOSE_PTY_TOOL => {
+            let input: GetPtyToolInput = serde_json::from_value(call.input)
+                .map_err(|error| RuntimeError::Tool(format!("invalid close_pty input: {error}")))?;
+            let pty = engine.close_pty_tool(input.pty_id).await?;
+            Ok(ToolExecutionResult::success(
+                serde_json::to_value(pty).map_err(|error| {
+                    RuntimeError::Tool(format!("invalid close_pty output: {error}"))
+                })?,
+            ))
+        }
+        SUBSCRIBE_PTY_TOOL => {
+            let input: SubscribePtyToolInput =
+                serde_json::from_value(call.input).map_err(|error| {
+                    RuntimeError::Tool(format!("invalid subscribe_pty input: {error}"))
+                })?;
+            let subscription = PtySubscription {
+                pty_id: input.pty_id,
+                kinds: input.kinds,
+                delivery: input
+                    .delivery
+                    .unwrap_or(PtySubscriptionDelivery::StreamOnly),
+            };
+            engine.subscribe_pty_tool(subscription.clone()).await?;
+            Ok(ToolExecutionResult::success(serde_json::json!({
+                "pty_id": subscription.pty_id,
+                "delivery": subscription.delivery,
+                "status": "subscribed"
+            })))
+        }
+        UNSUBSCRIBE_PTY_TOOL => {
+            let input: UnsubscribePtyToolInput =
+                serde_json::from_value(call.input).map_err(|error| {
+                    RuntimeError::Tool(format!("invalid unsubscribe_pty input: {error}"))
+                })?;
+            engine.unsubscribe_pty_tool(input.pty_id).await?;
+            Ok(ToolExecutionResult::success(serde_json::json!({
+                "pty_id": input.pty_id,
+                "status": "unsubscribed"
+            })))
+        }
+        READ_PTY_EVENTS_TOOL => {
+            let input: ReadPtyEventsToolInput =
+                serde_json::from_value(call.input).map_err(|error| {
+                    RuntimeError::Tool(format!("invalid read_pty_events input: {error}"))
+                })?;
+            let events = read_pty_events_from_engine(
+                &engine,
+                PtyEventFilter {
+                    pty_id: input.pty_id,
+                    kinds: input.kinds,
+                    since_sequence: input.since_sequence,
+                    limit: input.limit,
+                },
+            )
+            .await;
+            Ok(ToolExecutionResult::success(
+                serde_json::to_value(events).map_err(|error| {
+                    RuntimeError::Tool(format!("invalid read_pty_events output: {error}"))
+                })?,
+            ))
+        }
         _ => Err(RuntimeError::Tool(format!(
             "unknown native runtime tool: {}",
             call.name
         ))),
     }
+}
+
+#[cfg(test)]
+async fn execute_native_agent_tool(
+    engine: SessionEngine,
+    call: ToolCall,
+) -> Result<ToolExecutionResult, RuntimeError> {
+    execute_native_runtime_tool(engine, call).await
 }
 
 async fn wait_for_runtime_targets(
@@ -2314,6 +3947,23 @@ async fn read_messages_from_engine(
     messages
 }
 
+async fn read_pty_events_from_engine(
+    engine: &SessionEngine,
+    filter: PtyEventFilter,
+) -> Vec<DeliveredPtyEvent> {
+    let state = engine.state.lock().await;
+    let mut events = state
+        .recent_pty_events
+        .iter()
+        .filter(|delivered| delivered_event_matches_filter(delivered, &filter))
+        .cloned()
+        .collect::<Vec<_>>();
+    if let Some(limit) = filter.limit {
+        events.truncate(limit);
+    }
+    events
+}
+
 fn render_child_report_message(report: &ChildReport) -> Result<Message, RuntimeError> {
     let payload = serde_json::json!({
         "child_id": report.child_id,
@@ -2360,6 +4010,49 @@ fn render_agent_message_message(message: &AgentMessage) -> Result<Message, Runti
     ))
 }
 
+fn render_pty_event_message(delivered: &DeliveredPtyEvent) -> Result<Message, RuntimeError> {
+    let payload = serde_json::json!({
+        "pty_id": delivered.event.pty_id,
+        "sequence": delivered.event.sequence,
+        "kind": delivered.event.kind,
+        "timestamp_ms": delivered.event.timestamp_ms,
+        "payload": delivered.event.payload,
+    });
+    Ok(Message::new(
+        MessageRole::Developer,
+        vec![provider::ContentBlock::Text {
+            text: format!(
+                "<pty_event>{}</pty_event>",
+                serde_json::to_string(&payload).map_err(|error| {
+                    RuntimeError::Internal(format!("invalid PTY event payload: {error}"))
+                })?
+            ),
+        }],
+    ))
+}
+
+fn subscription_matches_event(subscription: &PtySubscription, event: &PtyEvent) -> bool {
+    subscription.pty_id == event.pty_id
+        && (subscription.kinds.is_empty() || subscription.kinds.contains(&event.kind))
+}
+
+fn delivered_event_matches_filter(delivered: &DeliveredPtyEvent, filter: &PtyEventFilter) -> bool {
+    if let Some(pty_id) = filter.pty_id
+        && delivered.event.pty_id != pty_id
+    {
+        return false;
+    }
+    if !filter.kinds.is_empty() && !filter.kinds.contains(&delivered.event.kind) {
+        return false;
+    }
+    if let Some(since_sequence) = filter.since_sequence
+        && delivered.event.sequence < since_sequence
+    {
+        return false;
+    }
+    true
+}
+
 fn message_matches_filter(message: &AgentMessage, filter: &AgentMessageFilter) -> bool {
     if filter
         .from_runtime_id
@@ -2398,6 +4091,103 @@ fn now_millis() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|duration| duration.as_millis() as u64)
         .unwrap_or_default()
+}
+
+fn compute_context_pressure(
+    provider_info: &ProviderInfo,
+    config: &RuntimeConfig,
+    transcript: &[Message],
+    active_turn: bool,
+    turn_index: u64,
+    compaction_attempted_turn: Option<u64>,
+) -> Option<ContextPressure> {
+    let model_id = config
+        .model
+        .as_deref()
+        .or_else(|| provider_info.default_model().map(|model| model.id.as_ref()))?;
+    let context_limit = provider_info
+        .models
+        .iter()
+        .find(|model| model.id.as_ref() == model_id)
+        .and_then(|model| model.limit.as_ref())
+        .map(|limit| limit.context)?;
+    if context_limit == 0 {
+        return None;
+    }
+
+    let estimated_tokens = transcript
+        .iter()
+        .map(estimate_message_tokens)
+        .sum::<usize>() as u64;
+    let ratio = estimated_tokens as f32 / context_limit as f32;
+
+    Some(ContextPressure {
+        estimated_tokens,
+        context_limit,
+        ratio,
+        should_compact: config.compaction.enabled
+            && active_turn
+            && compaction_attempted_turn != Some(turn_index)
+            && ratio >= config.compaction.threshold_ratio,
+    })
+}
+
+fn render_message_for_summary(message: &Message) -> String {
+    let role = match message.role {
+        MessageRole::System => "system",
+        MessageRole::Developer => "developer",
+        MessageRole::User => "user",
+        MessageRole::Assistant => "assistant",
+    };
+
+    let content = message
+        .content
+        .iter()
+        .map(render_block_for_summary)
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!("{role}: {content}")
+}
+
+fn render_block_for_summary(block: &provider::ContentBlock) -> String {
+    match block {
+        provider::ContentBlock::Text { text }
+        | provider::ContentBlock::Reasoning { text }
+        | provider::ContentBlock::Refusal { text } => text.clone(),
+        provider::ContentBlock::ImageUrl { url } => format!("[image:{url}]"),
+        provider::ContentBlock::ToolCall { id, name, input } => {
+            format!("tool_call id={id} name={name} input={input}")
+        }
+        provider::ContentBlock::ToolResult {
+            call_id,
+            output,
+            is_error,
+        } => format!(
+            "tool_result call_id={call_id} is_error={} output={output}",
+            is_error.unwrap_or(false)
+        ),
+    }
+}
+
+fn estimate_message_tokens(message: &Message) -> usize {
+    let content = message
+        .content
+        .iter()
+        .map(render_block_for_summary)
+        .collect::<Vec<_>>()
+        .join("\n");
+    estimate_text_tokens(&content)
+}
+
+fn estimate_text_tokens(text: &str) -> usize {
+    (text.chars().count() / 4).max(1)
+}
+
+fn request_options_without_tools(options: &provider::RequestOptions) -> provider::RequestOptions {
+    let mut options = options.clone();
+    options.tool_choice = None;
+    options.parallel_tool_calls = None;
+    options
 }
 
 async fn run_provider_step(
@@ -2693,9 +4483,14 @@ fn truncate_utf8(value: &str, max_bytes: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::borrow::Cow;
+
     use async_stream::stream;
     use futures::future::BoxFuture;
-    use provider::{EventStream, MockProvider, ProviderCapabilities, ToolDefinition, Usage};
+    use provider::{
+        EventStream, MockProvider, ModelInfo, ModelLimit, ProviderCapabilities, ToolDefinition,
+        Usage,
+    };
     use tokio::time::{Duration, timeout};
 
     use crate::ResultMode;
@@ -2743,6 +4538,77 @@ mod tests {
             Box::pin(async move {
                 if ctx.state().pending_completion {
                     return Ok(LoopDecision::FinishTurn);
+                }
+                if !ctx.state().active_turn {
+                    return Ok(LoopDecision::WaitForInput);
+                }
+                Ok(LoopDecision::RunProvider)
+            })
+        }
+    }
+
+    struct CompactingLoop;
+
+    impl LoopStrategy for CompactingLoop {
+        fn name(&self) -> &'static str {
+            "compacting"
+        }
+
+        fn decide<'a>(
+            &'a self,
+            ctx: LoopContext,
+        ) -> futures::future::BoxFuture<'a, Result<LoopDecision, RuntimeError>> {
+            Box::pin(async move {
+                if ctx.state().pending_completion {
+                    return Ok(LoopDecision::FinishTurn);
+                }
+                if !ctx.state().active_turn {
+                    return Ok(LoopDecision::WaitForInput);
+                }
+                if ctx
+                    .state()
+                    .context_pressure
+                    .as_ref()
+                    .is_some_and(|pressure| pressure.should_compact)
+                {
+                    return Ok(LoopDecision::CompactContext);
+                }
+                Ok(LoopDecision::RunProvider)
+            })
+        }
+    }
+
+    struct DoomAwareLoop;
+
+    impl LoopStrategy for DoomAwareLoop {
+        fn name(&self) -> &'static str {
+            "doom-aware"
+        }
+
+        fn decide<'a>(
+            &'a self,
+            ctx: LoopContext,
+        ) -> futures::future::BoxFuture<'a, Result<LoopDecision, RuntimeError>> {
+            Box::pin(async move {
+                if !ctx.state().pending_tool_calls.is_empty() {
+                    return Ok(LoopDecision::ExecuteToolBatch);
+                }
+                if ctx.state().pending_completion {
+                    return Ok(LoopDecision::FinishTurn);
+                }
+                if let Some(doom_loop) = ctx
+                    .state()
+                    .doom_loop
+                    .as_ref()
+                    .filter(|state| !state.handled)
+                {
+                    return Ok(LoopDecision::QueueSteering {
+                        message: Message::developer_text(format!(
+                            "Stop repeating the same tool call for `{}`.",
+                            doom_loop.tool_name
+                        )),
+                        when: SteerWhen::NextSafeBoundary,
+                    });
                 }
                 if !ctx.state().active_turn {
                     return Ok(LoopDecision::WaitForInput);
@@ -2806,13 +4672,403 @@ mod tests {
         }
     }
 
+    struct CompactionProvider {
+        fail_summary: bool,
+    }
+
+    impl Provider for CompactionProvider {
+        fn stream<'a>(
+            &'a self,
+            request: &'a Request,
+        ) -> BoxFuture<'a, Result<provider::EventStream<'a>, provider::Error>> {
+            Box::pin(async move {
+                let is_summary = request.messages.first().is_some_and(|message| {
+                    message
+                        .plain_text_lossy()
+                        .contains("Summarize the following conversation history")
+                });
+                if is_summary && self.fail_summary {
+                    return Err(provider::Error::Inference("summary failed".into()));
+                }
+
+                let response_text = if is_summary { "summary text" } else { "done" };
+                let stream = stream! {
+                    yield Ok(Event::ResponseStart {
+                        response_id: Some("compact".into()),
+                        model: Some("compact-model".into()),
+                    });
+                    yield Ok(Event::BlockStart {
+                        block: Block {
+                            id: "summary-text".into(),
+                            output_index: 0,
+                            kind: BlockKind::Text,
+                            item_id: None,
+                        },
+                    });
+                    yield Ok(Event::BlockDelta {
+                        id: "summary-text".into(),
+                        delta: BlockDelta::Text {
+                            text: response_text.into(),
+                        },
+                    });
+                    yield Ok(Event::BlockStop {
+                        id: "summary-text".into(),
+                    });
+                    yield Ok(Event::Completed {
+                        response_id: Some("compact".into()),
+                        finish_reason: Some(FinishReason::Stop),
+                    });
+                };
+                Ok(Box::pin(stream) as EventStream<'a>)
+            })
+        }
+
+        fn info(&self) -> ProviderInfo {
+            ProviderInfo {
+                name: "compact".into(),
+                default_model_id: Some("compact-model".into()),
+                capabilities: ProviderCapabilities::text_only(),
+                models: vec![ModelInfo {
+                    id: Cow::Borrowed("compact-model"),
+                    name: Cow::Borrowed("Compact Model"),
+                    family: None,
+                    reasoning_efforts: Cow::Borrowed(&[]),
+                    tool_call: true,
+                    attachment: false,
+                    structured_output: None,
+                    temperature: None,
+                    knowledge: None,
+                    release_date: None,
+                    last_updated: None,
+                    open_weights: None,
+                    input_modalities: Cow::Borrowed(&["text"]),
+                    output_modalities: Cow::Borrowed(&["text"]),
+                    cost: None,
+                    limit: Some(ModelLimit {
+                        context: 200,
+                        input: Some(180),
+                        output: 64,
+                    }),
+                    status: None,
+                    capabilities: None,
+                }],
+            }
+        }
+    }
+
+    struct DoomLoopProvider;
+
+    impl Provider for DoomLoopProvider {
+        fn stream<'a>(
+            &'a self,
+            request: &'a Request,
+        ) -> BoxFuture<'a, Result<provider::EventStream<'a>, provider::Error>> {
+            Box::pin(async move {
+                let steered = request.messages.iter().any(|message| {
+                    message.role == MessageRole::Developer
+                        && message
+                            .plain_text_lossy()
+                            .contains("Stop repeating the same tool call")
+                });
+                let stream = stream! {
+                    yield Ok(Event::ResponseStart {
+                        response_id: Some("doom".into()),
+                        model: Some("doom-model".into()),
+                    });
+                    if steered {
+                        yield Ok(Event::BlockStart {
+                            block: Block {
+                                id: "doom-text".into(),
+                                output_index: 0,
+                                kind: BlockKind::Text,
+                                item_id: None,
+                            },
+                        });
+                        yield Ok(Event::BlockDelta {
+                            id: "doom-text".into(),
+                            delta: BlockDelta::Text {
+                                text: "recovered".into(),
+                            },
+                        });
+                        yield Ok(Event::BlockStop {
+                            id: "doom-text".into(),
+                        });
+                    } else {
+                        yield Ok(Event::BlockStart {
+                            block: Block {
+                                id: "doom-tool".into(),
+                                output_index: 0,
+                                kind: BlockKind::ToolCall {
+                                    name: Some("echo".into()),
+                                    call_id: Some("doom-call".into()),
+                                },
+                                item_id: None,
+                            },
+                        });
+                        yield Ok(Event::BlockDelta {
+                            id: "doom-tool".into(),
+                            delta: BlockDelta::Json {
+                                partial_json: serde_json::json!({"message": "repeat"}).to_string(),
+                            },
+                        });
+                        yield Ok(Event::BlockStop {
+                            id: "doom-tool".into(),
+                        });
+                    }
+                    yield Ok(Event::Completed {
+                        response_id: Some("doom".into()),
+                        finish_reason: Some(FinishReason::Stop),
+                    });
+                };
+                Ok(Box::pin(stream) as EventStream<'a>)
+            })
+        }
+
+        fn info(&self) -> ProviderInfo {
+            ProviderInfo {
+                name: "doom".into(),
+                default_model_id: Some("doom-model".into()),
+                capabilities: ProviderCapabilities::text_only(),
+                models: Vec::new(),
+            }
+        }
+    }
+
+    struct PersistentDoomLoopProvider;
+
+    impl Provider for PersistentDoomLoopProvider {
+        fn stream<'a>(
+            &'a self,
+            _request: &'a Request,
+        ) -> BoxFuture<'a, Result<provider::EventStream<'a>, provider::Error>> {
+            Box::pin(async move {
+                let stream = stream! {
+                    yield Ok(Event::ResponseStart {
+                        response_id: Some("doom-persistent".into()),
+                        model: Some("doom-model".into()),
+                    });
+                    yield Ok(Event::BlockStart {
+                        block: Block {
+                            id: "doom-tool".into(),
+                            output_index: 0,
+                            kind: BlockKind::ToolCall {
+                                name: Some("echo".into()),
+                                call_id: Some("doom-call".into()),
+                            },
+                            item_id: None,
+                        },
+                    });
+                    yield Ok(Event::BlockDelta {
+                        id: "doom-tool".into(),
+                        delta: BlockDelta::Json {
+                            partial_json: serde_json::json!({"message": "repeat"}).to_string(),
+                        },
+                    });
+                    yield Ok(Event::BlockStop {
+                        id: "doom-tool".into(),
+                    });
+                    yield Ok(Event::Completed {
+                        response_id: Some("doom-persistent".into()),
+                        finish_reason: Some(FinishReason::Stop),
+                    });
+                };
+                Ok(Box::pin(stream) as EventStream<'a>)
+            })
+        }
+
+        fn info(&self) -> ProviderInfo {
+            ProviderInfo {
+                name: "doom-persistent".into(),
+                default_model_id: Some("doom-model".into()),
+                capabilities: ProviderCapabilities::text_only(),
+                models: Vec::new(),
+            }
+        }
+    }
+
+    struct AdvancedFlowProvider;
+
+    impl Provider for AdvancedFlowProvider {
+        fn stream<'a>(
+            &'a self,
+            request: &'a Request,
+        ) -> BoxFuture<'a, Result<provider::EventStream<'a>, provider::Error>> {
+            Box::pin(async move {
+                let response_text = if request.tools.is_empty() {
+                    "summary: preserve the important context"
+                } else {
+                    "outer turn completed"
+                };
+                let stream = stream! {
+                    yield Ok(Event::ResponseStart {
+                        response_id: Some("advanced".into()),
+                        model: Some("advanced-model".into()),
+                    });
+                    yield Ok(Event::BlockStart {
+                        block: Block {
+                            id: "advanced-text".into(),
+                            output_index: 0,
+                            kind: BlockKind::Text,
+                            item_id: None,
+                        },
+                    });
+                    yield Ok(Event::BlockDelta {
+                        id: "advanced-text".into(),
+                        delta: BlockDelta::Text {
+                            text: response_text.into(),
+                        },
+                    });
+                    yield Ok(Event::BlockStop {
+                        id: "advanced-text".into(),
+                    });
+                    yield Ok(Event::Completed {
+                        response_id: Some("advanced".into()),
+                        finish_reason: Some(FinishReason::Stop),
+                    });
+                };
+                Ok(Box::pin(stream) as EventStream<'a>)
+            })
+        }
+
+        fn info(&self) -> ProviderInfo {
+            ProviderInfo {
+                name: "advanced".into(),
+                default_model_id: Some("advanced-model".into()),
+                capabilities: ProviderCapabilities::text_only(),
+                models: vec![ModelInfo {
+                    id: Cow::Borrowed("advanced-model"),
+                    name: Cow::Borrowed("Advanced Model"),
+                    family: None,
+                    reasoning_efforts: Cow::Borrowed(&[]),
+                    tool_call: true,
+                    attachment: false,
+                    structured_output: None,
+                    temperature: None,
+                    knowledge: None,
+                    release_date: None,
+                    last_updated: None,
+                    open_weights: None,
+                    input_modalities: Cow::Borrowed(&["text"]),
+                    output_modalities: Cow::Borrowed(&["text"]),
+                    cost: None,
+                    limit: Some(ModelLimit {
+                        context: 8_000,
+                        input: Some(7_000),
+                        output: 1_000,
+                    }),
+                    status: None,
+                    capabilities: None,
+                }],
+            }
+        }
+    }
+
+    struct AdvancedLoop;
+
+    impl LoopStrategy for AdvancedLoop {
+        fn name(&self) -> &'static str {
+            "advanced"
+        }
+
+        fn decide<'a>(
+            &'a self,
+            ctx: LoopContext,
+        ) -> futures::future::BoxFuture<'a, Result<LoopDecision, RuntimeError>> {
+            Box::pin(async move {
+                if ctx.state().pending_completion {
+                    return Ok(LoopDecision::FinishTurn);
+                }
+                if !ctx.state().active_turn {
+                    return Ok(LoopDecision::WaitForInput);
+                }
+                if ctx.state().last_subcall.is_none() {
+                    return Ok(LoopDecision::RunSubcall {
+                        request: SubcallRequest {
+                            purpose: "handoff_summary".into(),
+                            messages: vec![Message::user_text("summarize this turn")],
+                            model_override: None,
+                        },
+                    });
+                }
+                if ctx.state().last_transcript_rewrite.is_none() {
+                    let summary = ctx
+                        .state()
+                        .last_subcall
+                        .as_ref()
+                        .and_then(|result| result.message.as_ref())
+                        .map(|message| message.plain_text_lossy())
+                        .unwrap_or_default();
+                    return Ok(LoopDecision::RewriteTranscript {
+                        rewrite: TranscriptRewrite {
+                            purpose: "handoff_rewrite".into(),
+                            messages: vec![Message::developer_text(format!(
+                                "<handoff>\n{}\n</handoff>",
+                                summary
+                            ))],
+                        },
+                    });
+                }
+                if ctx.state().last_transcript_append.is_none() {
+                    return Ok(LoopDecision::AppendTranscriptMessages {
+                        append: TranscriptAppend {
+                            purpose: "handoff_continue".into(),
+                            messages: vec![Message::developer_text(
+                                "Continue from the handoff summary.",
+                            )],
+                        },
+                    });
+                }
+                Ok(LoopDecision::RunProvider)
+            })
+        }
+    }
+
+    struct InvalidAppendLoop;
+
+    impl LoopStrategy for InvalidAppendLoop {
+        fn name(&self) -> &'static str {
+            "invalid-append"
+        }
+
+        fn decide<'a>(
+            &'a self,
+            ctx: LoopContext,
+        ) -> futures::future::BoxFuture<'a, Result<LoopDecision, RuntimeError>> {
+            Box::pin(async move {
+                if !ctx.state().active_turn {
+                    return Ok(LoopDecision::WaitForInput);
+                }
+                Ok(LoopDecision::AppendTranscriptMessages {
+                    append: TranscriptAppend {
+                        purpose: "bad_append".into(),
+                        messages: vec![Message::assistant_text("fabricated assistant")],
+                    },
+                })
+            })
+        }
+    }
+
     fn new_engine(provider: impl Provider + 'static) -> SessionEngine {
-        SessionEngine::new(
-            Arc::new(provider),
-            Arc::new(TestTools),
+        new_engine_with(
+            provider,
             Arc::new(PassiveLoop),
             RuntimeConfig::default(),
             SessionState::new(Ulid::new()),
+        )
+    }
+
+    fn new_engine_with(
+        provider: impl Provider + 'static,
+        strategy: Arc<dyn LoopStrategy>,
+        config: RuntimeConfig,
+        state: SessionState,
+    ) -> SessionEngine {
+        SessionEngine::new(
+            Arc::new(provider),
+            Arc::new(TestTools),
+            strategy,
+            config,
+            state,
         )
     }
 
@@ -3341,6 +5597,127 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn compact_context_rewrites_transcript_with_summary_message() {
+        let mut config = RuntimeConfig::default();
+        config.compaction.enabled = true;
+        config.compaction.threshold_ratio = 0.2;
+        config.compaction.preserve_recent_messages = 2;
+
+        let transcript = (0..8)
+            .flat_map(|index| {
+                [
+                    Message::user_text(format!("user-{index} {}", "x".repeat(160))),
+                    Message::assistant_text(format!("assistant-{index} {}", "y".repeat(160))),
+                ]
+            })
+            .collect::<Vec<_>>();
+        let initial_len = transcript.len() + 2;
+
+        let engine = new_engine_with(
+            CompactionProvider {
+                fail_summary: false,
+            },
+            Arc::new(CompactingLoop),
+            config,
+            SessionState::with_transcript(Ulid::new(), transcript),
+        );
+        let mut events = engine.subscribe();
+
+        engine
+            .submit(SessionCommand::SubmitInput {
+                input: vec![Message::user_text("new turn input")],
+                source: None,
+            })
+            .await
+            .unwrap();
+
+        let mut saw_compaction = false;
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+        while tokio::time::Instant::now() < deadline {
+            let event = timeout(Duration::from_millis(250), events.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            if matches!(event, RuntimeEvent::Compaction { .. }) {
+                saw_compaction = true;
+            }
+            if matches!(event, RuntimeEvent::TurnFinished { .. }) {
+                break;
+            }
+        }
+
+        let snapshot = engine.snapshot().await;
+        assert!(saw_compaction);
+        assert!(snapshot.transcript.len() < initial_len);
+        assert!(
+            snapshot
+                .transcript
+                .iter()
+                .any(|message| { message.plain_text_lossy().contains("<compaction_summary>") })
+        );
+    }
+
+    #[tokio::test]
+    async fn compaction_failure_keeps_transcript_unchanged_and_emits_error() {
+        let mut config = RuntimeConfig::default();
+        config.compaction.enabled = true;
+        config.compaction.threshold_ratio = 0.2;
+        config.compaction.preserve_recent_messages = 2;
+
+        let transcript = (0..8)
+            .flat_map(|index| {
+                [
+                    Message::user_text(format!("user-{index} {}", "x".repeat(160))),
+                    Message::assistant_text(format!("assistant-{index} {}", "y".repeat(160))),
+                ]
+            })
+            .collect::<Vec<_>>();
+        let initial_len = transcript.len() + 2;
+
+        let engine = new_engine_with(
+            CompactionProvider { fail_summary: true },
+            Arc::new(CompactingLoop),
+            config,
+            SessionState::with_transcript(Ulid::new(), transcript),
+        );
+        let mut events = engine.subscribe();
+
+        engine
+            .submit(SessionCommand::SubmitInput {
+                input: vec![Message::user_text("new turn input")],
+                source: None,
+            })
+            .await
+            .unwrap();
+
+        let mut error_message = None;
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+        while tokio::time::Instant::now() < deadline {
+            let event = timeout(Duration::from_millis(250), events.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            match event {
+                RuntimeEvent::Error { message, .. } if message.contains("summary failed") => {
+                    error_message = Some(message);
+                }
+                RuntimeEvent::TurnFinished { .. } => break,
+                _ => {}
+            }
+        }
+
+        let snapshot = engine.snapshot().await;
+        assert!(error_message.is_some());
+        assert_eq!(snapshot.transcript.len(), initial_len);
+        assert!(
+            snapshot
+                .transcript
+                .iter()
+                .all(|message| !message.plain_text_lossy().contains("<compaction_summary>"))
+        );
+    }
+
+    #[tokio::test]
     async fn mail_messages_are_not_injected_into_parent_transcript() {
         let engine = new_engine(MockProvider::new());
         let child_id = spawn_child(&engine, SpawnRequest::default()).await;
@@ -3563,5 +5940,512 @@ mod tests {
                 .plain_text_lossy()
                 .contains("<agent_message>")
         );
+    }
+
+    #[tokio::test]
+    async fn doom_loop_warning_can_be_steered_without_hard_abort() {
+        let mut config = RuntimeConfig::default();
+        config.doom_loop.enabled = true;
+        config.doom_loop.threshold = 2;
+
+        let engine = new_engine_with(
+            DoomLoopProvider,
+            Arc::new(DoomAwareLoop),
+            config,
+            SessionState::new(Ulid::new()),
+        );
+        let mut events = engine.subscribe();
+
+        engine
+            .submit(SessionCommand::SubmitInput {
+                input: vec![Message::user_text("start repeating")],
+                source: None,
+            })
+            .await
+            .unwrap();
+
+        let mut saw_warning = false;
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+        while tokio::time::Instant::now() < deadline {
+            let event = timeout(Duration::from_millis(250), events.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            if matches!(event, RuntimeEvent::DoomLoopWarning { .. }) {
+                saw_warning = true;
+            }
+            if matches!(event, RuntimeEvent::TurnFinished { .. }) {
+                break;
+            }
+        }
+
+        let snapshot = engine.snapshot().await;
+        assert!(saw_warning);
+        assert!(snapshot.transcript.iter().any(|message| {
+            message.role == MessageRole::Developer
+                && message
+                    .plain_text_lossy()
+                    .contains("Stop repeating the same tool call")
+        }));
+        assert!(
+            snapshot
+                .transcript
+                .iter()
+                .any(|message| message.plain_text_lossy().contains("recovered"))
+        );
+    }
+
+    #[tokio::test]
+    async fn doom_loop_hard_error_threshold_aborts_turn() {
+        let mut config = RuntimeConfig::default();
+        config.doom_loop.enabled = true;
+        config.doom_loop.threshold = 2;
+        config.doom_loop.hard_error_threshold = Some(2);
+
+        let engine = new_engine_with(
+            DoomLoopProvider,
+            Arc::new(DoomAwareLoop),
+            config,
+            SessionState::new(Ulid::new()),
+        );
+        let mut events = engine.subscribe();
+
+        engine
+            .submit(SessionCommand::SubmitInput {
+                input: vec![Message::user_text("start repeating")],
+                source: None,
+            })
+            .await
+            .unwrap();
+
+        let error_message = loop {
+            let event = timeout(Duration::from_millis(500), events.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            if let RuntimeEvent::Error { message, .. } = event {
+                break message;
+            }
+        };
+
+        let snapshot = engine.snapshot().await;
+        assert!(error_message.contains("doom loop detected"));
+        assert!(
+            snapshot
+                .transcript
+                .iter()
+                .all(|message| !message.plain_text_lossy().contains("recovered"))
+        );
+    }
+
+    #[tokio::test]
+    async fn doom_loop_can_abort_after_handled_repetition() {
+        let mut config = RuntimeConfig::default();
+        config.doom_loop.enabled = true;
+        config.doom_loop.threshold = 2;
+        config.doom_loop.error_after_handled_repetition = true;
+
+        let engine = new_engine_with(
+            PersistentDoomLoopProvider,
+            Arc::new(DoomAwareLoop),
+            config,
+            SessionState::new(Ulid::new()),
+        );
+        let mut events = engine.subscribe();
+
+        engine
+            .submit(SessionCommand::SubmitInput {
+                input: vec![Message::user_text("start repeating")],
+                source: None,
+            })
+            .await
+            .unwrap();
+
+        let error_message = loop {
+            let event = timeout(Duration::from_millis(500), events.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            if let RuntimeEvent::Error { message, .. } = event {
+                break message;
+            }
+        };
+
+        let snapshot = engine.snapshot().await;
+        assert!(error_message.contains("persisted"));
+        assert!(snapshot.transcript.iter().any(|message| {
+            message.role == MessageRole::Developer
+                && message
+                    .plain_text_lossy()
+                    .contains("Stop repeating the same tool call")
+        }));
+        assert!(
+            snapshot
+                .transcript
+                .iter()
+                .all(|message| !message.plain_text_lossy().contains("recovered"))
+        );
+    }
+
+    #[tokio::test]
+    async fn advanced_loop_can_chain_subcall_rewrite_append_across_ticks() {
+        let engine = new_engine_with(
+            AdvancedFlowProvider,
+            Arc::new(AdvancedLoop),
+            RuntimeConfig::default(),
+            SessionState::with_transcript(
+                Ulid::new(),
+                vec![Message::user_text("original context that will be replaced")],
+            ),
+        );
+        let mut events = engine.subscribe();
+
+        engine
+            .submit(SessionCommand::SubmitInput {
+                input: vec![Message::user_text("start advanced flow")],
+                source: None,
+            })
+            .await
+            .unwrap();
+
+        let mut saw_subcall = false;
+        let mut saw_rewrite = false;
+        let mut saw_append = false;
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+        while tokio::time::Instant::now() < deadline {
+            let event = timeout(Duration::from_millis(250), events.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            match event {
+                RuntimeEvent::SubcallFinished { .. } => saw_subcall = true,
+                RuntimeEvent::TranscriptRewritten { .. } => saw_rewrite = true,
+                RuntimeEvent::TranscriptMessagesAppended { .. } => saw_append = true,
+                RuntimeEvent::TurnFinished { .. } => break,
+                _ => {}
+            }
+        }
+
+        let snapshot = engine.snapshot().await;
+        assert!(saw_subcall);
+        assert!(saw_rewrite);
+        assert!(saw_append);
+        assert_eq!(
+            snapshot
+                .last_subcall
+                .as_ref()
+                .map(|result| result.purpose.as_str()),
+            Some("handoff_summary")
+        );
+        assert_eq!(
+            snapshot
+                .last_transcript_rewrite
+                .as_ref()
+                .map(|result| result.purpose.as_str()),
+            Some("handoff_rewrite")
+        );
+        assert_eq!(
+            snapshot
+                .last_transcript_append
+                .as_ref()
+                .map(|result| result.purpose.as_str()),
+            Some("handoff_continue")
+        );
+        assert_eq!(snapshot.recent_operations.len(), 3);
+        assert!(
+            snapshot
+                .transcript
+                .iter()
+                .any(|message| message.plain_text_lossy().contains("<handoff>"))
+        );
+        assert!(snapshot.transcript.iter().any(|message| {
+            message
+                .plain_text_lossy()
+                .contains("Continue from the handoff")
+        }));
+        assert!(
+            snapshot
+                .transcript
+                .iter()
+                .any(|message| message.plain_text_lossy().contains("outer turn completed"))
+        );
+    }
+
+    #[tokio::test]
+    async fn append_transcript_messages_rejects_fabricated_assistant_messages() {
+        let engine = new_engine_with(
+            AdvancedFlowProvider,
+            Arc::new(InvalidAppendLoop),
+            RuntimeConfig::default(),
+            SessionState::new(Ulid::new()),
+        );
+        let mut events = engine.subscribe();
+
+        engine
+            .submit(SessionCommand::SubmitInput {
+                input: vec![Message::user_text("start invalid append")],
+                source: None,
+            })
+            .await
+            .unwrap();
+
+        let error_message = loop {
+            let event = timeout(Duration::from_millis(500), events.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            if let RuntimeEvent::Error { message, .. } = event {
+                break message;
+            }
+        };
+
+        let snapshot = engine.snapshot().await;
+        assert!(error_message.contains("may not fabricate assistant messages"));
+        assert!(snapshot.last_transcript_append.is_none());
+        assert!(
+            snapshot
+                .transcript
+                .iter()
+                .all(|message| !message.plain_text_lossy().contains("fabricated assistant"))
+        );
+    }
+
+    #[tokio::test]
+    async fn pty_tools_can_open_execute_capture_and_close() {
+        let engine = new_engine(MockProvider::new());
+        let token = format!("PTY_HELLO_{}", Ulid::new());
+
+        let opened = execute_native_agent_tool(
+            engine.clone(),
+            ToolCall {
+                id: "open-pty".into(),
+                name: OPEN_PTY_TOOL.into(),
+                input: serde_json::json!({
+                    "label": "scratch-shell",
+                    "rows": 30,
+                    "cols": 120
+                }),
+            },
+        )
+        .await
+        .unwrap();
+        let pty_id: PtyId = serde_json::from_value(opened.output["pty_id"].clone()).unwrap();
+
+        let executed = execute_native_agent_tool(
+            engine.clone(),
+            ToolCall {
+                id: "execute-pty".into(),
+                name: EXECUTE_PTY_TOOL.into(),
+                input: serde_json::json!({
+                    "pty_id": pty_id,
+                    "commands": [format!("printf '{}\\n'", token)],
+                    "wait_ms": 150
+                }),
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(executed.output["pty_id"], pty_id.to_string());
+
+        let captured = execute_native_agent_tool(
+            engine.clone(),
+            ToolCall {
+                id: "capture-pty".into(),
+                name: CAPTURE_PTY_TOOL.into(),
+                input: serde_json::json!({
+                    "pty_id": pty_id,
+                    "mode": "incremental",
+                    "since_cursor": 0
+                }),
+            },
+        )
+        .await
+        .unwrap();
+        let visible_screen = captured.output["snapshot"]["visible_screen"]
+            .as_str()
+            .unwrap();
+        let incremental_output = captured.output["snapshot"]["incremental_output"]
+            .as_str()
+            .unwrap_or_default();
+        assert!(visible_screen.contains(&token) || incremental_output.contains(&token));
+
+        let listed = execute_native_agent_tool(
+            engine.clone(),
+            ToolCall {
+                id: "list-ptys".into(),
+                name: LIST_PTYS_TOOL.into(),
+                input: serde_json::json!({}),
+            },
+        )
+        .await
+        .unwrap();
+        assert!(
+            listed
+                .output
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|pty| pty["pty_id"] == pty_id.to_string())
+        );
+
+        let closed = execute_native_agent_tool(
+            engine,
+            ToolCall {
+                id: "close-pty".into(),
+                name: CLOSE_PTY_TOOL.into(),
+                input: serde_json::json!({ "pty_id": pty_id }),
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(closed.output["status"], "closed");
+    }
+
+    #[tokio::test]
+    async fn subscribed_pty_output_can_be_promoted_into_developer_messages() {
+        let engine = new_engine(MockProvider::new());
+        let token = format!("PTY_EVENT_{}", Ulid::new());
+        let opened = execute_native_agent_tool(
+            engine.clone(),
+            ToolCall {
+                id: "open-pty-promoted".into(),
+                name: OPEN_PTY_TOOL.into(),
+                input: serde_json::json!({ "label": "promoted-shell" }),
+            },
+        )
+        .await
+        .unwrap();
+        let pty_id: PtyId = serde_json::from_value(opened.output["pty_id"].clone()).unwrap();
+
+        sleep(Duration::from_millis(100)).await;
+
+        execute_native_agent_tool(
+            engine.clone(),
+            ToolCall {
+                id: "subscribe-pty".into(),
+                name: SUBSCRIBE_PTY_TOOL.into(),
+                input: serde_json::json!({
+                    "pty_id": pty_id,
+                    "kinds": ["output"],
+                    "delivery": "promote_to_developer"
+                }),
+            },
+        )
+        .await
+        .unwrap();
+
+        execute_native_agent_tool(
+            engine.clone(),
+            ToolCall {
+                id: "execute-pty-promoted".into(),
+                name: EXECUTE_PTY_TOOL.into(),
+                input: serde_json::json!({
+                    "pty_id": pty_id,
+                    "commands": [format!("printf '{}\\n'", token)],
+                    "wait_ms": 150
+                }),
+            },
+        )
+        .await
+        .unwrap();
+
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+        loop {
+            let snapshot = engine.snapshot().await;
+            if snapshot
+                .transcript
+                .iter()
+                .any(|message| message.plain_text_lossy().contains("<pty_event>"))
+            {
+                assert!(
+                    snapshot
+                        .transcript
+                        .iter()
+                        .any(|message| message.plain_text_lossy().contains(&token))
+                );
+                break;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "timed out waiting for PTY event injection"
+            );
+            sleep(Duration::from_millis(25)).await;
+        }
+    }
+
+    #[tokio::test]
+    async fn read_pty_events_tool_returns_delivered_subscription_events() {
+        let engine = new_engine(MockProvider::new());
+        let token = format!("PTY_READ_{}", Ulid::new());
+        let opened = execute_native_agent_tool(
+            engine.clone(),
+            ToolCall {
+                id: "open-pty-read".into(),
+                name: OPEN_PTY_TOOL.into(),
+                input: serde_json::json!({}),
+            },
+        )
+        .await
+        .unwrap();
+        let pty_id: PtyId = serde_json::from_value(opened.output["pty_id"].clone()).unwrap();
+
+        sleep(Duration::from_millis(100)).await;
+
+        execute_native_agent_tool(
+            engine.clone(),
+            ToolCall {
+                id: "subscribe-pty-read".into(),
+                name: SUBSCRIBE_PTY_TOOL.into(),
+                input: serde_json::json!({
+                    "pty_id": pty_id,
+                    "kinds": ["output"],
+                    "delivery": "stream_only"
+                }),
+            },
+        )
+        .await
+        .unwrap();
+
+        execute_native_agent_tool(
+            engine.clone(),
+            ToolCall {
+                id: "execute-pty-read".into(),
+                name: EXECUTE_PTY_TOOL.into(),
+                input: serde_json::json!({
+                    "pty_id": pty_id,
+                    "commands": [format!("printf '{}\\n'", token)],
+                    "wait_ms": 150
+                }),
+            },
+        )
+        .await
+        .unwrap();
+
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+        loop {
+            let result = execute_native_agent_tool(
+                engine.clone(),
+                ToolCall {
+                    id: "read-pty-events".into(),
+                    name: READ_PTY_EVENTS_TOOL.into(),
+                    input: serde_json::json!({
+                        "pty_id": pty_id,
+                        "kinds": ["output"],
+                        "limit": 10
+                    }),
+                },
+            )
+            .await
+            .unwrap();
+            let payload = result.output.to_string();
+            if payload.contains(&token) {
+                break;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "timed out waiting for delivered PTY events"
+            );
+            sleep(Duration::from_millis(25)).await;
+        }
     }
 }

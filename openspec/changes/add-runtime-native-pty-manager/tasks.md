@@ -1,0 +1,8 @@
+- [x] Add PTY identifiers, session state, execution results, event types, and PTY commands to `agent-runtime`
+- [x] Implement a runtime-managed PTY backend with persistent sessions, buffered output, capture, resize, interrupt, background, and close behavior
+- [x] Add PTY loop effects and PTY visibility in `SessionState`
+- [x] Add PTY event subscriptions and safe-boundary developer-message promotion
+- [x] Expose provider-visible native PTY tools
+- [x] Add PTY runtime tests for lifecycle, execution, capture, and subscription-driven event delivery
+- [x] Update architecture and competitor research docs for runtime-native PTY support
+- [x] Validate the new OpenSpec change

@@ -4,9 +4,10 @@ use ulid::Ulid;
 
 use crate::{
     AgentMessage, ApprovalDecision, ApprovalRequest, ChildReport, ChildResult, ChildRuntimeState,
-    ChildStatus, ControlEvent, Envelope, InputDelivery, InterruptMode, RuntimeId, SessionBoundary,
-    SessionInputSource, SessionPhase, SteerWhen, ToolCall, ToolExecutionResult, WaitRequest,
-    WaitResult,
+    ChildStatus, ControlEvent, DeliveredPtyEvent, Envelope, InputDelivery, InterruptMode,
+    PtyCaptureResult, PtyEvent, PtyId, PtySessionState, PtySubscription, RuntimeId,
+    SessionBoundary, SessionInputSource, SessionPhase, SteerWhen, SubcallResult, ToolCall,
+    ToolExecutionResult, TranscriptAppendResult, TranscriptRewriteResult, WaitRequest, WaitResult,
 };
 
 /// Runtime-level events emitted by the bidirectional session engine.
@@ -178,6 +179,52 @@ pub enum RuntimeEvent {
         /// Rendered transcript message committed for the report.
         message: Message,
     },
+    /// A PTY session was opened.
+    PtyOpened {
+        /// PTY snapshot after opening.
+        pty: PtySessionState,
+    },
+    /// A PTY session changed status or metadata.
+    PtyUpdated {
+        /// PTY snapshot after the update.
+        pty: PtySessionState,
+    },
+    /// A PTY event was emitted by the PTY manager.
+    PtyEventEmitted {
+        /// PTY event payload.
+        event: PtyEvent,
+    },
+    /// A runtime subscribed to PTY events.
+    PtySubscribed {
+        /// Subscriber runtime.
+        runtime_id: RuntimeId,
+        /// Subscription details.
+        subscription: PtySubscription,
+    },
+    /// A runtime unsubscribed from PTY events.
+    PtyUnsubscribed {
+        /// Subscriber runtime.
+        runtime_id: RuntimeId,
+        /// PTY identifier.
+        pty_id: PtyId,
+    },
+    /// A PTY event was delivered to a runtime through an explicit subscription.
+    PtyEventDelivered {
+        /// Delivered event payload.
+        delivered: DeliveredPtyEvent,
+    },
+    /// A PTY event was injected into the provider-visible transcript.
+    PtyEventInjected {
+        /// Delivered event payload.
+        delivered: DeliveredPtyEvent,
+        /// Rendered transcript message committed for the PTY event.
+        message: Message,
+    },
+    /// A PTY capture request completed.
+    PtyCaptured {
+        /// Capture result.
+        result: PtyCaptureResult,
+    },
     /// An envelope was queued for routing.
     EnvelopeQueued {
         /// Envelope payload.
@@ -219,6 +266,21 @@ pub enum RuntimeEvent {
     MessageCommitted {
         /// Committed message.
         message: Message,
+    },
+    /// A loop-authored provider subcall completed.
+    SubcallFinished {
+        /// Structured subcall result.
+        result: SubcallResult,
+    },
+    /// A loop-authored transcript rewrite completed.
+    TranscriptRewritten {
+        /// Structured rewrite result.
+        result: TranscriptRewriteResult,
+    },
+    /// A loop-authored transcript append completed.
+    TranscriptMessagesAppended {
+        /// Structured append result.
+        result: TranscriptAppendResult,
     },
     /// A provider-requested tool call is pending execution.
     ToolCallPending {

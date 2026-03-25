@@ -5,6 +5,18 @@ crate keeps agent strategy behind the `AgentLoop` trait, but the concrete loops
 now represent meaningfully different execution contracts rather than small
 prompt variations.
 
+For the newer `agent-runtime` / `agent-loops` path, the architectural direction
+is slightly different: hard execution mechanics are moving into the reusable
+runtime, while loops stay focused on policy. Legacy `robust` behavior is still
+useful as a reference, but retries, compaction, and doom-loop handling are no
+longer expected to live forever inside one monolithic loop implementation.
+The newer path also aims to keep **one** loop architecture: simple loops should
+be the small-subset users of the same declarative runtime effect surface that
+supports more advanced Terminus-style handoff and PTY-aware flows. The newest
+runtime work also moves persistent PTY sessions out of the legacy
+`terminal_session` framing and toward explicit runtime-managed PTY ids,
+snapshots, event subscriptions, and safe-boundary developer-message promotion.
+
 ## Table Of Contents
 
 | Topic | Document |
@@ -58,6 +70,7 @@ flowchart LR
 | --- | --- |
 | The crate is still successfully isolating loop experimentation from `brain-core` | This is the main reason the recent benchmark-driven work has not forced a deeper runtime rewrite yet |
 | `terminus2` and `terminus-kira` are not just hardened variants of `simple` | They encode different assumptions about planning, terminal feedback, and completion confirmation |
+| The new `agent-runtime` path should absorb runtime-native mechanics, not loop-language control flow | The goal is richer bounded effects and richer runtime state, not `If`/`While`/interpreter creep inside `LoopDecision` |
 | Persistent terminal sessions are now a first-class loop primitive | Tooling and events need to support long-lived execution state rather than only one-shot tools |
 | Multimodality entered through loop pressure, not only provider pressure | The message model and OpenAI-compatible serializers had to widen because KIRA-style behavior needed them |
 

@@ -1,4 +1,4 @@
-use provider::Message;
+use provider::{FinishReason, Message};
 use serde::{Deserialize, Serialize};
 use ulid::Ulid;
 
@@ -9,6 +9,9 @@ pub type RuntimeId = Ulid;
 
 /// Stable identifier for one parent-child spawn relationship.
 pub type SpawnId = Ulid;
+
+/// Stable identifier for one managed PTY session.
+pub type PtyId = Ulid;
 
 /// Optional metadata describing where an inbound session command originated.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -157,6 +160,392 @@ pub struct WaitResult {
     pub outcome: WaitOutcome,
     /// Per-runtime outcome details.
     pub targets: Vec<WaitTargetOutcome>,
+}
+
+/// Pure provider subcall requested by a loop strategy.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SubcallRequest {
+    /// Stable purpose label used by loops to correlate results across ticks.
+    pub purpose: String,
+    /// Provider messages for the isolated subcall.
+    pub messages: Vec<Message>,
+    /// Optional model override applied only to the subcall.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_override: Option<String>,
+}
+
+/// Result captured from a loop-authored provider subcall.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SubcallResult {
+    /// Stable purpose label echoed from the originating request.
+    pub purpose: String,
+    /// Final assistant message, when the subcall produced one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<Message>,
+    /// Provider finish reason captured for the subcall.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finish_reason: Option<FinishReason>,
+    /// Optional error string when the subcall failed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// Concrete transcript replacement requested by a loop strategy.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TranscriptRewrite {
+    /// Stable purpose label used for diagnostics and loop coordination.
+    pub purpose: String,
+    /// Full transcript that should replace the current transcript.
+    pub messages: Vec<Message>,
+}
+
+/// Outcome recorded after a loop-authored transcript rewrite.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TranscriptRewriteResult {
+    /// Stable purpose label echoed from the originating rewrite request.
+    pub purpose: String,
+    /// Number of messages before the rewrite.
+    pub previous_message_count: usize,
+    /// Number of messages after the rewrite.
+    pub new_message_count: usize,
+}
+
+/// Concrete transcript append requested by a loop strategy.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TranscriptAppend {
+    /// Stable purpose label used for diagnostics and loop coordination.
+    pub purpose: String,
+    /// Messages to append to the current transcript.
+    pub messages: Vec<Message>,
+}
+
+/// Outcome recorded after a loop-authored transcript append.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TranscriptAppendResult {
+    /// Stable purpose label echoed from the originating append request.
+    pub purpose: String,
+    /// Number of messages appended.
+    pub appended_messages: usize,
+    /// Final transcript length after the append.
+    pub transcript_message_count: usize,
+}
+
+/// Recent runtime-native operation outcome exposed back to loop strategies.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum RuntimeOperationResult {
+    /// Result of a pure provider subcall.
+    Subcall { result: SubcallResult },
+    /// Result of a transcript replacement.
+    TranscriptRewrite { result: TranscriptRewriteResult },
+    /// Result of a transcript append.
+    TranscriptAppend { result: TranscriptAppendResult },
+    /// Result of a PTY command/input batch.
+    PtyExecution { result: PtyExecResult },
+    /// Result of a PTY capture request.
+    PtyCapture { result: PtyCaptureResult },
+}
+
+/// Lifecycle status tracked for one runtime-managed PTY session.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PtyStatus {
+    /// PTY was created and is still starting up.
+    Starting,
+    /// PTY is alive and currently idle.
+    Idle,
+    /// PTY recently received input and is considered foreground-active.
+    Running,
+    /// PTY is still alive but explicitly backgrounded.
+    Backgrounded,
+    /// PTY terminated cleanly.
+    Closed,
+    /// PTY failed unexpectedly.
+    Failed,
+}
+
+/// Structured snapshot of a runtime-managed PTY session.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PtySessionState {
+    /// Stable PTY identifier.
+    pub pty_id: PtyId,
+    /// Optional human-readable label.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    /// Runtime that originally opened the PTY.
+    pub owner_runtime_id: RuntimeId,
+    /// Working directory used when the PTY was opened.
+    pub cwd: String,
+    /// Current row count.
+    pub rows: u16,
+    /// Current column count.
+    pub cols: u16,
+    /// Current PTY lifecycle status.
+    pub status: PtyStatus,
+    /// Monotonic cursor representing buffered PTY output progress.
+    pub output_cursor: u64,
+    /// Most recent child shell/process exit code when known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exit_code: Option<i32>,
+}
+
+/// Snapshot captured from the current PTY screen and output buffer.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PtySnapshot {
+    /// PTY this snapshot came from.
+    pub pty_id: PtyId,
+    /// Visible screen contents rendered from the virtual terminal.
+    pub visible_screen: String,
+    /// Incremental output since a previously observed cursor, when requested.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub incremental_output: Option<String>,
+    /// Cursor value callers may reuse for future incremental reads.
+    pub output_cursor: u64,
+}
+
+/// Structured result of a PTY execution request.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PtyExecResult {
+    /// PTY this execution ran against.
+    pub pty_id: PtyId,
+    /// Commands or input chunks that were executed.
+    pub steps: Vec<String>,
+    /// Whether execution was intentionally backgrounded.
+    pub backgrounded: bool,
+    /// Whether the request completed without interruption.
+    pub completed: bool,
+    /// Whether the request was interrupted.
+    pub interrupted: bool,
+    /// Whether the PTY child process has exited.
+    pub shell_exited: bool,
+    /// Exit code when known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exit_code: Option<i32>,
+    /// Snapshot captured after execution.
+    pub snapshot: PtySnapshot,
+}
+
+/// Structured result of a PTY capture request.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PtyCaptureResult {
+    /// PTY this capture came from.
+    pub pty_id: PtyId,
+    /// Snapshot captured from the PTY.
+    pub snapshot: PtySnapshot,
+}
+
+/// Semantic kind for PTY-originated events.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PtyEventKind {
+    /// Output bytes became available.
+    Output,
+    /// A PTY execution request started.
+    ExecutionStarted,
+    /// A PTY execution request completed.
+    ExecutionCompleted,
+    /// PTY status changed.
+    StatusChanged,
+    /// PTY dimensions changed.
+    Resized,
+    /// PTY received an interrupt.
+    Interrupted,
+    /// PTY closed.
+    Closed,
+    /// PTY failed.
+    Failed,
+}
+
+/// Event emitted by a runtime-managed PTY session.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PtyEvent {
+    /// PTY identifier that emitted the event.
+    pub pty_id: PtyId,
+    /// Monotonic per-PTY sequence number.
+    pub sequence: u64,
+    /// Semantic event kind.
+    pub kind: PtyEventKind,
+    /// Runtime timestamp in milliseconds.
+    pub timestamp_ms: u64,
+    /// Structured event payload.
+    pub payload: serde_json::Value,
+}
+
+/// Delivery policy for PTY event subscriptions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PtySubscriptionDelivery {
+    /// Keep events observable in runtime state without transcript promotion.
+    StreamOnly,
+    /// Queue events for safe-boundary transcript promotion as developer messages.
+    PromoteToDeveloper,
+}
+
+/// PTY event subscription owned by a runtime.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PtySubscription {
+    /// Target PTY identifier.
+    pub pty_id: PtyId,
+    /// Optional event-kind filter.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub kinds: Vec<PtyEventKind>,
+    /// Delivery behavior applied to matching events.
+    pub delivery: PtySubscriptionDelivery,
+}
+
+/// Query used while reading PTY events visible to the current runtime.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PtyEventFilter {
+    /// Optional PTY identifier filter.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pty_id: Option<PtyId>,
+    /// Optional event-kind filter.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub kinds: Vec<PtyEventKind>,
+    /// Optional lower-bound sequence filter.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub since_sequence: Option<u64>,
+    /// Optional maximum number of events to return.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<usize>,
+}
+
+/// How a PTY capture should read output from the buffered session.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PtyCaptureMode {
+    /// Return the visible screen only.
+    VisibleScreen,
+    /// Return the visible screen and incremental output since a cursor.
+    Incremental,
+}
+
+/// Request to open a new runtime-managed PTY session.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OpenPtyRequest {
+    /// Optional human-readable label for diagnostics/UI.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    /// Optional working directory for the PTY shell.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
+    /// Initial row count.
+    pub rows: u16,
+    /// Initial column count.
+    pub cols: u16,
+}
+
+impl Default for OpenPtyRequest {
+    fn default() -> Self {
+        Self {
+            label: None,
+            cwd: None,
+            rows: 24,
+            cols: 80,
+        }
+    }
+}
+
+/// Request to execute commands inside an existing PTY.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PtyExecRequest {
+    /// Target PTY identifier.
+    pub pty_id: PtyId,
+    /// Commands or input chunks to write.
+    pub steps: Vec<String>,
+    /// Minimum wait after sending input before capturing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wait_ms: Option<u64>,
+    /// Whether the PTY should remain backgrounded after the write.
+    #[serde(default)]
+    pub background: bool,
+}
+
+/// Request to capture the current PTY state.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PtyCaptureRequest {
+    /// Target PTY identifier.
+    pub pty_id: PtyId,
+    /// Capture mode.
+    pub mode: PtyCaptureMode,
+    /// Optional output cursor used for incremental capture.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub since_cursor: Option<u64>,
+}
+
+/// PTY-oriented commands accepted by a runtime.
+#[derive(Debug, Clone, PartialEq)]
+pub enum PtyCommand {
+    /// Open a new runtime-managed PTY session.
+    OpenPty {
+        /// PTY creation request.
+        request: OpenPtyRequest,
+    },
+    /// List PTY sessions currently known to the runtime registry.
+    ListPtys,
+    /// Fetch a single PTY snapshot by id.
+    GetPty {
+        /// PTY identifier.
+        pty_id: PtyId,
+    },
+    /// Write raw input into an existing PTY.
+    WritePtyInput {
+        /// PTY identifier.
+        pty_id: PtyId,
+        /// Raw input to write.
+        input: String,
+        /// Optional wait before capturing the PTY again.
+        wait_ms: Option<u64>,
+    },
+    /// Execute a command/input batch inside an existing PTY.
+    ExecutePtyBatch {
+        /// Structured execution request.
+        request: PtyExecRequest,
+    },
+    /// Capture PTY state and optionally incremental output.
+    CapturePty {
+        /// Structured capture request.
+        request: PtyCaptureRequest,
+    },
+    /// Resize an existing PTY.
+    ResizePty {
+        /// PTY identifier.
+        pty_id: PtyId,
+        /// New row count.
+        rows: u16,
+        /// New column count.
+        cols: u16,
+    },
+    /// Interrupt an existing PTY by sending ctrl-c.
+    InterruptPty {
+        /// PTY identifier.
+        pty_id: PtyId,
+    },
+    /// Mark an existing PTY as backgrounded.
+    BackgroundPty {
+        /// PTY identifier.
+        pty_id: PtyId,
+    },
+    /// Close an existing PTY.
+    ClosePty {
+        /// PTY identifier.
+        pty_id: PtyId,
+    },
+    /// Subscribe the current runtime to PTY events.
+    SubscribePty {
+        /// PTY event subscription.
+        subscription: PtySubscription,
+    },
+    /// Remove a PTY event subscription from the current runtime.
+    UnsubscribePty {
+        /// PTY identifier.
+        pty_id: PtyId,
+    },
+    /// Read PTY events delivered to the current runtime.
+    ReadPtyEvents {
+        /// Filter applied to visible PTY events.
+        filter: PtyEventFilter,
+    },
 }
 
 /// How broadly the runtime should expose agent listing results.
@@ -499,6 +888,8 @@ pub enum SessionCommand {
     Approve(ApprovalDecision),
     /// Submit agent-oriented work such as spawn or messaging.
     Agent(AgentCommand),
+    /// Submit PTY-oriented work such as opening, executing, or subscribing.
+    Pty(PtyCommand),
 }
 
 #[cfg(test)]
@@ -554,5 +945,28 @@ mod tests {
         assert_eq!(message.thread_id, None);
         assert_eq!(message.reply_to, None);
         assert_eq!(message.read_at, None);
+    }
+
+    #[test]
+    fn subcall_request_preserves_purpose_and_messages() {
+        let request = SubcallRequest {
+            purpose: "handoff_summary".into(),
+            messages: vec![Message::user_text("summarize this")],
+            model_override: Some("summary-model".into()),
+        };
+
+        assert_eq!(request.purpose, "handoff_summary");
+        assert_eq!(request.messages.len(), 1);
+        assert_eq!(request.model_override.as_deref(), Some("summary-model"));
+    }
+
+    #[test]
+    fn open_pty_request_defaults_match_runtime_shell_expectations() {
+        let request = OpenPtyRequest::default();
+
+        assert_eq!(request.label, None);
+        assert_eq!(request.cwd, None);
+        assert_eq!(request.rows, 24);
+        assert_eq!(request.cols, 80);
     }
 }

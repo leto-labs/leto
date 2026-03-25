@@ -346,5 +346,13 @@
     "searchPath": "src",
     "notes": "Official Anthropic TypeScript SDK. Use for Messages request/response types, SSE event shapes, tool-use blocks, and general API behavior when implementing provider-anthropic.",
     "enabled": true
+  },
+  {
+    "name": "letta-code",
+    "url": "https://github.com/letta-ai/letta-code",
+    "tag": "v0.8.0",
+    "searchPath": "src",
+    "notes": "Memory-first TypeScript coding harness built on Letta agents. Use as a contrast point for persistent agent memory, long-lived agent identity across sessions, and the distinction between stateful agent architecture and loop-language power.",
+    "enabled": true
   }
 ]

@@ -7,9 +7,10 @@ mod tests {
     use std::sync::Arc;
 
     use agent_runtime::{
-        ApprovalDecision, ControlEvent, InterruptMode, Message, MessageRole, RuntimeConfig,
-        RuntimeEvent, SessionBoundary, SessionCommand, SessionEngine, SessionPhase, SessionState,
-        SteerWhen, ToolApproval, ToolCall, ToolExecutionResult, ToolExecutor,
+        AgentCommand, ApprovalDecision, ControlEvent, InterruptMode, Message, MessageRole,
+        OpenPtyRequest, PtyCommand, RuntimeConfig, RuntimeEvent, SessionBoundary, SessionCommand,
+        SessionEngine, SessionPhase, SessionState, SpawnRequest, SteerWhen, ToolApproval, ToolCall,
+        ToolExecutionResult, ToolExecutor,
     };
     use async_stream::stream;
     use futures::future::BoxFuture;
@@ -422,5 +423,76 @@ mod tests {
                 .iter()
                 .any(|message| message.plain_text_lossy().contains("stay concise"))
         );
+    }
+
+    #[tokio::test]
+    async fn simple_loop_processes_queued_spawn_agent_commands() {
+        let engine = SessionEngine::new(
+            Arc::new(MockProvider::new()),
+            Arc::new(EchoTools),
+            Arc::new(SimpleLoop),
+            RuntimeConfig::default(),
+            SessionState::new(Ulid::new()),
+        );
+
+        let request = SpawnRequest {
+            label: Some("worker".into()),
+            initial_input: vec![Message::user_text("do work")],
+            ..SpawnRequest::default()
+        };
+
+        engine
+            .submit(SessionCommand::Agent(AgentCommand::SpawnAgent {
+                request,
+                wait: None,
+            }))
+            .await
+            .unwrap();
+
+        let state = timeout(Duration::from_millis(500), async {
+            loop {
+                let state = engine.snapshot().await;
+                if state.children.len() == 1 {
+                    break state;
+                }
+                sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(state.children.len(), 1);
+        assert!(state.pending_runtime_actions.is_empty());
+    }
+
+    #[tokio::test]
+    async fn simple_loop_processes_queued_open_pty_commands() {
+        let engine = SessionEngine::new(
+            Arc::new(MockProvider::new()),
+            Arc::new(EchoTools),
+            Arc::new(SimpleLoop),
+            RuntimeConfig::default(),
+            SessionState::new(Ulid::new()),
+        );
+
+        engine
+            .submit(SessionCommand::Pty(PtyCommand::OpenPty {
+                request: OpenPtyRequest::default(),
+            }))
+            .await
+            .unwrap();
+
+        let state = timeout(Duration::from_millis(500), async {
+            loop {
+                let state = engine.snapshot().await;
+                if state.ptys.len() == 1 {
+                    break state;
+                }
+                sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(state.ptys.len(), 1);
+        assert!(state.pending_runtime_actions.is_empty());
     }
 }

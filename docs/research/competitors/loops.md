@@ -407,6 +407,27 @@ Most important signal for `brain`:
 - if `brain` only grows stronger terminal tooling, it will still be qualitatively different from Codex/OpenCode-style subagents
 - this is the right baseline for comparison with "one smart terminal worker", not with a real multi-runtime control plane
 
+### PTY management comparison
+
+Looking specifically at terminal/PTY handling across the stronger references:
+
+| System | PTY shape | Strongest lesson |
+| --- | --- | --- |
+| Terminus2 / Harbor | one persistent terminal session used as the core execution substrate | terminal state is long-lived and must be observable across many turns |
+| Terminus Kira | persistent terminal plus stricter completion, timeout, and interrupt behavior | richer PTY execution semantics matter more than a loop DSL |
+| OpenCode | PTY as a first-class managed subsystem with ids, lifecycle, write/resize/connect/list behavior | PTY should be treated as a managed runtime resource, not a generic tool |
+| Codex | robust PTY/process-group execution substrate with buffering and cleanup semantics | low-level interrupt, stream, and lifecycle behavior must be reliable |
+| Gastown | tmux/session environment used as durable orchestration substrate | long-lived terminal sessions need explicit lifecycle and operational hygiene |
+
+The practical conclusion for `brain` is:
+
+- a one-shot shell tool is not enough for Terminus-style behavior
+- a generic `terminal_session` tool is directionally right but still too tool-shaped
+- runtime-native PTY support should combine:
+  - OpenCode-style identity/lifecycle
+  - Codex-style execution/interrupt semantics
+  - Gastown-style long-lived session hygiene
+
 ### 2. Codex
 
 Higher-level summary:
@@ -839,6 +860,78 @@ The most important recommendation is negative: do **not** regress back toward:
 - transcript-only messaging with no mailbox distinction
 
 The current direction is already much closer to the right runtime model. The work ahead is mostly about hardening and extending it, not replacing it.
+
+### Advanced Loop Fit And Non-Goals
+
+The next architectural question is not "should the runtime grow more hidden
+policy?" It is "how expressive can the declarative loop surface become without
+turning into an interpreter?"
+
+The strongest conclusion from the legacy loops plus the external references is:
+
+- keep one loop architecture
+- keep loops declarative
+- let loops branch in Rust across ticks
+- add more runtime-native effects and richer loop-visible state
+- do **not** add plan-level `If`, `While`, variables, or nested workflow DSLs
+
+#### Reference read-through
+
+- [`Terminus2Loop`](../../../crates/brain-loops/src/terminus2.rs) and Harbor's
+  [`terminus_2.py`](../../../repocache/harbor-framework/harbor/src/harbor/agents/terminus_2/terminus_2.py)
+  show that advanced loops need more than threshold-based compaction. They need
+  custom handoff summarization, transcript rewrite, parser-repair policy, and a
+  persistent terminal substrate.
+- [`TerminusKiraLoop`](../../../crates/brain-loops/src/terminus_kira.rs) and
+  official
+  [`terminus_kira.py`](../../../repocache/krafton-ai/KIRA/terminus_kira/terminus_kira.py)
+  push harder on runtime-native terminal and multimodal behavior: command
+  batches, timeout/interrupt semantics, completion confirmation, and image-read
+  subcalls.
+- Codex and OpenCode validate typed session/runtime actions, explicit
+  compaction/subtask operations, and clean stateful control planes.
+- Gastown validates delivery-mode distinctions and durable asynchronous
+  coordination, but it does not imply that the loop return type should become a
+  general orchestration DSL.
+- Letta Code is a useful contrast because it shows that some "advanced loop"
+  pressure is really about persistent agent memory and stateful runtime design,
+  not more control-flow power in the loop surface.
+
+#### Advanced-loop support matrix
+
+| Feature | Current runtime | Needs bounded declarative effect expansion | Needs PTY-native runtime support | Out of scope |
+| --- | --- | --- | --- | --- |
+| Advisory compaction / doom-loop state | Yes | No | No | No |
+| Built-in compaction | Yes | No | No | No |
+| Multi-step handoff summarization across ticks | Partial | Yes | No | No |
+| Concrete transcript rewrite with preserved prefix/tail chosen by the loop | No | Yes | No | No |
+| Loop-authored transcript append of runtime-authored messages | No | Yes | No | No |
+| Tagged provider subcalls with loop-visible results | No | Yes | No | No |
+| Custom parser-repair and completion-confirmation policy | Partial | Yes | No | No |
+| Background child orchestration, wait, and release-hold | Yes | No | No | No |
+| Persistent PTY session capture and command execution | No | No | Yes | No |
+| PTY timeout + interrupt semantics | No | No | Yes | No |
+| PTY incremental output / visible-screen observations | No | No | Yes | No |
+| Multimodal image-read flow like KIRA | No | Yes | Yes | No |
+| Plan-level branching (`If`, `Match`, workflow `Sequence`) | No | No | No | Yes |
+| Plan-level loops (`While`, `RepeatUntil`, `ForEach`) | No | No | No | Yes |
+| Plan-level variables or registers | No | No | No | Yes |
+
+#### What this means for implementability
+
+- **Terminus2** looks implementable in the new architecture if the runtime
+  exposes bounded effects such as `RunSubcall`, `RewriteTranscript`, and richer
+  loop-visible operation results, plus a future PTY-native capability layer.
+- **Terminus Kira** also looks implementable in principle, but it depends more
+  heavily on PTY-native runtime support and multimodal/runtime-native
+  observation flows.
+- **Codex**, **OpenCode**, **OpenClaw**, and **Gastown** all point toward
+  richer runtime capabilities and stateful orchestration boundaries, not toward
+  embedding a mini interpreter in the loop return type.
+
+This is the key boundary to preserve: the loop should remain declarative, but it
+does not need to stay tiny. It should become richer by adding runtime-native
+effects and typed state, not by adding generic workflow control flow.
 
 ## What an "Agent" Seems to Be in Practice
 

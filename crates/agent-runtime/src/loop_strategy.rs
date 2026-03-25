@@ -4,8 +4,9 @@ use futures::future::BoxFuture;
 use provider::ProviderInfo;
 
 use crate::{
-    ApprovalRequest, InputDelivery, RuntimeConfig, RuntimeError, RuntimeId, SessionState,
-    SpawnRequest, WaitRequest,
+    ApprovalRequest, InputDelivery, OpenPtyRequest, PtyCaptureRequest, PtyExecRequest, PtyId,
+    PtySubscription, RuntimeConfig, RuntimeError, RuntimeId, SessionState, SpawnRequest,
+    SubcallRequest, TranscriptAppend, TranscriptRewrite, WaitRequest,
 };
 
 /// Immutable context presented to loop strategies when deciding the next step.
@@ -84,6 +85,86 @@ pub enum LoopDecision {
         input: Vec<provider::Message>,
         /// Boundary policy for delivery.
         delivery: InputDelivery,
+    },
+    /// Run an isolated provider subcall without mutating the outer transcript.
+    RunSubcall {
+        /// Subcall request to execute.
+        request: SubcallRequest,
+    },
+    /// Replace the current transcript with a concrete loop-authored transcript.
+    RewriteTranscript {
+        /// Transcript replacement plan.
+        rewrite: TranscriptRewrite,
+    },
+    /// Append concrete runtime-authored messages to the transcript.
+    AppendTranscriptMessages {
+        /// Transcript append plan.
+        append: TranscriptAppend,
+    },
+    /// Queue steering for the current runtime at a safe boundary.
+    QueueSteering {
+        /// Steering message to inject into the local transcript.
+        message: provider::Message,
+        /// Boundary policy for applying the steering.
+        when: crate::SteerWhen,
+    },
+    /// Open a new runtime-managed PTY session.
+    OpenPty {
+        /// PTY creation request.
+        request: OpenPtyRequest,
+    },
+    /// Write raw input into an existing PTY.
+    WritePtyInput {
+        /// Target PTY identifier.
+        pty_id: PtyId,
+        /// Raw PTY input.
+        input: String,
+        /// Optional wait before the runtime continues.
+        wait_ms: Option<u64>,
+    },
+    /// Execute a PTY command or input batch.
+    ExecutePtyBatch {
+        /// Structured execution request.
+        request: PtyExecRequest,
+    },
+    /// Capture the current PTY screen and optional incremental output.
+    CapturePty {
+        /// Structured capture request.
+        request: PtyCaptureRequest,
+    },
+    /// Resize an existing PTY.
+    ResizePty {
+        /// PTY identifier.
+        pty_id: PtyId,
+        /// New row count.
+        rows: u16,
+        /// New column count.
+        cols: u16,
+    },
+    /// Interrupt an existing PTY.
+    InterruptPty {
+        /// PTY identifier.
+        pty_id: PtyId,
+    },
+    /// Release the foreground expectation while keeping the PTY alive.
+    BackgroundPty {
+        /// PTY identifier.
+        pty_id: PtyId,
+    },
+    /// Close an existing PTY session.
+    ClosePty {
+        /// PTY identifier.
+        pty_id: PtyId,
+    },
+    /// Subscribe the current runtime to PTY events.
+    SubscribePty {
+        /// PTY event subscription.
+        subscription: PtySubscription,
+    },
+    /// Remove a PTY event subscription for the current runtime.
+    UnsubscribePty {
+        /// PTY identifier.
+        pty_id: PtyId,
     },
     /// Interrupt another runtime through the registry.
     InterruptAgent {

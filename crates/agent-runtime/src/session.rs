@@ -5,8 +5,10 @@ use serde::{Deserialize, Serialize};
 use ulid::Ulid;
 
 use crate::{
-    AgentMessage, ApprovalRequest, ChildReport, Envelope, InterruptMode, ResultMode, RuntimeId,
-    SessionInputSource, SpawnId, SpawnMode, SteerWhen, ToolCall, WaitRequest,
+    AgentMessage, ApprovalRequest, ChildReport, Envelope, InterruptMode, LoopDecision,
+    PtyCaptureResult, PtyEvent, PtyId, PtySessionState, PtySubscription, ResultMode, RuntimeId,
+    RuntimeOperationResult, SessionInputSource, SpawnId, SpawnMode, SteerWhen, SubcallResult,
+    ToolCall, TranscriptAppendResult, TranscriptRewriteResult, WaitRequest,
 };
 
 /// Coarse execution phase for an in-memory session engine.
@@ -137,6 +139,41 @@ pub struct ActiveWait {
     pub request: WaitRequest,
 }
 
+/// Advisory transcript pressure snapshot exposed to loop strategies.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ContextPressure {
+    /// Estimated transcript token count.
+    pub estimated_tokens: u64,
+    /// Advertised model context limit used for the estimate.
+    pub context_limit: u64,
+    /// Ratio of estimated transcript tokens to the context limit.
+    pub ratio: f32,
+    /// Whether the runtime recommends compaction before another provider step.
+    pub should_compact: bool,
+}
+
+/// Advisory repeated-tool-cycle snapshot exposed to loop strategies.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DoomLoopState {
+    /// Tool name involved in the repeated pattern.
+    pub tool_name: String,
+    /// Stable signature for the repeated invocation pattern.
+    pub signature: String,
+    /// Number of consecutive matching invocations observed.
+    pub repetitions: u32,
+    /// Whether steering has already been queued or applied for this signature.
+    pub handled: bool,
+}
+
+/// Recent PTY event delivered to a runtime through an explicit subscription.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DeliveredPtyEvent {
+    /// Source PTY event.
+    pub event: PtyEvent,
+    /// Subscription policy that delivered the event.
+    pub subscription: PtySubscription,
+}
+
 /// In-memory state for one reusable runtime session.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SessionState {
@@ -166,6 +203,42 @@ pub struct SessionState {
     pub iteration_count: u32,
     /// Canonical model-visible transcript.
     pub transcript: Vec<Message>,
+    /// Recent runtime-native operation outcomes visible to loop strategies.
+    #[serde(default, skip_serializing_if = "VecDeque::is_empty")]
+    pub recent_operations: VecDeque<RuntimeOperationResult>,
+    /// Required state-changing runtime actions queued for generic engine draining.
+    #[serde(skip)]
+    pub pending_runtime_actions: VecDeque<LoopDecision>,
+    /// Most recent provider subcall outcome, when any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_subcall: Option<SubcallResult>,
+    /// Most recent transcript rewrite outcome, when any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_transcript_rewrite: Option<TranscriptRewriteResult>,
+    /// Most recent transcript append outcome, when any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_transcript_append: Option<TranscriptAppendResult>,
+    /// Optional transcript-pressure advice computed from provider metadata.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_pressure: Option<ContextPressure>,
+    /// Optional repeated-tool-cycle advice computed from recent execution history.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub doom_loop: Option<DoomLoopState>,
+    /// PTYs currently known to this runtime through ownership or explicit subscription.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub ptys: BTreeMap<PtyId, PtySessionState>,
+    /// Explicit PTY event subscriptions owned by this runtime.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pty_subscriptions: Vec<PtySubscription>,
+    /// Recent PTY events delivered to this runtime.
+    #[serde(default, skip_serializing_if = "VecDeque::is_empty")]
+    pub recent_pty_events: VecDeque<DeliveredPtyEvent>,
+    /// PTY events waiting to be promoted into the transcript.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pending_promoted_pty_events: Vec<DeliveredPtyEvent>,
+    /// Most recent PTY capture outcome, when any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_pty_capture: Option<PtyCaptureResult>,
     /// Current runtime phase.
     pub phase: SessionPhase,
     /// Current externally visible boundary, when any.
@@ -215,6 +288,18 @@ impl SessionState {
             turn_index: 0,
             iteration_count: 0,
             transcript: Vec::new(),
+            recent_operations: VecDeque::new(),
+            pending_runtime_actions: VecDeque::new(),
+            last_subcall: None,
+            last_transcript_rewrite: None,
+            last_transcript_append: None,
+            context_pressure: None,
+            doom_loop: None,
+            ptys: BTreeMap::new(),
+            pty_subscriptions: Vec::new(),
+            recent_pty_events: VecDeque::new(),
+            pending_promoted_pty_events: Vec::new(),
+            last_pty_capture: None,
             phase: SessionPhase::Idle,
             boundary: Some(SessionBoundary::AwaitingInput),
             active_turn: false,

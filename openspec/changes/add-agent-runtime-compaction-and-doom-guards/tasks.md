@@ -1,0 +1,6 @@
+- [x] Add runtime config and session-state surfaces for compaction advice and doom-loop warnings
+- [x] Implement runtime-backed transcript compaction behind `CompactContext`
+- [x] Implement doom-loop detection with advisory state and optional hard-stop threshold
+- [x] Add a loop-visible local steering decision and update `agent-loops::SimpleLoop`
+- [x] Add tests covering compaction success/failure, doom-loop steering, and hard-stop behavior
+- [x] Document the runtime/loop design rule in `docs/architecture/`
