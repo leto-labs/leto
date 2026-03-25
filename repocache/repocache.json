@@ -101,6 +101,30 @@
     "enabled": true
   },
   {
+    "name": "ouroboros",
+    "url": "https://github.com/razzant/ouroboros",
+    "tag": "v6.2.0",
+    "searchPath": "ouroboros",
+    "notes": "Python self-modifying agent PoC. Original Colab/Telegram runtime with Git-backed self-editing, BIBLE.md constitution, background consciousness loop, persistent identity/scratchpad memory, task decomposition, multi-model review, and supervisor-managed workers. Study as a concrete prototype for agent self-rewrite and continuity, not as a finished distributed autonomy platform. README also points to a newer desktop successor under joi-lab/ouroboros-desktop.",
+    "enabled": true
+  },
+  {
+    "name": "ouroboros-desktop",
+    "url": "https://github.com/joi-lab/ouroboros-desktop",
+    "tag": "main",
+    "searchPath": "ouroboros",
+    "notes": "Desktop successor to the original Ouroboros runtime. Native app with PyWebView launcher, Starlette server, web UI, local-model support, dual-layer safety, and a stronger immutable-shell plus self-editable-core split. Study for the evolution from Telegram/Colab PoC toward a more durable sovereign runtime.",
+    "enabled": true
+  },
+  {
+    "name": "evoagentx",
+    "url": "https://github.com/EvoAgentX/EvoAgentX",
+    "tag": "v0.1.0",
+    "searchPath": "evoagentx",
+    "notes": "Python framework for building, evaluating, and evolving agentic workflows. Strong adjacent reference for workflow generation, automated evaluation, memory modules, tool-rich multi-agent pipelines, and explicit self-evolution algorithms. Useful as a concept cousin to Ouroboros rather than a direct lineage match.",
+    "enabled": true
+  },
+  {
     "name": "llama_cpp-rs",
     "url": "https://github.com/edgenai/llama_cpp-rs",
     "tag": "main",
@@ -360,6 +384,21 @@
     "tag": "v0.8.0",
     "searchPath": "src",
     "notes": "Memory-first TypeScript coding harness built on Letta agents. Use as a contrast point for persistent agent memory, long-lived agent identity across sessions, and the distinction between stateful agent architecture and loop-language power.",
+    "enabled": true
+  },
+  {
+    "name": "utoipa",
+    "url": "https://github.com/juhaku/utoipa",
+    "tag": "utoipa-5.4.0",
+    "notes": "Rust OpenAPI generation library. For axum integration, start with utoipa-axum/src plus examples/todo-axum/src and examples/simple-axum/src. Core schema/derive behavior lives in utoipa/src and utoipa-gen/src. Research for generated /doc on axum-based agent-server compat routes, especially handler annotations, schema derives, path/query/body typing, and how route inventory stays aligned with the generated spec.",
+    "enabled": true
+  },
+  {
+    "name": "aide",
+    "url": "https://github.com/tamasfe/aide",
+    "tag": "release-aide-0.16.0-alpha.3",
+    "searchPath": "crates/aide/src",
+    "notes": "Rust code-first API documentation library with Axum integration. Start with crates/aide/src/axum plus examples/example-axum/src for the concrete router/documentation flow; macros live in crates/aide-macros/src. Research ApiRouter/api_route ergonomics, schema extraction via schemars, operation metadata, and whether docs and route registration can share one source of truth for agent-server compat.",
     "enabled": true
   }
 ]
