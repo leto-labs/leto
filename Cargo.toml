@@ -1,6 +1,10 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/chat",
+    "crates/chat-slack",
+    "crates/chat-teams",
+    "crates/chat-telegram",
     "crates/atif",
     "crates/brain-types",
     "crates/provider",
@@ -88,6 +92,10 @@ tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
 
 # Internal
 atif = { path = "crates/atif" }
+chat = { path = "crates/chat" }
+chat-slack = { path = "crates/chat-slack" }
+chat-teams = { path = "crates/chat-teams" }
+chat-telegram = { path = "crates/chat-telegram" }
 brain-types = { path = "crates/brain-types" }
 provider = { path = "crates/provider" }
 agent-runtime = { path = "crates/agent-runtime" }

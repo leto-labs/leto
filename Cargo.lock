@@ -898,6 +898,53 @@ dependencies = [
 ]
 
 [[package]]
+name = "chat"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "futures",
+ "serde",
+ "thiserror 2.0.18",
+ "tokio",
+]
+
+[[package]]
+name = "chat-slack"
+version = "0.1.0"
+dependencies = [
+ "chat",
+ "chrono",
+ "futures",
+ "serde",
+ "tokio",
+ "tokio-stream",
+]
+
+[[package]]
+name = "chat-teams"
+version = "0.1.0"
+dependencies = [
+ "chat",
+ "chrono",
+ "futures",
+ "serde",
+ "tokio",
+ "tokio-stream",
+]
+
+[[package]]
+name = "chat-telegram"
+version = "0.1.0"
+dependencies = [
+ "chat",
+ "chrono",
+ "futures",
+ "serde",
+ "tokio",
+ "tokio-stream",
+]
+
+[[package]]
 name = "chrono"
 version = "0.4.44"
 source = "registry+https://github.com/rust-lang/crates.io-index"

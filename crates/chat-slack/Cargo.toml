@@ -1,0 +1,15 @@
+[package]
+name = "chat-slack"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+chat = { workspace = true }
+chrono = { workspace = true }
+futures = { workspace = true }
+serde = { workspace = true }
+tokio = { workspace = true, features = ["sync"] }
+tokio-stream = { workspace = true, features = ["sync"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
