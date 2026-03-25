@@ -340,12 +340,20 @@ This document builds on the higher-level competitor notes:
 
 And the concrete repocache sources for this pass:
 
+- Local `brain` / `agent-runtime` references:
+  - [`SimpleLoop`](../../../crates/agent-loops/src/simple.rs)
+  - [`Terminus2Loop`](../../../crates/brain-loops/src/terminus2.rs)
+  - [`agent-runtime` command surface](../../../crates/agent-runtime/src/command.rs)
+  - [`agent-runtime` loop decision surface](../../../crates/agent-runtime/src/loop_strategy.rs)
+  - [`agent-runtime` session state](../../../crates/agent-runtime/src/session.rs)
+  - [`agent-runtime` engine/tool bridge](../../../crates/agent-runtime/src/engine.rs)
 - Codex:
-  - [`codex-rs/protocol/src/models.rs`](../../../repocache/openai/codex/codex-rs/protocol/src/models.rs)
-  - [`codex-rs/core/src/codex.rs`](../../../repocache/openai/codex/codex-rs/core/src/codex.rs)
-  - [`codex-rs/core/src/codex_thread.rs`](../../../repocache/openai/codex/codex-rs/core/src/codex_thread.rs)
+  - [`codex-rs/core/src/agent/control.rs`](../../../repocache/openai/codex/codex-rs/core/src/agent/control.rs)
+  - [`codex-rs/core/src/session_prefix.rs`](../../../repocache/openai/codex/codex-rs/core/src/session_prefix.rs)
+  - [`codex-rs/app-server-protocol/src/protocol/thread_history.rs`](../../../repocache/openai/codex/codex-rs/app-server-protocol/src/protocol/thread_history.rs)
 - OpenCode:
   - [`packages/opencode/src/session/index.ts`](../../../repocache/anomalyco/opencode/packages/opencode/src/session/index.ts)
+  - [`packages/opencode/src/session/prompt.ts`](../../../repocache/anomalyco/opencode/packages/opencode/src/session/prompt.ts)
   - [`packages/opencode/src/tool/task.ts`](../../../repocache/anomalyco/opencode/packages/opencode/src/tool/task.ts)
 - OpenClaw:
   - [`docs/concepts/agent-loop.md`](../../../repocache/openclaw/openclaw/docs/concepts/agent-loop.md)
@@ -356,13 +364,50 @@ And the concrete repocache sources for this pass:
   - [`src/providers/mod.rs`](../../../repocache/JoasASantos/ironclaw/src/providers/mod.rs)
 - ZeroClaw:
   - [`src/agent/loop_.rs`](../../../repocache/zeroclaw-labs/zeroclaw/src/agent/loop_.rs)
-  - [`src/providers/mod.rs`](../../../repocache/zeroclaw-labs/zeroclaw/src/providers/mod.rs)
-  - [`src/tools/mod.rs`](../../../repocache/zeroclaw-labs/zeroclaw/src/tools/mod.rs)
+  - [`src/tools/delegate.rs`](../../../repocache/zeroclaw-labs/zeroclaw/src/tools/delegate.rs)
+  - [`docs/reference/api/config-reference.md`](../../../repocache/zeroclaw-labs/zeroclaw/docs/reference/api/config-reference.md)
   - [`src/channels/mod.rs`](../../../repocache/zeroclaw-labs/zeroclaw/src/channels/mod.rs)
+- Gastown:
+  - [`AGENTS.md`](../../../repocache/steveyegge/gastown/AGENTS.md)
+  - [`internal/cmd/nudge.go`](../../../repocache/steveyegge/gastown/internal/cmd/nudge.go)
 
 ## Cross-Competitor Comparison
 
-### 1. Codex
+Before comparing named systems, it helps to separate three buckets that often get conflated:
+
+| Bucket | Representative systems | What is really being compared |
+| --- | --- | --- |
+| Single-agent shell harness | `Terminus2Loop`, `TerminusKiraLoop` | One agent loop repeatedly driving a shell or terminal tool. |
+| Native subagent runtime | Codex, OpenCode, ZeroClaw delegate mode, current `agent-runtime` | A runtime/session substrate that can create or control child units of work with their own model/tool flow. |
+| Orchestration fabric above runtimes | Gastown, parts of IronClaw | Messaging, wake-up, queueing, routing, and coordination above any one session runtime. |
+
+That split is important for `brain` because "multi-agent" can mean at least three different things:
+
+- a single agent that is very good at driving a terminal
+- a session runtime that can spawn and control child runtimes
+- an external coordination plane that routes work and messages between otherwise separate sessions
+
+### 1. Terminus-style single-agent shell control
+
+Key local source evidence:
+
+- [`Terminus2Loop`](../../../crates/brain-loops/src/terminus2.rs)
+- [`TerminusKiraLoop`](../../../crates/brain-loops/src/terminus_kira.rs)
+
+What matters architecturally:
+
+- Terminus is still one agent loop, even when it looks operationally sophisticated.
+- The autonomy comes from a repeated provider -> parse -> `terminal_session` / shell -> observe cycle.
+- The runtime surface is centered on keystrokes, terminal snapshots, shell execution, and explicit `task_complete` confirmation.
+- There is no first-class child runtime identity, no parent/child registry, no mailbox, and no background delegated worker lifecycle.
+
+Most important signal for `brain`:
+
+- a tmux/terminal harness can feel very agentic without having any native subagent substrate
+- if `brain` only grows stronger terminal tooling, it will still be qualitatively different from Codex/OpenCode-style subagents
+- this is the right baseline for comparison with "one smart terminal worker", not with a real multi-runtime control plane
+
+### 2. Codex
 
 Higher-level summary:
 
@@ -370,28 +415,32 @@ Higher-level summary:
 
 Key source evidence:
 
-- [`codex.rs`](../../../repocache/openai/codex/codex-rs/core/src/codex.rs)
-- [`codex_thread.rs`](../../../repocache/openai/codex/codex-rs/core/src/codex_thread.rs)
-- [`models.rs`](../../../repocache/openai/codex/codex-rs/protocol/src/models.rs)
+- [`agent/control.rs`](../../../repocache/openai/codex/codex-rs/core/src/agent/control.rs)
+- [`session_prefix.rs`](../../../repocache/openai/codex/codex-rs/core/src/session_prefix.rs)
+- [`thread_history.rs`](../../../repocache/openai/codex/codex-rs/app-server-protocol/src/protocol/thread_history.rs)
 
 What matters architecturally:
 
-- Codex is not organized around a small loop trait. It is organized around a session runtime.
-- The runtime owns structured content items, approvals, compaction, rollout/history state, realtime conversation, subagents, and turn lifecycle.
-- `CodexThread` exposes a bidirectional session conduit:
-  - `submit(...)`
-  - `steer_input(...)`
-  - `next_event(...)`
-- The protocol models structured input items and content parts rather than a flat string transcript.
+- Codex is not organized around a small loop trait. It is organized around a session/thread runtime.
+- `AgentControl` is explicitly a control-plane handle for multi-agent operations shared across a user session.
+- Child runtimes are real thread/session objects with stable ids and explicit operations:
+  - `spawn_agent(...)`
+  - `resume_agent_from_rollout(...)`
+  - `send_input(...)`
+  - `interrupt_agent(...)`
+  - `shutdown_agent(...)`
+  - `subscribe_status(...)`
+- Parent sessions get model-visible subagent notifications injected when watchers observe child completion.
+- Parent model context can also carry a rendered `<subagents>` block listing current child agents.
+- The protocol/history layer knows about collab spawn, interaction, wait, close, and resume operations as first-class history items.
 
 Most important signal for `brain`:
 
-- steering and interruption are not bolted onto the loop as ad hoc cancellation
-- they are first-class session operations
+- steering, interruption, waiting, and redirection are not bolted onto the loop as ad hoc cancellation
+- Codex already treats "child agent lifecycle" as session/runtime state, not merely as tool output
+- this is the strongest reference for native subagents as a registry + control API + model-visible status surface
 
-This is the strongest evidence that the real center of the architecture is an evented thread/session engine, not just a `run()` call.
-
-### 2. OpenCode
+### 3. OpenCode
 
 Higher-level summary:
 
@@ -400,22 +449,24 @@ Higher-level summary:
 Key source evidence:
 
 - [`session/index.ts`](../../../repocache/anomalyco/opencode/packages/opencode/src/session/index.ts)
+- [`session/prompt.ts`](../../../repocache/anomalyco/opencode/packages/opencode/src/session/prompt.ts)
 - [`tool/task.ts`](../../../repocache/anomalyco/opencode/packages/opencode/src/tool/task.ts)
 
 What matters architecturally:
 
-- sessions are persistent first-class records with parent/child relationships, forking, permissions, summaries, and workspace linkage
-- subagents are implemented as child sessions, not just recursive prompt calls
-- the `task` tool resumes or creates a child session, selects an agent, and prompts through that session runtime
+- Sessions are persistent first-class records with parent/child relationships, forking, permissions, summaries, and workspace linkage.
+- Subagents are implemented as child sessions, not just recursive prompt calls.
+- The `task` tool resumes or creates a child session, selects an agent, and prompts through that session runtime.
+- If the chosen subagent definition does not specify a model, OpenCode falls back to the spawning assistant message's `providerID` and `modelID`.
+- The default model-facing surface is still mostly "spawn or resume a child session, run the delegated task, return `<task_result>`."
 
 Most important signal for `brain`:
 
 - "subagent support" is really a session-management feature
-- delegation belongs closer to the engine/session layer than to a one-off tool helper
+- config/model inheritance defaults matter in practice and should be deterministic
+- OpenCode is native enough to have child sessions, but the default UX is still more final-result-oriented than mailbox-oriented
 
-OpenCode is one of the clearest examples that an "agent" in a product runtime is often a long-lived session object with policies, not merely a function around a provider.
-
-### 3. OpenClaw
+### 4. OpenClaw
 
 Higher-level summary:
 
@@ -428,19 +479,17 @@ Key source evidence:
 
 What matters architecturally:
 
-- OpenClaw is gateway-first and multi-channel by design
-- its documented loop is serialized per session
-- queue modes like collect, steer, and follow-up exist at the outer runtime layer
-- the gateway bridges events from an embedded inner runtime into lifecycle, assistant, and tool streams
+- OpenClaw is gateway-first and multi-channel by design.
+- Its documented loop is serialized per session.
+- Queue modes like collect, steer, and follow-up exist at the outer runtime layer.
+- The gateway bridges events from an embedded inner runtime into lifecycle, assistant, and tool streams.
 
 Most important signal for `brain`:
 
 - multiple input channels and deferred steering are runtime concerns, not prompt tricks
 - when several user/control-plane inputs can target the same session, an event-channel model is more natural than a single synchronous `run()`
 
-OpenClaw is especially useful for thinking about always-on sessions, external channels, and "authoritative session lane" execution.
-
-### 4. ZeroClaw
+### 5. ZeroClaw
 
 Higher-level summary:
 
@@ -449,25 +498,24 @@ Higher-level summary:
 Key source evidence:
 
 - [`agent/loop_.rs`](../../../repocache/zeroclaw-labs/zeroclaw/src/agent/loop_.rs)
-- [`providers/mod.rs`](../../../repocache/zeroclaw-labs/zeroclaw/src/providers/mod.rs)
-- [`tools/mod.rs`](../../../repocache/zeroclaw-labs/zeroclaw/src/tools/mod.rs)
-- [`channels/mod.rs`](../../../repocache/zeroclaw-labs/zeroclaw/src/channels/mod.rs)
+- [`tools/delegate.rs`](../../../repocache/zeroclaw-labs/zeroclaw/src/tools/delegate.rs)
+- [`config-reference.md`](../../../repocache/zeroclaw-labs/zeroclaw/docs/reference/api/config-reference.md)
 
 What matters architecturally:
 
-- ZeroClaw is the closest Rust implementation to the direction `brain` is exploring
-- it has real provider/tool/channel subsystems
-- it has a genuine iterative tool loop
-- it already treats channels as first-class, not just UI shells
+- ZeroClaw is the closest Rust implementation to the direction `brain` is exploring on providers/tools/channels.
+- It has a real iterative tool loop and treats channels as first-class.
+- Delegation exists as a `delegate` tool backed by named sub-agent configs.
+- Those sub-agents can be single-prompt by default or "agentic" with their own filtered tool-call loop and recursion-depth limits.
+- The current implementation still reads more like delegated tool execution than a live child-runtime registry with durable bidirectional messaging.
 
 Most important signal for `brain`:
 
 - a shared engine layer below policy-specific loops is viable
-- provider capabilities, tool routing, channels, and approvals want to exist below the "agent persona" level
+- delegate-tool ergonomics are useful, but a delegate tool alone is not the same as a first-class child-runtime graph
+- ZeroClaw is a good comparison point for "sub-agent profiles + delegate tool", not for a registry with direct-vs-mail messaging
 
-ZeroClaw is the strongest external evidence that our trait-oriented instincts are directionally right, but also a warning that the central loop can still become a catch-all if it is not separated from runtime mechanics.
-
-### 5. IronClaw
+### 6. IronClaw
 
 Higher-level summary:
 
@@ -480,35 +528,317 @@ Key source evidence:
 
 What matters architecturally:
 
-- IronClaw explicitly models agent roles, coordination patterns, and shared context
-- the provider trait is real and explicit
-- the multi-agent orchestration vocabulary is stronger than the loop/runtime wiring
+- IronClaw explicitly models agent roles, coordination patterns, and shared context.
+- The provider trait is real and explicit.
+- The collaboration vocabulary is stronger on roles/patterns/shared artifacts than on per-child runtime lifecycle controls.
+- Shared context carries inter-agent messages and artifacts across sequential, parallel, debate, hierarchical, and pipeline patterns.
 
 Most important signal for `brain`:
 
 - "agent" can live above the single-turn loop as a coordination/orchestration concept
 - roles, collaboration patterns, and shared artifacts are not the same abstraction as provider/tool execution
+- IronClaw is closer to a built-in orchestration framework than to a fine-grained child-runtime control plane
 
-IronClaw is a useful reminder that a future Brain architecture may need both:
+### 7. Gastown
 
-- a low-level session/runtime abstraction
-- a higher-level orchestration abstraction
+Key source evidence:
+
+- [`AGENTS.md`](../../../repocache/steveyegge/gastown/AGENTS.md)
+- [`internal/cmd/nudge.go`](../../../repocache/steveyegge/gastown/internal/cmd/nudge.go)
+
+What matters architecturally:
+
+- Gastown is not primarily a single runtime with native child sessions. It is a multi-agent environment and coordination fabric.
+- It separates immediate session delivery (`gt nudge`) from persistent inbox delivery (`gt mail`).
+- `gt nudge` has several delivery modes, including queueing and wait-for-idle delivery before injection into the target session.
+- `gt mail` is durable, queryable, and restart-safe. Agents explicitly read inbox state.
+- The system is comfortable with wake-up, routing, durability, addressing, and daemon/session management as first-class concerns.
+
+Most important signal for `brain`:
+
+- Gastown is the strongest local reference for the distinction between direct notification and pull-based mail
+- it validates the "DM vs mailbox" split we are adding to `agent-runtime`
+- it is best understood as orchestration infra above the runtime, not as a substitute for runtime-native child lifecycle
+
+### 8. Current `agent-runtime`
+
+Key local source evidence:
+
+- [`command.rs`](../../../crates/agent-runtime/src/command.rs)
+- [`loop_strategy.rs`](../../../crates/agent-runtime/src/loop_strategy.rs)
+- [`session.rs`](../../../crates/agent-runtime/src/session.rs)
+- [`engine.rs`](../../../crates/agent-runtime/src/engine.rs)
+- [`SimpleLoop`](../../../crates/agent-loops/src/simple.rs)
+
+What matters architecturally:
+
+- The current design has moved decisively away from "subagent as an ad hoc tool helper" and toward a runtime-native registry/control model.
+- Parent and child runtimes have stable ids, typed spawn/wait/message operations, child snapshots, explicit wait policy, and safe-boundary delivery rules.
+- `spawn_agent`, `message_agent`, `read_agent_mail`, `interrupt_agent`, `list_agents`, and `wait_agent` are model-visible native tools, but they are facades over runtime actions.
+- Cross-agent messaging distinguishes:
+  - direct messages surfaced at the next safe boundary
+  - mail that stays in the mailbox until pulled with filters
+- Child reports and direct messages are promoted into model-visible transcript messages at safe boundaries.
+- Today those injected wrappers use `MessageRole::Developer`, which is a reasonable choice when the content is runtime-authored control-plane context rather than literal user intent.
+
+Most important signal for `brain`:
+
+- our current runtime is no longer in the "single loop with nicer tools" bucket
+- it is now much closer to Codex/OpenCode on the core direction
+- the biggest remaining gap relative to systems like Gastown is broader orchestration fabric and routing policy above the runtime
 
 ## Feature Matrix
 
-The main recurring features across these systems are:
+There are really two different matrices worth tracking:
 
-| Capability | Codex | OpenCode | OpenClaw | ZeroClaw | IronClaw | Implication for `brain` |
+1. a broad engine/runtime matrix
+2. a detailed subagent capability matrix
+
+### Engine / Runtime Matrix
+
+| Capability | Terminus-style shell loop | Codex | OpenCode | OpenClaw | ZeroClaw | IronClaw | Gastown | Current `agent-runtime` | Implication for `brain` |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Iterative tool loop | Yes | Yes | Yes | Yes, via embedded runtime | Yes | Partly | No, not the core abstraction | Yes | Core loop remains necessary |
+| Persistent session/thread | Weak | Strong | Strong | Strong | Moderate | Weak | Strong, but at orchestration level | Strong | Session should be first-class |
+| Native child runtime identity | No | Strong | Strong | Moderate | Moderate | Weak | No, external sessions | Strong | Child runtimes should not just be recursive helper calls |
+| Steering/interruption | Weak | Strong | Moderate | Strong | Moderate | Weak | Strong, via external commands | Strong | Evented session control matters |
+| Multiple input/channels | No | Moderate | Moderate | Strong | Strong | Moderate | Strong | Moderate | Channel/transport concerns do not belong only in prompts |
+| Approval/policy integration | Weak | Strong | Strong | Strong | Strong | Strong | Moderate | Strong | Tool execution should sit near policy |
+| Compaction/context management | Loop-local | Strong | Strong | Strong | Strong | Weak | External/session recovery | Strong | Context management belongs below strategy |
+
+### Detailed Subagent Capability Matrix
+
+This is the matrix that matters most for the current `agent-runtime` discussion. It focuses on the features that most clearly distinguish:
+
+- single-agent shell loops
+- native child-runtime systems
+- orchestration fabrics
+
+| System | Spawn multiple subagents | Background children | Parent -> child re-input / steer | Cross-agent direct messaging | Pull mailbox / inbox read | Wait semantics | Can wait, then release hold and keep child running | Child reports / model-visible status | Discovery / listing | Notes |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Terminus-style shell loop | No | No | n/a | No | No | No child wait concept | n/a | terminal state only | n/a | Strong single-worker terminal autonomy, not multi-agent runtime |
+| Codex | Yes | Yes | Yes via `send_input`, plus interrupt/resume/shutdown | Partial; strong control-plane interaction, less explicit mail model | Weak compared to a real mail system | Strong explicit collab wait/history items | Likely yes in practice because control and waiting are separate collab operations, but less visibly productized than in Gastown-style mail | Strong: subagent notifications and environment-context listing | Strong | Best reference for native runtime subagents with control-plane APIs |
+| OpenCode | Yes via child sessions | Moderate | Limited; mostly resume or re-prompt child session | Weak | No general mailbox surface | Mostly tied to task execution / resume flow | Weak-to-moderate | Final result strong, incremental child messaging weaker | Strong session graph | Native child sessions, but model UX remains task-tool-centric |
+| ZeroClaw | Moderate via named delegate configs | Weak-to-moderate | Limited; delegate again rather than fully control a live child | Weak | No | Mostly tool-call wait semantics | Weak | Returned delegate output, not rich child lifecycle | Configured agent names | Better delegate tool than runtime-native child graph |
+| IronClaw | Yes at orchestration-pattern level | Moderate | Pattern-dependent | Shared-context messages rather than explicit DM/mail split | Shared context, not inbox/mail | Pattern-dependent | Pattern-dependent | Shared artifacts/messages, not a specific child-report surface | Strong at role/pattern level | Better at orchestration patterns than child-runtime control |
+| Gastown | Yes across sessions | Yes | Yes via external commands like `gt nudge` | Strong | Strong | External wake/queue semantics, not a child wait API inside one runtime | Yes: queued or timed nudges can effectively release immediate hold while work continues | External to transcript unless agent reads/responds | Strong via addresses and inboxes | Best reference for orchestration-level direct vs mail split |
+| Current `agent-runtime` | Yes | Yes by default (`Background`) | Yes via `SendAgentInput` / `message_agent` and interrupt/pause/resume actions | Strong: `Direct` messages routed by registry id | Strong: `Mail` plus `read_agent_mail` filters | Strong `WaitRequest` with timeout policy | Strong: default timeout releases hold and leaves child running; optional interrupt on timeout | Strong: child reports and direct messages injected at safe boundaries | Conservative by default (`list_agents` -> direct children), broader routing by known id | This is now a real child-runtime control plane, not just a nicer tool loop |
+
+### Specific capability observations
+
+#### Ability to spawn multiple subagents
+
+- Codex, OpenCode, IronClaw, Gastown, and the current `agent-runtime` all clearly support multiple active child/peer units rather than a single `active_child` slot.
+- Terminus-style loops do not; they remain one active agent driving tools.
+- ZeroClaw supports multiple configured delegate profiles, but its core surface still behaves more like repeated delegated calls than a durable set of live child runtimes.
+
+#### Backgrounding
+
+- Terminus has no real background child concept.
+- OpenCode can leave child sessions around, but its primary UX is still "run delegated task and return result."
+- Gastown is strong here because sessions and mail live outside any one synchronous turn.
+- The current `agent-runtime` is explicitly designed for background children as the default spawn posture, which is a major architectural shift from single-loop delegation.
+
+#### Cross-agent communication
+
+- Gastown is the clearest reference for separating immediate notify from durable inbox.
+- Codex has strong parent/child control-plane communication and model-visible notifications, but less of an explicit durable mailbox abstraction.
+- OpenCode is still more result-oriented than message-oriented.
+- The current `agent-runtime` now sits in an interesting middle position:
+  - more native runtime control than Gastown
+  - more explicit direct-vs-mail messaging than Codex/OpenCode
+  - still missing some of the broader orchestration ergonomics of Gastown
+
+#### Waiting, then backgrounding later
+
+- This is one of the most important differentiators because many systems blur "spawn" and "block."
+- In Terminus there is nothing comparable because there is no child runtime.
+- In many delegate-tool designs, waiting is implicit in the tool call, so "release hold and let it continue" is awkward or unsupported.
+- Gastown achieves a similar effect externally through queueing, nudging, and mail.
+- The current `agent-runtime` now treats this explicitly:
+  - spawn defaults to background
+  - waiting is a separate policy object
+  - timeout can release the hold while leaving the child alive
+  - timeout can optionally interrupt instead
+
+This is one of the strongest arguments that the current design has moved beyond a tool helper into a real runtime substrate.
+
+### Full Scorecard
+
+The capability matrix above says what each system can do. This scorecard is a more opinionated evaluation of how useful each system is for running a real team of agents cleanly.
+
+Scoring dimensions:
+
+- **Power**: how much multi-agent behavior the system can express
+- **Flexibility**: how easily it supports different team shapes without redesign
+- **Implementation**: how concrete/coherent the feature looks in source, not just in marketing or docs
+- **Stability**: how well the architecture protects against chaos via explicit lifecycle, routing, waiting, or delivery semantics
+- **Team fit**: how suitable it is for a true long-running team of agents rather than a single high-agency worker
+
+| System | Power | Flexibility | Implementation | Stability | Team fit | Notes |
 | --- | --- | --- | --- | --- | --- | --- |
-| Iterative tool loop | Yes | Yes | Yes, via embedded runtime | Yes | Partly | Core loop remains necessary |
-| Structured content items | Yes | Yes | Yes | Yes | Yes | Plain `String` messages are too weak long-term |
-| Persistent session/thread | Strong | Strong | Strong | Moderate | Weak | Session should be first-class |
-| Subagents/delegation | Strong | Strong | Moderate | Moderate | Strong | Delegation is engine-level, not just loop-level |
-| Multimodal input | Yes | Yes | Yes | Yes | Yes | Provider/session model should support content parts |
-| Multiple input channels | Moderate | Moderate | Strong | Strong | Moderate | Transport/channel may need to be first-class |
-| Steering/interruption | Strong | Moderate | Strong | Moderate | Weak | Event-driven session control matters |
-| Approval/policy integration | Strong | Strong | Strong | Strong | Strong | Tool execution should sit near policy |
-| Compaction as loop/runtime concern | Strong | Strong | Strong | Strong | Weak | Context management belongs below strategy |
+| Terminus-style shell loop | `C` | `D+` | `B` | `C+` | `D` | Strong single-worker autonomy; weak as team infrastructure because there is no child-runtime substrate. |
+| Codex | `A` | `A-` | `A-` | `A-` | `A` | Best native child-runtime reference in this set. Real control-plane operations, status tracking, and model-visible lifecycle. |
+| OpenCode | `B+` | `B+` | `B+` | `B` | `B+` | Strong child-session model, but the default UX still leans toward task/result more than active multi-agent coordination. |
+| OpenClaw | `B` | `B+` | `B` | `B+` | `B` | Strong runtime/channel thinking, but less clearly centered on true subagent team control. |
+| ZeroClaw | `B` | `B` | `B` | `B-` | `B-` | Useful delegate-tool model, but weaker on durable child-runtime control and communication. |
+| IronClaw | `B+` | `A-` | `B-` | `B` | `B+` | Strong orchestration vocabulary and role patterns; weaker on precise child-runtime lifecycle semantics. |
+| Gastown | `A-` | `A` | `B+` | `A-` | `A` | Best orchestration/message fabric in the set. Especially strong on wake-up, queueing, durable mail, and operational cleanliness. |
+| Current `agent-runtime` | `A-` | `A-` | `B+` | `A-` | `A-` | Architecturally strong: typed runtime actions, background children, direct vs mail, explicit wait/release semantics. Lower maturity than Codex, but the design direction is very good. |
+
+### Codex vs Gastown Scorecard
+
+These are the two most important reference points because they represent two different kinds of strength.
+
+| Dimension | Codex | Gastown | Which is stronger |
+| --- | --- | --- | --- |
+| Native child-runtime control | Excellent | Weak | Codex |
+| Spawn/resume/interrupt/wait semantics | Excellent | Moderate, but externalized | Codex |
+| Direct addressing and wake-up | Good | Excellent | Gastown |
+| Durable mailbox / pull model | Moderate | Excellent | Gastown |
+| Safety against message loss | Good | Excellent | Gastown |
+| Model-visible subagent state | Excellent | Weak-to-moderate | Codex |
+| Team-wide operational cleanliness | Good | Excellent | Gastown |
+| Fit for embedding in one runtime | Excellent | Weak | Codex |
+| Fit for coordinating many sessions/processes | Moderate | Excellent | Gastown |
+
+### What This Means for `brain`
+
+If the goal is a true team of agents that stays clean and stable under load, the right move is not to choose Codex *or* Gastown. It is to borrow the right layer from each.
+
+What to take from Codex:
+
+- stable child runtime identity
+- native control-plane actions for spawn, redirect, interrupt, pause/resume, status, and wait
+- child lifecycle as first-class runtime state
+- safe model-visible child status and child-result reporting
+- subagent discovery/listing in runtime context
+
+What to take from Gastown:
+
+- explicit distinction between immediate notify and durable mail
+- wake-up and wait-idle delivery semantics
+- delivery modes that avoid losing messages when agents are busy
+- stronger ideas around addressing, queueing, and asynchronous coordination
+- operational assumption that not every target is currently idle or even attached
+
+What not to copy blindly from Codex:
+
+- treating mailbox concerns as secondary forever
+- assuming the main missing piece is only spawn/control; team systems also need durable routing and pull-based inboxes
+
+What not to copy blindly from Gastown:
+
+- pushing too much coordination outside the runtime too early
+- relying on external session/process orchestration before the runtime-level child model is solid
+
+Recommended synthesis for `brain`:
+
+- keep the current native child-runtime model
+- keep direct-vs-mail as a first-class split
+- strengthen mail durability, addressing, and read/ack semantics in the direction Gastown suggests
+- strengthen status subscription, lifecycle observability, and UI/model-visible child state in the direction Codex suggests
+- preserve non-destructive wait semantics so "wait now, release later, child keeps running" remains a core primitive rather than an accident
+
+### Future Runtime Improvements
+
+These are intentionally framed as **runtime / SDK / API** improvements, not product CLI features. The comparison in this document is primarily useful insofar as it sharpens what should exist in the core `BrainRuntime` surface and its underlying engine.
+
+#### 1. Add durability and recovery to the runtime substrate
+
+The current `agent-runtime` design is architecturally strong, but it is still storeless and in-memory-first. For a true team runtime, the next maturity step is:
+
+- durable child snapshot state
+- durable mailbox state
+- durable active wait state
+- restart/recovery behavior for background children
+- explicit orphan/rejoin handling when the host process restarts
+
+This is the biggest gap between "good runtime model" and "production-grade team runtime."
+
+#### 2. Strengthen runtime-level routing and authorization policy
+
+The registry can already route by runtime id, but a mature team runtime should make policy first-class:
+
+- who may message whom
+- who may interrupt whom
+- who may discover whom
+- whether sibling direct messaging is allowed
+- whether some runtimes are control-only, review-only, or read-only
+- whether message classes are informational vs control-bearing
+
+This belongs in the runtime/API layer, not in prompt conventions.
+
+#### 3. Deepen mailbox semantics without collapsing them into transcript input
+
+The current direct-vs-mail split is good. The next step is to make the mailbox model more complete:
+
+- explicit ack / mark-read / claim semantics
+- message priority
+- richer threading/reply linkage
+- better pull/query filters
+- stronger guarantees around non-lossy delivery and retry behavior
+
+Gastown is a useful reference here, but the goal is a runtime-native mailbox API, not a CLI mail clone.
+
+#### 4. Add richer wait/join semantics to the runtime API
+
+`WaitRequest` is already a strong primitive. The future runtime surface should probably grow beyond simple blocking on a list of ids:
+
+- wait for any
+- wait for all
+- wait for quorum
+- wait until timeout then downgrade to background
+- wait groups / join handles
+- dependency-aware waiting
+
+This keeps "waiting but then backgrounding" as a first-class runtime behavior rather than an implementation accident.
+
+#### 5. Improve addressability without weakening identity
+
+Stable runtime ids should remain canonical, but the runtime surface will be easier to use if it also supports:
+
+- labels
+- roles
+- tags
+- parent-relative aliases
+- filtered agent listing and lookup
+
+This should be additive over canonical ids, not a replacement for them.
+
+#### 6. Add higher-level orchestration helpers above the core primitives
+
+The current runtime has good low-level actions. A future layer can make common team patterns easier without weakening the substrate:
+
+- fan-out / collect helpers
+- handoff helpers
+- escalation/review helpers
+- assignment helpers
+- merge/join helpers
+
+These should be built *on top of* the runtime API, not by skipping the runtime API.
+
+#### 7. Improve model-visible child/report representation
+
+The current `MessageRole::Developer` wrappers are defensible, but they are still wrapper-based. A future runtime/API iteration should consider:
+
+- first-class structured child-report content
+- first-class structured agent-message content
+- clearer provenance fields
+- safer parsing for downstream consumers and tools
+
+This is lower priority than durability and policy, but it is part of runtime maturity.
+
+#### 8. Preserve the current architectural direction
+
+The most important recommendation is negative: do **not** regress back toward:
+
+- subagents as only one-shot tool helpers
+- recursive parent-owned child objects
+- implicit blocking spawn semantics
+- transcript-only messaging with no mailbox distinction
+
+The current direction is already much closer to the right runtime model. The work ahead is mostly about hardening and extending it, not replacing it.
 
 ## What an "Agent" Seems to Be in Practice
 
