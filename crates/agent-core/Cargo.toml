@@ -1,0 +1,25 @@
+[package]
+name = "agent-core"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+agent-loops = { workspace = true }
+agent-tools = { workspace = true }
+agent-runtime = { workspace = true }
+agent-store = { workspace = true }
+atif = { workspace = true }
+futures = { workspace = true }
+provider = { workspace = true }
+provider-openai = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["sync", "rt", "time"] }
+tokio-stream = { workspace = true, features = ["sync"] }
+tokio-util = { workspace = true }
+
+[dev-dependencies]
+async-stream = { workspace = true }
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time"] }

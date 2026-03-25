@@ -12,6 +12,9 @@ pub struct ToolDefinition {
     pub description: Option<String>,
     /// JSON Schema describing the tool's input payload.
     pub input_schema: serde_json::Value,
+    /// Optional JSON Schema describing the tool's output payload.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_schema: Option<serde_json::Value>,
 }
 
 impl ToolDefinition {
@@ -26,7 +29,29 @@ impl ToolDefinition {
             name: name.into(),
             description: Some(description.into()),
             input_schema,
+            output_schema: None,
         }
+    }
+
+    /// Adds an output schema to the tool definition.
+    pub fn with_output_schema(mut self, output_schema: serde_json::Value) -> Self {
+        self.output_schema = Some(output_schema);
+        self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ToolDefinition;
+
+    #[test]
+    fn serializes_optional_output_schema() {
+        let definition =
+            ToolDefinition::new("echo", "Echo text", serde_json::json!({ "type": "object" }))
+                .with_output_schema(serde_json::json!({ "type": "string" }));
+
+        let value = serde_json::to_value(&definition).expect("serialize tool definition");
+        assert_eq!(value["output_schema"]["type"], "string");
     }
 }
 

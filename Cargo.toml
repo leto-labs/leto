@@ -10,6 +10,9 @@ members = [
     "crates/provider",
     "crates/agent-runtime",
     "crates/agent-loops",
+    "crates/agent-tools",
+    "crates/agent-store",
+    "crates/agent-core",
     "crates/provider-anthropic",
     "crates/provider-llamacpp",
     "crates/provider-mistralrs",
@@ -42,6 +45,7 @@ agent-client-protocol = "0.10.2"
 # Serialization
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+schemars = "1"
 image = "0.25"
 
 # IDs
@@ -100,6 +104,9 @@ brain-types = { path = "crates/brain-types" }
 provider = { path = "crates/provider" }
 agent-runtime = { path = "crates/agent-runtime" }
 agent-loops = { path = "crates/agent-loops" }
+agent-tools = { path = "crates/agent-tools" }
+agent-store = { path = "crates/agent-store" }
+agent-core = { path = "crates/agent-core" }
 provider-anthropic = { path = "crates/provider-anthropic" }
 provider-llamacpp = { path = "crates/provider-llamacpp" }
 provider-mistralrs = { path = "crates/provider-mistralrs" }

@@ -50,6 +50,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "agent-core"
+version = "0.1.0"
+dependencies = [
+ "agent-loops",
+ "agent-runtime",
+ "agent-store",
+ "agent-tools",
+ "async-stream",
+ "atif",
+ "futures",
+ "provider",
+ "provider-openai",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-stream",
+ "tokio-util",
+]
+
+[[package]]
 name = "agent-loops"
 version = "0.1.0"
 dependencies = [
@@ -80,6 +102,42 @@ dependencies = [
  "tokio-util",
  "ulid",
  "vt100",
+]
+
+[[package]]
+name = "agent-store"
+version = "0.1.0"
+dependencies = [
+ "agent-runtime",
+ "atif",
+ "chrono",
+ "futures",
+ "provider",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-stream",
+ "ulid",
+]
+
+[[package]]
+name = "agent-tools"
+version = "0.1.0"
+dependencies = [
+ "agent-runtime",
+ "futures",
+ "glob",
+ "provider",
+ "regex",
+ "schemars 1.2.1",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "walkdir",
 ]
 
 [[package]]

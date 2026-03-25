@@ -1,0 +1,12 @@
+- [x] Add `agent-store` with projects, sessions, messages, credentials, and trajectories.
+- [x] Reuse `provider::Message` and `atif` types rather than duplicating schemas.
+- [x] Add `InMemoryStore` and `FileStore` implementations with tests.
+- [x] Add `agent-core` with builder-based assembly, default local wiring, turn orchestration, and cancellation.
+- [x] Add `agent-tools` with typed request/response contracts, native local drivers, and a `ToolExecutor` registry.
+- [x] Extend shared provider tool definitions with optional `output_schema`.
+- [x] Use direct `schemars`-generated schemas and doc-comment descriptions for v1 tool definitions.
+- [x] Add tests covering transcript persistence, provider discovery, cancellation, and trajectory roundtrips.
+- [x] Add tests covering typed schema generation and default tool execution without legacy bridging.
+- [x] Add `GREsau/schemars` to `repocache` for future source-first reference.
+- [x] Validate the OpenSpec change and run the workspace test suite.
+  Note: `cargo test --workspace` currently stalls in the pre-existing `smoke_openrouter` provider smoke test, so verification also included `cargo test --workspace -- --skip smoke_openrouter`.

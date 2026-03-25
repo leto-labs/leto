@@ -677,6 +677,24 @@ impl RuntimeRegistryInner {
             .insert(handle.runtime_id, handle);
     }
 
+    fn unregister_handle(&self, runtime_id: RuntimeId) {
+        let mut state = self.state.lock().expect("runtime registry poisoned");
+        state.handles.remove(&runtime_id);
+        if let Some(parent_ref) = state.child_to_parent.remove(&runtime_id)
+            && let Some(children) = state
+                .parent_to_children
+                .get_mut(&parent_ref.parent_runtime_id)
+        {
+            children.remove(&runtime_id);
+            if children.is_empty() {
+                state
+                    .parent_to_children
+                    .remove(&parent_ref.parent_runtime_id);
+            }
+        }
+        state.parent_to_children.remove(&runtime_id);
+    }
+
     fn profile(&self, name: Option<&str>) -> Result<RuntimeProfile, RuntimeError> {
         let state = self.state.lock().expect("runtime registry poisoned");
         let key = name.unwrap_or("default");
@@ -758,6 +776,8 @@ impl EngineRuntime {
             .await;
 
         while let Some(command) = self.command_rx.recv().await {
+            let should_shutdown =
+                matches!(command, EngineCommand::External(SessionCommand::Shutdown));
             let result = match command {
                 EngineCommand::External(command) => self.handle_external_command(command).await,
                 EngineCommand::ProviderFinished(result) => {
@@ -785,7 +805,13 @@ impl EngineRuntime {
                     recoverable: error.recoverable(),
                 });
             }
+
+            if should_shutdown {
+                break;
+            }
         }
+
+        self.registry.unregister_handle(self.runtime_id);
     }
 
     async fn handle_external_command(
@@ -834,6 +860,12 @@ impl EngineRuntime {
                     self.handle_pty_command(command).await?;
                 }
                 self.drive().await
+            }
+            SessionCommand::Shutdown => {
+                if let Some(cancel) = self.active_provider_cancel.take() {
+                    cancel.cancel();
+                }
+                Ok(())
             }
         }
     }

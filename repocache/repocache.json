@@ -244,6 +244,13 @@
     "enabled": true
   },
   {
+    "name": "schemars",
+    "url": "https://github.com/GREsau/schemars",
+    "tag": "main",
+    "notes": "Rust JSON Schema generation crate. Use for derive behavior, doc-comment-to-description/title mapping, schema attributes, and serde interaction when generating tool request/response schemas for agent-tools.",
+    "enabled": true
+  },
+  {
     "name": "models.dev",
     "url": "https://github.com/anomalyco/models.dev",
     "tag": "dev",

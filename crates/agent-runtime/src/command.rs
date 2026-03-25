@@ -890,6 +890,8 @@ pub enum SessionCommand {
     Agent(AgentCommand),
     /// Submit PTY-oriented work such as opening, executing, or subscribing.
     Pty(PtyCommand),
+    /// Shut down the in-memory runtime engine and stop processing commands.
+    Shutdown,
 }
 
 #[cfg(test)]
