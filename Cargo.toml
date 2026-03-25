@@ -13,6 +13,8 @@ members = [
     "crates/agent-tools",
     "crates/agent-store",
     "crates/agent-core",
+    "crates/agent-core-remote",
+    "crates/agent-server",
     "crates/provider-anthropic",
     "crates/provider-llamacpp",
     "crates/provider-mistralrs",
@@ -62,6 +64,7 @@ thiserror = "2"
 anyhow = "1"
 
 # HTTP / SSE
+axum = "0.8"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream"] }
 eventsource-stream = "0.2"
 tokio-tungstenite = { version = "0.28", features = ["rustls-tls-webpki-roots"] }
@@ -107,6 +110,8 @@ agent-loops = { path = "crates/agent-loops" }
 agent-tools = { path = "crates/agent-tools" }
 agent-store = { path = "crates/agent-store" }
 agent-core = { path = "crates/agent-core" }
+agent-core-remote = { path = "crates/agent-core-remote" }
+agent-server = { path = "crates/agent-server" }
 provider-anthropic = { path = "crates/provider-anthropic" }
 provider-llamacpp = { path = "crates/provider-llamacpp" }
 provider-mistralrs = { path = "crates/provider-mistralrs" }

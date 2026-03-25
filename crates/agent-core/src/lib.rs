@@ -16,7 +16,7 @@ use agent_store::{
     StoreError, StoreEvent, StoredMessage, normalize_project_root,
 };
 use agent_tools::native_tools as native_tool_executor;
-use futures::{Stream, StreamExt};
+use futures::{Stream, StreamExt, future::BoxFuture};
 use provider::{ModelInfo, Provider, RequestOptions};
 use provider_openai::{OpenAiConfigPreset, OpenAiProvider};
 use serde::{Deserialize, Serialize};
@@ -29,7 +29,7 @@ const CORE_EVENT_CAPACITY: usize = 1024;
 /// Stream of events emitted by the application-facing core boundary.
 pub type CoreEventStream = Pin<Box<dyn Stream<Item = CoreEvent> + Send>>;
 
-/// Aggregated event emitted by `AgentCore`.
+/// Aggregated event emitted by the shared `AgentCore` boundary.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum CoreEvent {
@@ -45,7 +45,7 @@ pub enum CoreEvent {
 }
 
 /// Flattened model metadata surfaced by `AgentCore`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct ProviderModelInfo {
     pub provider_name: String,
     pub model: ModelInfo,
@@ -70,8 +70,116 @@ pub enum CoreError {
     NoLoopsRegistered,
 }
 
-/// Builder for the application-facing `AgentCore` SDK surface.
-pub struct AgentCoreBuilder {
+/// Consumer-facing core boundary shared by native and remote implementations.
+///
+/// Embedded clients, remote clients, and hosted servers should depend on this
+/// trait rather than on a specific locality-aware implementation. Native and
+/// remote construction are intentionally separate concerns.
+pub trait AgentCore: Send + Sync {
+    /// Returns the backing store or a remote proxy implementing the same store
+    /// trait surface.
+    fn store(&self) -> &dyn Store;
+
+    /// Returns the registered provider names.
+    fn provider_names(&self) -> Vec<String>;
+
+    /// Returns the registered loop names.
+    fn loop_names(&self) -> Vec<String>;
+
+    /// Returns the configured default provider name.
+    fn default_provider_name(&self) -> &str;
+
+    /// Returns the configured default loop name.
+    fn default_loop_name(&self) -> &str;
+
+    /// Returns a unified live event stream for store and turn activity.
+    fn subscribe(&self) -> CoreEventStream;
+
+    /// Resolves a project by normalized root, creating it when absent.
+    fn resolve_or_create_project(
+        &self,
+        root: std::path::PathBuf,
+    ) -> BoxFuture<'_, Result<Project, CoreError>>;
+
+    /// Creates a new session under a project.
+    fn create_session(&self, project_id: ProjectId) -> BoxFuture<'_, Result<Session, CoreError>>;
+
+    /// Returns one persisted project.
+    fn project(&self, project_id: ProjectId) -> BoxFuture<'_, Result<Project, CoreError>>;
+
+    /// Returns one persisted session.
+    fn session(&self, session_id: SessionId) -> BoxFuture<'_, Result<Session, CoreError>>;
+
+    /// Lists sessions under a project.
+    fn sessions_for_project(
+        &self,
+        project_id: ProjectId,
+    ) -> BoxFuture<'_, Result<Vec<Session>, CoreError>>;
+
+    /// Applies a partial update to a persisted session.
+    fn update_session(
+        &self,
+        session_id: SessionId,
+        update: SessionUpdate,
+    ) -> BoxFuture<'_, Result<Session, CoreError>>;
+
+    /// Deletes a persisted session and its transcript data.
+    fn delete_session(&self, session_id: SessionId) -> BoxFuture<'_, Result<(), CoreError>>;
+
+    /// Lists the canonical stored transcript for a session.
+    fn messages(
+        &self,
+        session_id: SessionId,
+    ) -> BoxFuture<'_, Result<Vec<StoredMessage>, CoreError>>;
+
+    /// Returns the persisted ATIF trajectory for a session when present.
+    fn trajectory(
+        &self,
+        session_id: SessionId,
+    ) -> BoxFuture<'_, Result<Option<atif::Trajectory>, CoreError>>;
+
+    /// Upserts a validated ATIF trajectory for a session.
+    fn upsert_trajectory(
+        &self,
+        session_id: SessionId,
+        trajectory: atif::Trajectory,
+    ) -> BoxFuture<'_, Result<atif::Trajectory, CoreError>>;
+
+    /// Returns the effective runtime configuration for a session.
+    fn effective_runtime_config(
+        &self,
+        session_id: SessionId,
+    ) -> BoxFuture<'_, Result<RuntimeConfig, CoreError>>;
+
+    /// Returns the effective loop name for a session.
+    fn current_loop_name_for_session(
+        &self,
+        session_id: SessionId,
+    ) -> BoxFuture<'_, Result<String, CoreError>>;
+
+    /// Returns the effective model identifier for a session when configured.
+    fn current_model_id_for_session(
+        &self,
+        session_id: SessionId,
+    ) -> BoxFuture<'_, Result<Option<String>, CoreError>>;
+
+    /// Lists all registered models across all providers.
+    fn list_models(&self) -> Vec<ProviderModelInfo>;
+
+    /// Starts one store-backed turn for a session and returns an event stream
+    /// for that turn only.
+    fn turn(
+        &self,
+        session_id: SessionId,
+        input: Vec<Message>,
+    ) -> BoxFuture<'_, Result<CoreEventStream, CoreError>>;
+
+    /// Cancels a currently active turn for a session.
+    fn cancel_turn(&self, session_id: SessionId) -> BoxFuture<'_, Result<(), CoreError>>;
+}
+
+/// Builder for the embedded `AgentCoreNative` implementation.
+pub struct AgentCoreNativeBuilder {
     store: Arc<dyn Store>,
     providers: BTreeMap<String, Arc<dyn Provider>>,
     loops: BTreeMap<String, Arc<dyn LoopStrategy>>,
@@ -81,8 +189,9 @@ pub struct AgentCoreBuilder {
     discover_openai_from_credentials: bool,
 }
 
-impl AgentCoreBuilder {
-    /// Starts building a new `AgentCore` around the provided store.
+impl AgentCoreNativeBuilder {
+    /// Starts building a new embedded `AgentCoreNative` around the provided
+    /// store.
     pub fn new(store: Arc<dyn Store>) -> Self {
         Self {
             store,
@@ -131,8 +240,8 @@ impl AgentCoreBuilder {
         self
     }
 
-    /// Builds the assembled `AgentCore` surface.
-    pub async fn build(mut self) -> Result<AgentCore, CoreError> {
+    /// Builds the assembled embedded `AgentCoreNative`.
+    pub async fn build(mut self) -> Result<AgentCoreNative, CoreError> {
         if self.loops.is_empty() {
             self.loops.insert("simple".into(), Arc::new(SimpleLoop));
         }
@@ -158,7 +267,7 @@ impl AgentCoreBuilder {
             .unwrap_or_else(|| Arc::new(native_tool_executor()) as Arc<dyn ToolExecutor>);
 
         let (events, _) = broadcast::channel(CORE_EVENT_CAPACITY);
-        let runtime = AgentCore {
+        let runtime = AgentCoreNative {
             store: self.store.clone(),
             providers: self.providers,
             loops: self.loops,
@@ -175,9 +284,9 @@ impl AgentCoreBuilder {
     }
 }
 
-/// Multi-session orchestration facade built on top of `agent-runtime`.
+/// Native in-process implementation of the shared `AgentCore` boundary.
 #[derive(Clone)]
-pub struct AgentCore {
+pub struct AgentCoreNative {
     store: Arc<dyn Store>,
     providers: BTreeMap<String, Arc<dyn Provider>>,
     loops: BTreeMap<String, Arc<dyn LoopStrategy>>,
@@ -188,10 +297,10 @@ pub struct AgentCore {
     events: broadcast::Sender<CoreEvent>,
 }
 
-impl AgentCore {
-    /// Returns a builder for the new core SDK surface.
-    pub fn builder(store: Arc<dyn Store>) -> AgentCoreBuilder {
-        AgentCoreBuilder::new(store)
+impl AgentCoreNative {
+    /// Returns a builder for the embedded native core implementation.
+    pub fn builder(store: Arc<dyn Store>) -> AgentCoreNativeBuilder {
+        AgentCoreNativeBuilder::new(store)
     }
 
     /// Builds a default local core surface with native `agent-tools`,
@@ -588,6 +697,135 @@ impl AgentCore {
     }
 }
 
+impl AgentCore for AgentCoreNative {
+    fn store(&self) -> &dyn Store {
+        AgentCoreNative::store(self)
+    }
+
+    fn provider_names(&self) -> Vec<String> {
+        AgentCoreNative::provider_names(self)
+    }
+
+    fn loop_names(&self) -> Vec<String> {
+        AgentCoreNative::loop_names(self)
+    }
+
+    fn default_provider_name(&self) -> &str {
+        AgentCoreNative::default_provider_name(self)
+    }
+
+    fn default_loop_name(&self) -> &str {
+        AgentCoreNative::default_loop_name(self)
+    }
+
+    fn subscribe(&self) -> CoreEventStream {
+        AgentCoreNative::subscribe(self)
+    }
+
+    fn resolve_or_create_project(
+        &self,
+        root: std::path::PathBuf,
+    ) -> BoxFuture<'_, Result<Project, CoreError>> {
+        Box::pin(AgentCoreNative::resolve_or_create_project(self, root))
+    }
+
+    fn create_session(&self, project_id: ProjectId) -> BoxFuture<'_, Result<Session, CoreError>> {
+        Box::pin(AgentCoreNative::create_session(self, project_id))
+    }
+
+    fn project(&self, project_id: ProjectId) -> BoxFuture<'_, Result<Project, CoreError>> {
+        Box::pin(AgentCoreNative::project(self, project_id))
+    }
+
+    fn session(&self, session_id: SessionId) -> BoxFuture<'_, Result<Session, CoreError>> {
+        Box::pin(AgentCoreNative::session(self, session_id))
+    }
+
+    fn sessions_for_project(
+        &self,
+        project_id: ProjectId,
+    ) -> BoxFuture<'_, Result<Vec<Session>, CoreError>> {
+        Box::pin(AgentCoreNative::sessions_for_project(self, project_id))
+    }
+
+    fn update_session(
+        &self,
+        session_id: SessionId,
+        update: SessionUpdate,
+    ) -> BoxFuture<'_, Result<Session, CoreError>> {
+        Box::pin(AgentCoreNative::update_session(self, session_id, update))
+    }
+
+    fn delete_session(&self, session_id: SessionId) -> BoxFuture<'_, Result<(), CoreError>> {
+        Box::pin(AgentCoreNative::delete_session(self, session_id))
+    }
+
+    fn messages(
+        &self,
+        session_id: SessionId,
+    ) -> BoxFuture<'_, Result<Vec<StoredMessage>, CoreError>> {
+        Box::pin(AgentCoreNative::messages(self, session_id))
+    }
+
+    fn trajectory(
+        &self,
+        session_id: SessionId,
+    ) -> BoxFuture<'_, Result<Option<atif::Trajectory>, CoreError>> {
+        Box::pin(AgentCoreNative::trajectory(self, session_id))
+    }
+
+    fn upsert_trajectory(
+        &self,
+        session_id: SessionId,
+        trajectory: atif::Trajectory,
+    ) -> BoxFuture<'_, Result<atif::Trajectory, CoreError>> {
+        Box::pin(AgentCoreNative::upsert_trajectory(
+            self, session_id, trajectory,
+        ))
+    }
+
+    fn effective_runtime_config(
+        &self,
+        session_id: SessionId,
+    ) -> BoxFuture<'_, Result<RuntimeConfig, CoreError>> {
+        Box::pin(AgentCoreNative::effective_runtime_config(self, session_id))
+    }
+
+    fn current_loop_name_for_session(
+        &self,
+        session_id: SessionId,
+    ) -> BoxFuture<'_, Result<String, CoreError>> {
+        Box::pin(AgentCoreNative::current_loop_name_for_session(
+            self, session_id,
+        ))
+    }
+
+    fn current_model_id_for_session(
+        &self,
+        session_id: SessionId,
+    ) -> BoxFuture<'_, Result<Option<String>, CoreError>> {
+        Box::pin(AgentCoreNative::current_model_id_for_session(
+            self, session_id,
+        ))
+    }
+
+    fn list_models(&self) -> Vec<ProviderModelInfo> {
+        AgentCoreNative::list_models(self)
+    }
+
+    fn turn(
+        &self,
+        session_id: SessionId,
+        input: Vec<Message>,
+    ) -> BoxFuture<'_, Result<CoreEventStream, CoreError>> {
+        Box::pin(AgentCoreNative::turn(self, session_id, input))
+    }
+
+    fn cancel_turn(&self, session_id: SessionId) -> BoxFuture<'_, Result<(), CoreError>> {
+        Box::pin(AgentCoreNative::cancel_turn(self, session_id))
+    }
+}
+
 struct ResolvedSessionRuntime {
     provider: Arc<dyn Provider>,
     loop_strategy: Arc<dyn LoopStrategy>,
@@ -755,15 +993,66 @@ mod tests {
     #[tokio::test]
     async fn build_default_local_requires_explicit_provider_registration() {
         let store = Arc::new(InMemoryStore::new());
-        let result = AgentCore::build_default_local(store).await;
+        let result = AgentCoreNative::build_default_local(store).await;
 
         assert!(matches!(result, Err(CoreError::NoProvidersRegistered)));
     }
 
     #[tokio::test]
+    async fn trait_object_core_supports_projects_turns_and_events() {
+        let store = Arc::new(InMemoryStore::new());
+        let core: Arc<dyn AgentCore> = Arc::new(
+            AgentCoreNative::builder(store)
+                .with_provider("mock", Arc::new(MockProvider::new()))
+                .build()
+                .await
+                .unwrap(),
+        );
+
+        let mut bus = core.subscribe();
+        let project = core
+            .resolve_or_create_project("/tmp/trait-object-core".into())
+            .await
+            .unwrap();
+        let session = core.create_session(project.id).await.unwrap();
+        let mut turn = core
+            .turn(session.id, vec![Message::user_text("hello from dyn core")])
+            .await
+            .unwrap();
+
+        let bus_event = timeout(Duration::from_secs(1), bus.next())
+            .await
+            .unwrap()
+            .expect("expected a core bus event");
+        assert!(matches!(
+            bus_event,
+            CoreEvent::Store { .. } | CoreEvent::Turn { .. }
+        ));
+
+        let finished = timeout(Duration::from_secs(1), async {
+            while let Some(event) = turn.next().await {
+                if matches!(
+                    event,
+                    CoreEvent::Turn {
+                        event: RuntimeEvent::TurnFinished { .. },
+                        ..
+                    }
+                ) {
+                    return true;
+                }
+            }
+            false
+        })
+        .await
+        .unwrap();
+
+        assert!(finished);
+    }
+
+    #[tokio::test]
     async fn resolve_or_create_project_normalizes_roots() {
         let store = Arc::new(InMemoryStore::new());
-        let core = AgentCore::builder(store)
+        let core = AgentCoreNative::builder(store)
             .with_provider("mock", Arc::new(MockProvider::new()))
             .build()
             .await
@@ -784,7 +1073,7 @@ mod tests {
     #[tokio::test]
     async fn turn_persists_transcript_back_to_store() {
         let store = Arc::new(InMemoryStore::new());
-        let core = AgentCore::builder(store.clone())
+        let core = AgentCoreNative::builder(store.clone())
             .with_provider("mock", Arc::new(MockProvider::new()))
             .build()
             .await
@@ -825,7 +1114,7 @@ mod tests {
     #[tokio::test]
     async fn cancel_turn_emits_turn_cancelled() {
         let store = Arc::new(InMemoryStore::new());
-        let core = AgentCore::builder(store.clone())
+        let core = AgentCoreNative::builder(store.clone())
             .with_provider("slow", Arc::new(SlowProvider))
             .build()
             .await
@@ -893,14 +1182,14 @@ mod tests {
             .await
             .unwrap();
 
-        let core = AgentCore::build_default_local(store).await.unwrap();
+        let core = AgentCoreNative::build_default_local(store).await.unwrap();
         assert!(core.provider_names().contains(&"openai".to_string()));
     }
 
     #[tokio::test]
     async fn trajectories_roundtrip_through_core() {
         let store = Arc::new(InMemoryStore::new());
-        let core = AgentCore::builder(store.clone())
+        let core = AgentCoreNative::builder(store.clone())
             .with_provider("mock", Arc::new(MockProvider::new()))
             .build()
             .await
@@ -924,7 +1213,7 @@ mod tests {
     async fn file_store_default_core_roundtrips() {
         let temp = TempDir::new().unwrap();
         let store = Arc::new(agent_store::FileStore::new(temp.path()).await.unwrap());
-        let core = AgentCore::builder(store.clone())
+        let core = AgentCoreNative::builder(store.clone())
             .with_provider("mock", Arc::new(MockProvider::new()))
             .build()
             .await
@@ -1048,7 +1337,7 @@ mod tests {
     #[tokio::test]
     async fn default_tools_execute_without_legacy_bridge() {
         let store = Arc::new(InMemoryStore::new());
-        let core = AgentCore::builder(store.clone())
+        let core = AgentCoreNative::builder(store.clone())
             .with_provider("tool", Arc::new(ToolCallingProvider))
             .build()
             .await

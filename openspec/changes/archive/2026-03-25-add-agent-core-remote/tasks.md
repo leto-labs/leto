@@ -1,0 +1,7 @@
+- [x] Add `agent-core-remote` as a workspace crate with canonical `/v1` protocol types.
+- [x] Add a focused `agent-core-remote` spec and modify affected `agent-core` and `agent-server` specs.
+- [x] Expand `agent-server` canonical `/v1` routes to cover the full composed store surface.
+- [x] Move canonical shared DTOs from `agent-server` into `agent-core-remote`.
+- [x] Implement `AgentCoreRemote` and proxy store types over HTTP.
+- [x] Add integration tests that run `AgentCoreRemote` against a live `agent-server`.
+- [x] Validate the new OpenSpec change and run workspace tests.

@@ -1,0 +1,34 @@
+[package]
+name = "agent-core-remote"
+edition.workspace = true
+version.workspace = true
+
+[features]
+default = ["client"]
+client = ["dep:async-stream", "dep:eventsource-stream", "dep:reqwest", "dep:tokio", "dep:tracing"]
+
+[dependencies]
+agent-core = { workspace = true }
+agent-runtime = { workspace = true }
+agent-store = { workspace = true }
+atif = { workspace = true }
+futures = { workspace = true }
+provider = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio-util = { workspace = true }
+async-stream = { workspace = true, optional = true }
+eventsource-stream = { workspace = true, optional = true }
+reqwest = { workspace = true, optional = true }
+tokio = { workspace = true, features = ["sync"], optional = true }
+tracing = { workspace = true, optional = true }
+
+[dev-dependencies]
+agent-server = { workspace = true }
+agent-store = { workspace = true }
+axum = { workspace = true }
+chrono = { workspace = true }
+provider = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "time"] }
+tracing-subscriber = { workspace = true, features = ["fmt"] }
