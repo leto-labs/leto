@@ -10,7 +10,7 @@ especially around agent loops, multimodal message flow, ACP, and benchmarking.
 | --- | --- | --- | --- |
 | Contracts | [`types.md`](types.md) | Shared traits, messages, events, config, session, and runtime contracts | Stable foundation |
 | Engine | [`core/README.md`](core/README.md) | `Brain`, `BrainRuntime`, `BrainRuntimeNative`, and future remote runtime shape | Core orchestration |
-| Reusable session engine | [`agent-runtime.md`](agent-runtime.md) | Runtime/loop boundary for the newer storeless session engine and child-runtime substrate | Active greenfield path |
+| Reusable session engine | [`agent-runtime/README.md`](agent-runtime/README.md) | Runtime/loop boundary for the newer storeless session engine and child-runtime substrate | Active greenfield path |
 | Execution strategies | [`loops/README.md`](loops/README.md) | `simple`, `robust`, `terminus2`, `terminus-kira` | Highest churn / experimental pressure |
 | Runtime capabilities | [`tools/README.md`](tools/README.md), [`provider/README.md`](provider/README.md), [`stores/README.md`](stores/README.md), [`transports.md`](transports.md), [`config.md`](config.md) | Tool execution, provider backends, persistence, transport, config layering | Mixed maturity |
 | Client surfaces | [`cli.md`](cli.md), [`acp.md`](acp.md) | Local CLI, benchmark exec path, ACP bridge/runtime surface | Active product surfaces |
@@ -97,7 +97,7 @@ sequenceDiagram
 | --- | --- |
 | What are the canonical contracts? | [`types.md`](types.md) |
 | What is the difference between `Brain`, `BrainRuntime`, and `BrainRuntimeNative`? | [`core/README.md`](core/README.md) |
-| What belongs in `agent-runtime` versus a loop strategy? | [`agent-runtime.md`](agent-runtime.md) |
+| What belongs in `agent-runtime` versus a loop strategy? | [`agent-runtime/README.md`](agent-runtime/README.md) |
 | Where are the experimental loop ideas concentrated? | [`loops/README.md`](loops/README.md) |
 | How do tools stay swappable across native and ACP-backed execution? | [`tools/README.md`](tools/README.md) |
 | How do provider backends handle presets, auth, and multimodal requests? | [`provider/README.md`](provider/README.md) |

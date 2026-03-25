@@ -16,6 +16,8 @@ supports more advanced Terminus-style handoff and PTY-aware flows. The newest
 runtime work also moves persistent PTY sessions out of the legacy
 `terminal_session` framing and toward explicit runtime-managed PTY ids,
 snapshots, event subscriptions, and safe-boundary developer-message promotion.
+For the concrete runtime mechanics behind that direction, start with
+[`../agent-runtime/README.md`](../agent-runtime/README.md).
 
 ## Table Of Contents
 
