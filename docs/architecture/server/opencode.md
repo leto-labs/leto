@@ -253,3 +253,71 @@ OpenCode compatibility:
 That is the "right" way to evolve this compatibility layer. The older
 compat-wide schema injection and normalization logic may still exist, but it
 should be treated as legacy debt to reduce over time, not as the design target.
+
+## Pinned UI Validation Workflow
+
+The repository now carries a pinned OpenCode UI validation workspace at
+`submodules/opencode`.
+
+Use that submodule as the real frontend reference consumer for browser-facing
+validation of `agent-server`.
+
+### Version Pin
+
+- submodule remote: `https://github.com/leto-labs/opencode.git`
+- checked-out compat baseline: upstream OpenCode `v1.3.2`
+- pinned commit:
+  `0dcdf5f529dced23d8452c9aa5f166abb24d8f7c`
+
+Keep the submodule pinned to the approved compatibility release. Do not move it
+to a newer fork or upstream branch tip unless the compatibility target is being
+updated deliberately.
+
+### Local Bring-Up
+
+Initialize submodules if needed:
+
+```bash
+git submodule update --init --recursive
+```
+
+Start a local `agent-server` instance on the default OpenCode backend port:
+
+```bash
+cargo run -p agent-server --example mock_server
+```
+
+Then, from the pinned submodule root, install dependencies and start the web
+app:
+
+```bash
+bun install
+bun --cwd packages/app dev -- --host 0.0.0.0 --port 3000
+```
+
+Open `http://127.0.0.1:3000`. On localhost, the OpenCode web app will target
+`http://localhost:4096` by default, so the pinned UI should connect to the
+local `agent-server` without a Brain-specific frontend flow.
+
+### Smoke Test
+
+With the local mock server running on port `4096`, a minimal browser smoke test
+from the submodule root is:
+
+```bash
+bunx playwright install chromium
+bun --cwd packages/app test:e2e e2e/app/home.spec.ts
+```
+
+That verifies the pinned web UI boots against the local server baseline and the
+core server-selection surface renders.
+
+### Patch Policy
+
+Treat the submodule as an upstream-tracking validation target, not as a second
+implementation surface.
+
+- fix missing compatibility behavior in `agent-server` first
+- only patch the UI for true blocker seams such as auth transport, CORS, or
+  platform/browser networking behavior
+- keep any local fork delta explicit and as small as possible

@@ -1,3 +1,6 @@
 [submodule "submodules/nori-cli"]
 	path = submodules/nori-cli
 	url = git@github.com:leto-labs/nori-cli.git
+[submodule "submodules/opencode"]
+	path = submodules/opencode
+	url = https://github.com/leto-labs/opencode.git

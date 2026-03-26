@@ -2,7 +2,7 @@
   {
     "name": "opencode",
     "url": "https://github.com/anomalyco/opencode",
-    "tag": "main",
+    "tag": "v1.3.2",
     "searchPath": "packages/opencode/src",
     "notes": "TypeScript/Bun AI coding agent monorepo. Core runtime lives in packages/opencode/src with client/server architecture, OpenAPI 3.1, SSE, agent profiles (build/plan/general/explore), session compaction, plugin and MCP tool dispatch, and SQLite-backed persistence. Study packages/opencode/src for provider wiring, session loop, permissions, and built-in tools.",
     "enabled": true

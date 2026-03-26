@@ -99,6 +99,13 @@ ls openspec/changes/             # active proposals
 ls openspec/specs/               # current truth (built capabilities)
 ```
 
+For integration and client-validation work that depends on checked-out forks,
+initialize the repository submodules locally:
+
+```bash
+git submodule update --init --recursive
+```
+
 ## License
 
 TBD
