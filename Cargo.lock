@@ -137,15 +137,20 @@ dependencies = [
  "agent-core-remote",
  "agent-runtime",
  "agent-store",
+ "aide",
  "atif",
  "axum",
  "chrono",
+ "dirs",
  "futures",
  "provider",
  "reqwest 0.12.28",
+ "schemars 1.2.1",
  "serde",
  "serde_json",
  "tokio",
+ "tokio-stream",
+ "tower-http",
  "tracing",
  "ulid",
 ]
@@ -207,6 +212,40 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ddd31a130427c27518df266943a5308ed92d4b226cc639f5a8f1002816174301"
 dependencies = [
  "memchr",
+]
+
+[[package]]
+name = "aide"
+version = "0.16.0-alpha.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "87a769cd3a8984b7236931cd48f4d1f6b99c0475d60987a1f69490b079116306"
+dependencies = [
+ "aide-macros",
+ "axum",
+ "bytes",
+ "cfg-if",
+ "http",
+ "indexmap 2.13.0",
+ "schemars 1.2.1",
+ "serde",
+ "serde_json",
+ "serde_qs",
+ "thiserror 2.0.18",
+ "tower-layer",
+ "tower-service",
+ "tracing",
+]
+
+[[package]]
+name = "aide-macros"
+version = "0.16.0-alpha.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "15e90573b48a90439758669afeff706f4f6f54515303beba88e118e8c6006d09"
+dependencies = [
+ "darling 0.23.0",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
 ]
 
 [[package]]
@@ -4947,6 +4986,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2b42f36aa1cd011945615b92222f6bf73c599a102a300334cd7f8dbeec726cc"
 dependencies = [
  "dyn-clone",
+ "indexmap 2.13.0",
  "ref-cast",
  "schemars_derive",
  "serde",
@@ -5142,6 +5182,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9ce1fc6db65a611022b23a0dec6975d63fb80a302cb3388835ff02c097258d50"
 dependencies = [
  "serde",
+]
+
+[[package]]
+name = "serde_qs"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8b417bedc008acbdf6d6b4bc482d29859924114bbe2650b7921fb68a261d0aa6"
+dependencies = [
+ "axum",
+ "futures",
+ "percent-encoding",
+ "serde",
+ "thiserror 2.0.18",
 ]
 
 [[package]]

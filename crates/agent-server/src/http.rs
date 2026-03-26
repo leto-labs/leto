@@ -11,11 +11,13 @@ use agent_store::{
 use axum::body::Body;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
+use axum::http::header::{AUTHORIZATION, CONTENT_TYPE};
 use axum::response::sse::{Event as SseEvent, KeepAlive, Sse};
 use axum::response::{IntoResponse, Json, Response};
 use axum::{Router, routing};
 use futures::StreamExt;
 use serde_json::json;
+use tower_http::cors::{Any, CorsLayer};
 use ulid::Ulid;
 
 use crate::compat;
@@ -32,7 +34,13 @@ type AppState = Arc<AgentServer>;
 pub fn build_router(server: Arc<AgentServer>) -> Router {
     Router::new()
         .nest("/v1", canonical_router())
-        .nest("/v1/compat/opencode", compat::router())
+        .nest("/v1/compat/opencode", compat::opencode::router())
+        .layer(
+            CorsLayer::new()
+                .allow_origin(Any)
+                .allow_methods(Any)
+                .allow_headers([AUTHORIZATION, CONTENT_TYPE]),
+        )
         .with_state(server)
 }
 
@@ -695,14 +703,6 @@ pub(crate) fn invalid_request(code: &str) -> Response {
     (
         StatusCode::BAD_REQUEST,
         Json(ErrorResponse::new(code, "invalid request")),
-    )
-        .into_response()
-}
-
-pub(crate) fn stub_response(message: impl Into<String>) -> Response {
-    (
-        StatusCode::NOT_IMPLEMENTED,
-        Json(ErrorResponse::stub("not_implemented", message.into())),
     )
         .into_response()
 }

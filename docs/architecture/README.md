@@ -15,7 +15,7 @@ especially around agent loops, multimodal message flow, ACP, and benchmarking.
 | Runtime capabilities | [`tools/README.md`](tools/README.md), [`provider/README.md`](provider/README.md), [`stores/README.md`](stores/README.md), [`transports.md`](transports.md), [`config.md`](config.md) | Tool execution, provider backends, persistence, transport, config layering | Mixed maturity |
 | Client surfaces | [`cli.md`](cli.md), [`acp.md`](acp.md) | Local CLI, benchmark exec path, ACP bridge/runtime surface | Active product surfaces |
 | Benchmark/export surfaces | [`atif.md`](atif.md) | ATIF transcript/export model for Harbor-facing runs | Important integration layer |
-| Deferred legacy surface | [`server.md`](server.md) | Older server/API abstraction kept out of the active architecture path | Legacy / deferred |
+| Deferred legacy surface | [`server/README.md`](server/README.md) | Older server/API abstraction kept out of the active architecture path | Legacy / deferred |
 
 ## System Map
 
@@ -105,6 +105,7 @@ sequenceDiagram
 | How does config get layered from defaults, global state, and project files? | [`config.md`](config.md) |
 | How do CLI and ACP sit on top of the runtime? | [`cli.md`](cli.md), [`acp.md`](acp.md) |
 | How does Harbor-facing transcript export work? | [`atif.md`](atif.md) |
+| How should OpenCode compatibility docs be shaped? | [`server/opencode.md`](server/opencode.md) |
 
 ## Current Architectural Reading
 

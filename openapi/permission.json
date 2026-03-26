@@ -1,0 +1,167 @@
+{
+  "openapi": "3.1.1",
+  "info": {
+    "title": "opencode",
+    "description": "opencode api",
+    "version": "0.0.3"
+  },
+  "paths": {
+    "/permission/{requestID}/reply": {
+      "post": {
+        "operationId": "permission.reply",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "directory",
+            "schema": { "type": "string" }
+          },
+          {
+            "in": "query",
+            "name": "workspace",
+            "schema": { "type": "string" }
+          },
+          {
+            "in": "path",
+            "name": "requestID",
+            "schema": { "type": "string", "pattern": "^per.*" },
+            "required": true
+          }
+        ],
+        "summary": "Respond to permission request",
+        "description": "Approve or deny a permission request from the AI assistant.",
+        "responses": {
+          "200": {
+            "description": "Permission processed successfully",
+            "content": {
+              "application/json": { "schema": { "type": "boolean" } }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/BadRequestError" }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/NotFoundError" }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "reply": {
+                    "type": "string",
+                    "enum": ["once", "always", "reject"]
+                  },
+                  "message": { "type": "string" }
+                },
+                "required": ["reply"]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/permission": {
+      "get": {
+        "operationId": "permission.list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "directory",
+            "schema": { "type": "string" }
+          },
+          { "in": "query", "name": "workspace", "schema": { "type": "string" } }
+        ],
+        "summary": "List pending permissions",
+        "description": "Get all pending permission requests across all sessions.",
+        "responses": {
+          "200": {
+            "description": "List of pending permissions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": { "$ref": "#/components/schemas/PermissionRequest" }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "PermissionRequest": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "pattern": "^per.*" },
+          "sessionID": { "type": "string", "pattern": "^ses.*" },
+          "permission": { "type": "string" },
+          "patterns": { "type": "array", "items": { "type": "string" } },
+          "metadata": {
+            "type": "object",
+            "propertyNames": { "type": "string" },
+            "additionalProperties": {}
+          },
+          "always": { "type": "array", "items": { "type": "string" } },
+          "tool": {
+            "type": "object",
+            "properties": {
+              "messageID": { "type": "string", "pattern": "^msg.*" },
+              "callID": { "type": "string" }
+            },
+            "required": ["messageID", "callID"]
+          }
+        },
+        "required": [
+          "id",
+          "sessionID",
+          "permission",
+          "patterns",
+          "metadata",
+          "always"
+        ]
+      },
+      "BadRequestError": {
+        "type": "object",
+        "properties": {
+          "data": {},
+          "errors": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "propertyNames": { "type": "string" },
+              "additionalProperties": {}
+            }
+          },
+          "success": { "type": "boolean", "const": false }
+        },
+        "required": ["data", "errors", "success"]
+      },
+      "NotFoundError": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string", "const": "NotFoundError" },
+          "data": {
+            "type": "object",
+            "properties": { "message": { "type": "string" } },
+            "required": ["message"]
+          }
+        },
+        "required": ["name", "data"]
+      }
+    }
+  }
+}

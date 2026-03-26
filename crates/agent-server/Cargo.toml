@@ -8,14 +8,19 @@ agent-core = { workspace = true }
 agent-core-remote = { path = "../agent-core-remote", default-features = false }
 agent-runtime = { workspace = true }
 agent-store = { workspace = true }
+aide = { workspace = true, features = ["axum", "axum-json", "axum-query", "macros"] }
 atif = { workspace = true }
 axum = { workspace = true }
 chrono = { workspace = true }
+dirs = { workspace = true }
 futures = { workspace = true }
 provider = { workspace = true }
+schemars = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true, features = ["rt", "net"] }
+tokio-stream = { workspace = true }
+tower-http = { workspace = true }
 tracing = { workspace = true }
 ulid = { workspace = true }
 

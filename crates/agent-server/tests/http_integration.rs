@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::{fs, path::Path};
 
 use agent_core::{AgentCore, AgentCoreNative};
 use agent_server::{AgentServer, build_router};
@@ -180,7 +181,7 @@ async fn canonical_and_compat_event_endpoints_are_sse() {
 }
 
 #[tokio::test]
-async fn compat_health_is_real_and_prompt_async_is_stubbed() {
+async fn compat_config_provider_and_prompt_routes_are_real() {
     let base = start_server().await;
     let client = reqwest::Client::new();
     let project = create_project(&client, &base).await;
@@ -193,18 +194,138 @@ async fn compat_health_is_real_and_prompt_async_is_stubbed() {
         .unwrap();
     assert_eq!(health.status(), reqwest::StatusCode::OK);
 
-    let stub = client
+    let config = client
+        .get(format!("{base}/v1/compat/opencode/config"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(config.status(), reqwest::StatusCode::OK);
+
+    let provider_auth = client
+        .get(format!("{base}/v1/compat/opencode/provider/auth"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(provider_auth.status(), reqwest::StatusCode::OK);
+
+    let prompt = client
+        .post(format!(
+            "{base}/v1/compat/opencode/session/{}/message",
+            session.id
+        ))
+        .json(&serde_json::json!({
+            "parts": [{"type": "text", "text": "hello compat"}]
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(prompt.status(), reqwest::StatusCode::OK);
+
+    let prompt_async = client
         .post(format!(
             "{base}/v1/compat/opencode/session/{}/prompt_async",
             session.id
         ))
-        .json(&serde_json::json!({}))
+        .json(&serde_json::json!({
+            "parts": [{"type": "text", "text": "hello async compat"}]
+        }))
         .send()
         .await
         .unwrap();
-    assert_eq!(stub.status(), reqwest::StatusCode::NOT_IMPLEMENTED);
+    assert_eq!(prompt_async.status(), reqwest::StatusCode::NO_CONTENT);
+}
 
-    let payload: serde_json::Value = stub.json().await.unwrap();
-    assert_eq!(payload["error"]["code"], "not_implemented");
-    assert_eq!(payload["error"]["stub"], true);
+#[tokio::test]
+async fn compat_doc_serves_raw_aide_openapi() {
+    let base = start_server().await;
+    let client = reqwest::Client::new();
+
+    let remote: serde_json::Value = client
+        .get(format!("{base}/v1/compat/opencode/doc"))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(remote["openapi"], serde_json::json!("3.1.1"));
+    assert_eq!(remote["info"]["title"], serde_json::json!("opencode"));
+    assert_eq!(
+        remote["info"]["description"],
+        serde_json::json!("opencode api")
+    );
+    assert_eq!(remote["info"]["version"], serde_json::json!("0.0.3"));
+
+    let paths = remote["paths"]
+        .as_object()
+        .expect("compat /doc should return OpenAPI paths");
+    assert!(paths.contains_key("/project"));
+    assert!(paths.contains_key("/session"));
+    assert!(paths.contains_key("/global/health"));
+    assert!(!paths.contains_key("/doc"));
+    assert!(!paths.contains_key("/v1/compat/opencode/project"));
+}
+
+#[test]
+fn compat_runtime_does_not_import_pinned_openapi_contract() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/compat/opencode");
+
+    fn scan(path: &Path) {
+        for entry in fs::read_dir(path).unwrap() {
+            let entry = entry.unwrap();
+            let path = entry.path();
+            if path.is_dir() {
+                scan(&path);
+                continue;
+            }
+            if path.extension().and_then(|ext| ext.to_str()) != Some("rs") {
+                continue;
+            }
+            let source = fs::read_to_string(&path).unwrap();
+            assert!(
+                !source.contains("openapi/opencode.json"),
+                "runtime compat source must not reference openapi/opencode.json: {}",
+                path.display()
+            );
+            assert!(
+                !source.contains("include_str!(\"../../../../../openapi/opencode.json\")"),
+                "runtime compat source must not embed openapi/opencode.json: {}",
+                path.display()
+            );
+        }
+    }
+
+    scan(&root);
+}
+
+#[tokio::test]
+async fn compat_preflight_allows_browser_requests() {
+    let base = start_server().await;
+    let client = reqwest::Client::new();
+
+    let response = client
+        .request(
+            reqwest::Method::OPTIONS,
+            format!("{base}/v1/compat/opencode/config"),
+        )
+        .header(reqwest::header::ORIGIN, "http://localhost:3000")
+        .header(reqwest::header::ACCESS_CONTROL_REQUEST_METHOD, "PATCH")
+        .header(
+            reqwest::header::ACCESS_CONTROL_REQUEST_HEADERS,
+            "authorization,content-type",
+        )
+        .send()
+        .await
+        .unwrap();
+
+    assert!(response.status().is_success());
+    assert!(
+        response
+            .headers()
+            .get(reqwest::header::ACCESS_CONTROL_ALLOW_ORIGIN)
+            .is_some()
+    );
 }
