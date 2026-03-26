@@ -400,5 +400,37 @@
     "searchPath": "crates/aide/src",
     "notes": "Rust code-first API documentation library with Axum integration. Start with crates/aide/src/axum plus examples/example-axum/src for the concrete router/documentation flow; macros live in crates/aide-macros/src. Research ApiRouter/api_route ergonomics, schema extraction via schemars, operation metadata, and whether docs and route registration can share one source of truth for agent-server compat.",
     "enabled": true
+  },
+  {
+    "name": "hono-openapi",
+    "url": "https://github.com/rhinobase/hono-openapi",
+    "tag": "v1.1.2",
+    "searchPath": "src",
+    "notes": "OpenCode 1.3.2 route-to-OpenAPI bridge. Start with src for describeRoute, resolver, validator, openAPIRouteHandler, and generateSpecs. Compare its route-local contract model to agent-server's aide-based generation.",
+    "enabled": true
+  },
+  {
+    "name": "@standard-community/standard-openapi",
+    "url": "https://github.com/standard-community/standard-openapi",
+    "tag": "v0.2.9",
+    "searchPath": "src",
+    "notes": "OpenCode 1.3.2 downstream OpenAPI conversion library. Start with src and compare its JSON Schema to OpenAPI conversion behavior against the local patched copy in repocache/anomalyco/opencode/patches.",
+    "enabled": true
+  },
+  {
+    "name": "@standard-community/standard-json",
+    "url": "https://github.com/standard-community/standard-json",
+    "tag": "v0.3.5",
+    "searchPath": "src",
+    "notes": "Standard Schema to JSON Schema conversion library used under OpenCode's OpenAPI pipeline. Study the Zod and optional peer conversion path before blaming aide/schemars for every mismatch.",
+    "enabled": true
+  },
+  {
+    "name": "zod-to-json-schema",
+    "url": "https://github.com/StefanTerdell/zod-to-json-schema",
+    "tag": "3.24.5",
+    "searchPath": "src",
+    "notes": "Zod-to-JSON-Schema converter in the OpenCode 1.3.2 dependency graph. Use to understand how Zod-originating shapes may differ before standard-openapi emits the final OpenAPI document.",
+    "enabled": true
   }
 ]

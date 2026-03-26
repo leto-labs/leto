@@ -1,11 +1,10 @@
-use schemars::{JsonSchema, json_schema};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::common::CompatQuery;
-use super::global::McpServerConfigDoc;
 use super::permission::PermissionRuleset;
-use super::provider::TrueConstDoc;
+use super::provider::{FalseConstDoc, TrueConstDoc};
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
 pub struct ToolListQueryDoc {
@@ -18,104 +17,104 @@ pub struct ToolListQueryDoc {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct McpAddRequest {
     pub name: String,
-    // schemars expands this untagged enum inline by default, but OpenCode's
-    // published contract reuses the top-level MCP config components here.
-    // Keep the contract shape at the DTO boundary rather than patching the
-    // final document in doc.rs.
-    #[schemars(schema_with = "mcp_add_config_schema")]
-    pub config: McpServerConfigDoc,
+    pub config: McpAddConfigDoc,
 }
 
-fn mcp_add_config_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
-    json_schema!({
-        "anyOf": [
-            {
-                "type": "object",
-                "properties": {
-                    "type": {
-                        "type": "string",
-                        "const": "local",
-                        "description": "Type of MCP server connection"
-                    },
-                    "command": {
-                        "type": "array",
-                        "items": { "type": "string" },
-                        "description": "Command and arguments to run the MCP server"
-                    },
-                    "environment": {
-                        "type": "object",
-                        "description": "Environment variables to set when running the MCP server"
-                    },
-                    "enabled": {
-                        "type": "boolean",
-                        "description": "Enable or disable the MCP server on startup"
-                    },
-                    "timeout": {
-                        "type": "integer",
-                        "maximum": 9007199254740991u64,
-                        "exclusiveMinimum": 0,
-                        "description": "Timeout in ms for MCP server requests. Defaults to 5000 (5 seconds) if not specified."
-                    }
-                },
-                "required": ["type", "command"]
-            },
-            {
-                "type": "object",
-                "properties": {
-                    "type": {
-                        "type": "string",
-                        "const": "remote",
-                        "description": "Type of MCP server connection"
-                    },
-                    "url": {
-                        "type": "string",
-                        "description": "URL of the remote MCP server"
-                    },
-                    "enabled": {
-                        "type": "boolean",
-                        "description": "Enable or disable the MCP server on startup"
-                    },
-                    "headers": {
-                        "type": "object",
-                        "description": "Headers to send with the request"
-                    },
-                    "oauth": {
-                        "description": "OAuth authentication configuration for the MCP server. Set to false to disable OAuth auto-detection.",
-                        "anyOf": [
-                            {
-                                "type": "object",
-                                "properties": {
-                                    "clientId": {
-                                        "type": "string",
-                                        "description": "OAuth client ID. If not provided, dynamic client registration (RFC 7591) will be attempted."
-                                    },
-                                    "clientSecret": {
-                                        "type": "string",
-                                        "description": "OAuth client secret (if required by the authorization server)"
-                                    },
-                                    "scope": {
-                                        "type": "string",
-                                        "description": "OAuth scopes to request during authorization"
-                                    }
-                                }
-                            },
-                            {
-                                "type": "boolean",
-                                "const": false
-                            }
-                        ]
-                    },
-                    "timeout": {
-                        "type": "integer",
-                        "maximum": 9007199254740991u64,
-                        "exclusiveMinimum": 0,
-                        "description": "Timeout in ms for MCP server requests. Defaults to 5000 (5 seconds) if not specified."
-                    }
-                },
-                "required": ["type", "url"]
-            }
-        ]
-    })
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum McpAddConfigDoc {
+    Local(McpAddLocalConfigDoc),
+    Remote(McpAddRemoteConfigDoc),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct McpAddLocalConfigDoc {
+    #[serde(rename = "type")]
+    #[schemars(description = "Type of MCP server connection")]
+    pub config_type: McpAddLocalConfigTypeDoc,
+    #[schemars(description = "Command and arguments to run the MCP server")]
+    pub command: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(description = "Environment variables to set when running the MCP server")]
+    pub environment: Option<std::collections::BTreeMap<String, String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(description = "Enable or disable the MCP server on startup")]
+    pub enabled: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(range(min = 1, max = 9007199254740991i64))]
+    #[schemars(
+        description = "Timeout in ms for MCP server requests. Defaults to 5000 (5 seconds) if not specified."
+    )]
+    pub timeout: Option<u64>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+pub enum McpAddLocalConfigTypeDoc {
+    #[default]
+    #[serde(rename = "local")]
+    Local,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct McpAddRemoteConfigDoc {
+    #[serde(rename = "type")]
+    #[schemars(description = "Type of MCP server connection")]
+    pub config_type: McpAddRemoteConfigTypeDoc,
+    #[schemars(description = "URL of the remote MCP server")]
+    pub url: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(description = "Enable or disable the MCP server on startup")]
+    pub enabled: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(description = "Headers to send with the request")]
+    pub headers: Option<std::collections::BTreeMap<String, String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        description = "OAuth authentication configuration for the MCP server. Set to false to disable OAuth auto-detection."
+    )]
+    pub oauth: Option<McpAddRemoteOauthDoc>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(range(min = 1, max = 9007199254740991i64))]
+    #[schemars(
+        description = "Timeout in ms for MCP server requests. Defaults to 5000 (5 seconds) if not specified."
+    )]
+    pub timeout: Option<u64>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+pub enum McpAddRemoteConfigTypeDoc {
+    #[default]
+    #[serde(rename = "remote")]
+    Remote,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum McpAddRemoteOauthDoc {
+    Config(McpAddOauthConfigDoc),
+    Disabled(FalseConstDoc),
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct McpAddOauthConfigDoc {
+    #[serde(default, rename = "clientId", skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        description = "OAuth client ID. If not provided, dynamic client registration (RFC 7591) will be attempted."
+    )]
+    pub client_id: Option<String>,
+    #[serde(
+        default,
+        rename = "clientSecret",
+        skip_serializing_if = "Option::is_none"
+    )]
+    #[schemars(description = "OAuth client secret (if required by the authorization server)")]
+    pub client_secret: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(description = "OAuth scopes to request during authorization")]
+    pub scope: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -356,4 +355,71 @@ pub enum McpStatusDoc {
     Failed(McpStatusFailedDoc),
     NeedsAuth(McpStatusNeedsAuthDoc),
     NeedsClientRegistration(McpStatusNeedsClientRegistrationDoc),
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::{
+        McpAddConfigDoc, McpAddLocalConfigDoc, McpAddOauthConfigDoc, McpAddRemoteConfigDoc,
+        McpAddRemoteOauthDoc,
+    };
+
+    #[test]
+    fn mcp_add_local_config_deserializes() {
+        let config: McpAddConfigDoc = serde_json::from_value(json!({
+            "type": "local",
+            "command": ["uvx", "example-server"],
+            "environment": { "DEBUG": "1" },
+            "enabled": true,
+            "timeout": 5000
+        }))
+        .expect("local MCP add config should deserialize");
+
+        assert!(matches!(
+            config,
+            McpAddConfigDoc::Local(McpAddLocalConfigDoc { .. })
+        ));
+    }
+
+    #[test]
+    fn mcp_add_remote_config_deserializes() {
+        let config: McpAddConfigDoc = serde_json::from_value(json!({
+            "type": "remote",
+            "url": "https://example.invalid/mcp",
+            "headers": { "Authorization": "Bearer token" },
+            "enabled": true,
+            "timeout": 5000
+        }))
+        .expect("remote MCP add config should deserialize");
+
+        assert!(matches!(
+            config,
+            McpAddConfigDoc::Remote(McpAddRemoteConfigDoc { .. })
+        ));
+    }
+
+    #[test]
+    fn mcp_add_remote_oauth_false_deserializes() {
+        let oauth: McpAddRemoteOauthDoc =
+            serde_json::from_value(json!(false)).expect("oauth=false should deserialize");
+
+        assert!(matches!(oauth, McpAddRemoteOauthDoc::Disabled(_)));
+    }
+
+    #[test]
+    fn mcp_add_remote_oauth_config_deserializes() {
+        let oauth: McpAddRemoteOauthDoc = serde_json::from_value(json!({
+            "clientId": "client-id",
+            "clientSecret": "client-secret",
+            "scope": "openid profile"
+        }))
+        .expect("oauth object should deserialize");
+
+        assert!(matches!(
+            oauth,
+            McpAddRemoteOauthDoc::Config(McpAddOauthConfigDoc { .. })
+        ));
+    }
 }

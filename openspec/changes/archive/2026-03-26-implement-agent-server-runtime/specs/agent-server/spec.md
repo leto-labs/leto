@@ -1,19 +1,6 @@
-# agent-server Specification
+# agent-server Delta Spec
 
-## Purpose
-Define the hosted `agent-server` boundary over the shared agent core, including
-the canonical versioned `/v1` API and the secondary OpenCode-compatible surface
-under `/v1/compat/opencode`.
-## Requirements
-### Requirement: Agent Server Must Host The Shared Core Boundary
-The system MUST provide an `agent-server` crate that hosts `Arc<dyn AgentCore>`
-rather than a separate client API trait.
-
-#### Scenario: Hosted server uses shared core
-- **WHEN** `agent-server` is constructed
-- **THEN** it SHALL accept a shared `AgentCore` implementation
-- **AND** the hosted boundary SHALL remain aligned with the same core interface
-  used by other consumers
+## MODIFIED Requirements
 
 ### Requirement: Canonical API Is Versioned Under `/v1`
 The canonical hosted API MUST live under `/v1`.
@@ -52,32 +39,14 @@ The system MUST expose an OpenCode-compatible secondary surface under
 `/v1/compat/opencode`.
 
 That compatibility surface MUST remain separate from the canonical API and MUST
-cover the OpenCode contract while keeping its internal implementation organized
-around the compat route families and shared domain concepts rather than a single
-catch-all DTO file.
+target OpenCode release `v1.3.2` as its compatibility baseline.
 
-#### Scenario: Compat DTOs are organized by domain
-- **WHEN** OpenCode compat request, response, query, path, and event DTOs are
-  defined
-- **THEN** they SHALL live in route-family or shared domain modules
-- **AND** the implementation SHALL NOT rely on a monolithic dumping-ground DTO
-  file as the primary contract source
+#### Scenario: Compatibility routes are version-scoped and namespaced
+- **WHEN** a caller uses the OpenCode-compatible surface
+- **THEN** it SHALL do so under `/v1/compat/opencode`
+- **AND** the canonical `/v1` API SHALL remain the primary hosted contract
 
-#### Scenario: Compat `/doc` remains exact while internal cleanup proceeds
-- **WHEN** the compat contract is generated at `/v1/compat/opencode/doc`
-- **THEN** it SHALL remain exactly equivalent to the pinned OpenCode contract
-  under the existing prefix-aware comparison
-- **AND** any remaining doc-generation helpers SHALL be limited to justified
-  generator-format or transport-documentation adaptation
-
-### Requirement: Canonical Protocol Is Shared With The Remote Core
-The system MUST share the canonical `/v1` wire contract between `agent-server`
-and `AgentCoreRemote`.
-
-#### Scenario: Server and remote client use one canonical protocol definition
-- **WHEN** the canonical `/v1` request or response shapes are compiled
-- **THEN** `agent-server` and `agent-core-remote` SHALL use the same DTO
-  definitions
+## ADDED Requirements
 
 ### Requirement: OpenCode Compatibility Must Cover The Full OpenAPI Contract
 The compatibility surface MUST cover the full OpenCode route inventory declared

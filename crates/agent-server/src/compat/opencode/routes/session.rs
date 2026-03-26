@@ -15,13 +15,12 @@ use super::super::types::common::CompatQuery;
 use super::super::types::errors::{BadRequestErrorDoc, NotFoundErrorDoc};
 use super::super::types::files::FileDiffDoc;
 use super::super::types::session::{
-    AgentPartInputDoc, AssistantMessageDoc, AssistantMessageWithPartsDoc, CommandFilePartInputDoc,
-    CommandRequest, FilePartInputDoc, MessageListQuery, MessageWithPartsDoc, PartDoc,
-    PermissionReplyRequest, PromptRequest, RevertRequest, SessionCreateRequest, SessionDiffQuery,
-    SessionDoc, SessionForkRequest, SessionIdPath, SessionIdleStatusDoc, SessionIdleStatusKindDoc,
-    SessionInitRequest, SessionListQuery, SessionMessagePartPath, SessionMessagePath,
-    SessionPermissionPath, SessionStatusDoc, SessionSummarizeRequest, SessionUpdateRequest,
-    ShellRequest, SubtaskPartInputDoc, TextPartInputDoc, TodoDoc,
+    AssistantMessageDoc, AssistantMessageWithPartsDoc, CommandRequest, MessageListQuery,
+    MessageWithPartsDoc, PartDoc, PermissionReplyRequest, PromptRequest, RevertRequest,
+    SessionCreateRequest, SessionDiffQuery, SessionDoc, SessionForkRequest, SessionIdPath,
+    SessionIdleStatusDoc, SessionIdleStatusKindDoc, SessionInitRequest, SessionListQuery,
+    SessionMessagePartPath, SessionMessagePath, SessionPermissionPath, SessionStatusDoc,
+    SessionSummarizeRequest, SessionUpdateRequest, ShellRequest, TodoDoc,
 };
 use super::super::*;
 
@@ -398,7 +397,7 @@ fn session_prompt_route() -> ApiRouter<AppState> {
                         "Create and send a new message to a session, streaming the AI response.",
                     )
                     .with(|op| session_parameters(op, &["directory", "workspace", "sessionID"]))
-                    .with(|op| inline_prompt_request(op, true))
+                    .with(|op| inline_json_request::<PromptRequest>(op, true))
                     .with(|op| {
                         json_response::<200, AssistantMessageWithPartsDoc>(op, "Created message")
                     }),
@@ -501,7 +500,7 @@ fn session_prompt_async_route() -> ApiRouter<AppState> {
                         .with(|op| {
                             session_parameters(op, &["directory", "workspace", "sessionID"])
                         })
-                        .with(|op| inline_prompt_request(op, true))
+                        .with(|op| inline_json_request::<PromptRequest>(op, true))
                         .response_with::<204, NoContent, _>(|res| {
                             res.description("Prompt accepted")
                         }),
@@ -522,7 +521,7 @@ fn session_command_route() -> ApiRouter<AppState> {
                         "Send a new command to a session for execution by the AI assistant.",
                     )
                     .with(|op| session_parameters(op, &["directory", "workspace", "sessionID"]))
-                    .with(|op| inline_command_request(op, true))
+                    .with(|op| inline_json_request::<CommandRequest>(op, true))
                     .with(|op| {
                         json_response::<200, AssistantMessageWithPartsDoc>(op, "Created message")
                     }),
@@ -648,25 +647,6 @@ fn inline_json_request<'a, T: JsonSchema>(
     inline_json_request_from_value(op, required, schema)
 }
 
-fn inline_prompt_request<'a>(op: TransformOperation<'a>, required: bool) -> TransformOperation<'a> {
-    let mut schema = inline_schema_value::<PromptRequest>();
-    canonicalize_schema_against_candidates(&mut schema, &prompt_part_request_candidates());
-    inline_json_request_from_value(op, required, schema)
-}
-
-fn inline_command_request<'a>(
-    op: TransformOperation<'a>,
-    required: bool,
-) -> TransformOperation<'a> {
-    let mut schema = inline_schema_value::<CommandRequest>();
-    if let Some(items) = pointer_mut(&mut schema, &["properties", "parts", "items"]) {
-        *items = serde_json::json!({
-            "anyOf": [inline_schema_value::<CommandFilePartInputDoc>()]
-        });
-    }
-    inline_json_request_from_value(op, required, schema)
-}
-
 fn parameter_order<'a>(mut op: TransformOperation<'a>, names: &[&str]) -> TransformOperation<'a> {
     let order = names
         .iter()
@@ -683,21 +663,6 @@ fn parameter_order<'a>(mut op: TransformOperation<'a>, names: &[&str]) -> Transf
             ReferenceOr::Reference { .. } => usize::MAX,
         });
     op
-}
-
-fn schema_name<T: JsonSchema>() -> String {
-    let root =
-        serde_json::to_value(schema_for!(T)).expect("serializing schemars schema should succeed");
-    root.get("title")
-        .and_then(Value::as_str)
-        .map(ToOwned::to_owned)
-        .unwrap_or_else(|| {
-            std::any::type_name::<T>()
-                .rsplit("::")
-                .next()
-                .unwrap_or("Schema")
-                .to_owned()
-        })
 }
 
 fn inline_schema_value<T: JsonSchema>() -> Value {
@@ -809,129 +774,6 @@ fn inline_json_request_from_value<'a>(
         }
     }
     op
-}
-
-fn strip_schema_titles_for_match(value: &mut Value) {
-    match value {
-        Value::Object(map) => {
-            map.remove("title");
-            for child in map.values_mut() {
-                strip_schema_titles_for_match(child);
-            }
-        }
-        Value::Array(items) => {
-            for item in items {
-                strip_schema_titles_for_match(item);
-            }
-        }
-        _ => {}
-    }
-}
-
-fn prompt_part_request_candidates() -> Vec<(String, Value)> {
-    vec![
-        component_candidate::<TextPartInputDoc>(),
-        component_candidate::<FilePartInputDoc>(),
-        component_candidate::<AgentPartInputDoc>(),
-        component_candidate::<SubtaskPartInputDoc>(),
-    ]
-}
-
-fn component_candidate<T: JsonSchema>() -> (String, Value) {
-    let mut schema = inline_schema_value::<T>();
-    strip_schema_titles_for_match(&mut schema);
-    (schema_name::<T>(), schema)
-}
-
-fn canonicalize_schema_against_candidates(schema: &mut Value, candidates: &[(String, Value)]) {
-    let Some(map) = schema.as_object_mut() else {
-        return;
-    };
-
-    for key in ["items", "contains", "propertyNames"] {
-        if let Some(child) = map.get_mut(key) {
-            if let Some(name) = matching_candidate_name(child, candidates) {
-                *child = serde_json::json!({
-                    "$ref": format!("#/components/schemas/{name}")
-                });
-            } else {
-                canonicalize_schema_against_candidates(child, candidates);
-            }
-        }
-    }
-
-    for key in ["anyOf", "oneOf", "allOf"] {
-        if let Some(Value::Array(items)) = map.get_mut(key) {
-            for item in items {
-                if let Some(name) = matching_candidate_name(item, candidates) {
-                    *item = serde_json::json!({
-                        "$ref": format!("#/components/schemas/{name}")
-                    });
-                } else {
-                    canonicalize_schema_against_candidates(item, candidates);
-                }
-            }
-        }
-    }
-
-    if let Some(Value::Object(properties)) = map.get_mut("properties") {
-        for child in properties.values_mut() {
-            if let Some(name) = matching_candidate_name(child, candidates) {
-                *child = serde_json::json!({
-                    "$ref": format!("#/components/schemas/{name}")
-                });
-            } else {
-                canonicalize_schema_against_candidates(child, candidates);
-            }
-        }
-    }
-
-    if let Some(child) = map.get_mut("additionalProperties") {
-        if let Some(name) = matching_candidate_name(child, candidates) {
-            *child = serde_json::json!({
-                "$ref": format!("#/components/schemas/{name}")
-            });
-        } else {
-            canonicalize_schema_against_candidates(child, candidates);
-        }
-    }
-}
-
-fn pointer_mut<'a>(value: &'a mut Value, path: &[&str]) -> Option<&'a mut Value> {
-    let mut current = value;
-    for segment in path {
-        if let Ok(index) = segment.parse::<usize>() {
-            current = current.as_array_mut()?.get_mut(index)?;
-        } else {
-            current = current.as_object_mut()?.get_mut(*segment)?;
-        }
-    }
-    Some(current)
-}
-
-fn matching_candidate_name(schema: &Value, candidates: &[(String, Value)]) -> Option<String> {
-    if !is_refable_schema(schema) {
-        return None;
-    }
-
-    let mut normalized = schema.clone();
-    strip_schema_titles_for_match(&mut normalized);
-
-    candidates
-        .iter()
-        .find(|(_, candidate)| *candidate == normalized)
-        .map(|(name, _)| name.clone())
-}
-
-fn is_refable_schema(schema: &Value) -> bool {
-    let Some(map) = schema.as_object() else {
-        return false;
-    };
-
-    map.contains_key("properties")
-        || map.contains_key("anyOf")
-        || map.contains_key("allOf")
-        || map.contains_key("oneOf")
 }
 
 fn session_parameters<'a>(

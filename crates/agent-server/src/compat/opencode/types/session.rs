@@ -53,7 +53,7 @@ pub struct CommandRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub variant: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub parts: Vec<CommandFilePartInputDoc>,
+    pub parts: Vec<CommandPartInputDoc>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
@@ -195,6 +195,12 @@ pub struct CommandFilePartInputDoc {
     pub url: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<FilePartSourceDoc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum CommandPartInputDoc {
+    File(CommandFilePartInputDoc),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -1148,4 +1154,42 @@ pub struct TodoDoc {
     pub status: String,
     #[schemars(description = "Priority level of the task: high, medium, low")]
     pub priority: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::{CommandPartInputDoc, CommandRequest};
+
+    #[test]
+    fn command_part_input_doc_deserializes_file_payload() {
+        let part: CommandPartInputDoc = serde_json::from_value(json!({
+            "type": "file",
+            "mime": "text/plain",
+            "url": "file:///tmp/example.txt"
+        }))
+        .expect("command file part should deserialize");
+
+        assert!(matches!(part, CommandPartInputDoc::File(_)));
+    }
+
+    #[test]
+    fn command_request_deserializes_existing_parts_shape() {
+        let request: CommandRequest = serde_json::from_value(json!({
+            "command": "cat",
+            "arguments": "README.md",
+            "parts": [
+                {
+                    "type": "file",
+                    "mime": "text/plain",
+                    "url": "file:///tmp/example.txt"
+                }
+            ]
+        }))
+        .expect("command request should deserialize");
+
+        assert_eq!(request.parts.len(), 1);
+        assert!(matches!(request.parts[0], CommandPartInputDoc::File(_)));
+    }
 }

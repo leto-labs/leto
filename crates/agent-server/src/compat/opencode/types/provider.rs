@@ -1,5 +1,6 @@
 use schemars::{JsonSchema, Schema, SchemaGenerator};
-use serde::{Deserialize, Serialize};
+use serde::de::Error as _;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value;
 use serde_json::json;
 
@@ -708,10 +709,79 @@ fn true_const_schema(_generator: &mut SchemaGenerator) -> Schema {
     .expect("valid true const schema")
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, JsonSchema)]
 #[schemars(schema_with = "false_const_schema")]
 pub struct FalseConstDoc;
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, JsonSchema)]
 #[schemars(schema_with = "true_const_schema")]
 pub struct TrueConstDoc;
+
+impl Serialize for FalseConstDoc {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_bool(false)
+    }
+}
+
+impl<'de> Deserialize<'de> for FalseConstDoc {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        match bool::deserialize(deserializer)? {
+            false => Ok(Self),
+            true => Err(D::Error::custom("expected false")),
+        }
+    }
+}
+
+impl Serialize for TrueConstDoc {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_bool(true)
+    }
+}
+
+impl<'de> Deserialize<'de> for TrueConstDoc {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        match bool::deserialize(deserializer)? {
+            true => Ok(Self),
+            false => Err(D::Error::custom("expected true")),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{FalseConstDoc, TrueConstDoc};
+
+    #[test]
+    fn false_const_doc_serializes_and_deserializes_as_false() {
+        assert_eq!(
+            serde_json::to_value(FalseConstDoc).expect("false const should serialize"),
+            serde_json::json!(false)
+        );
+        serde_json::from_value::<FalseConstDoc>(serde_json::json!(false))
+            .expect("false const should deserialize from false");
+        assert!(serde_json::from_value::<FalseConstDoc>(serde_json::json!(true)).is_err());
+    }
+
+    #[test]
+    fn true_const_doc_serializes_and_deserializes_as_true() {
+        assert_eq!(
+            serde_json::to_value(TrueConstDoc).expect("true const should serialize"),
+            serde_json::json!(true)
+        );
+        serde_json::from_value::<TrueConstDoc>(serde_json::json!(true))
+            .expect("true const should deserialize from true");
+        assert!(serde_json::from_value::<TrueConstDoc>(serde_json::json!(false)).is_err());
+    }
+}

@@ -284,6 +284,11 @@ fn compat_runtime_does_not_import_pinned_openapi_contract() {
             if path.extension().and_then(|ext| ext.to_str()) != Some("rs") {
                 continue;
             }
+            // `test_utils.rs` is compiled only under `#[cfg(test)]` and is
+            // allowed to load the pinned contract for parity tests.
+            if path.file_name().and_then(|name| name.to_str()) == Some("test_utils.rs") {
+                continue;
+            }
             let source = fs::read_to_string(&path).unwrap();
             assert!(
                 !source.contains("openapi/opencode.json"),
