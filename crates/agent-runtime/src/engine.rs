@@ -2535,8 +2535,8 @@ impl EngineRuntime {
                 .clone()
                 .or_else(|| self.config.model.clone()),
             messages: request.messages.clone(),
-            tools: Vec::new(),
-            options: request_options_without_tools(&self.config.request),
+            tools: request.tools.clone(),
+            options: request_options_for_subcall(&self.config.request, &request.tools),
         };
 
         let cancel = CancellationToken::new();
@@ -2789,7 +2789,7 @@ impl EngineRuntime {
                 Message::user_text(transcript),
             ],
             tools: Vec::new(),
-            options: request_options_without_tools(&self.config.request),
+            options: request_options_for_subcall(&self.config.request, &[]),
         };
 
         let step = run_provider_step(
@@ -4215,10 +4215,19 @@ fn estimate_text_tokens(text: &str) -> usize {
     (text.chars().count() / 4).max(1)
 }
 
-fn request_options_without_tools(options: &provider::RequestOptions) -> provider::RequestOptions {
+fn request_options_for_subcall(
+    options: &provider::RequestOptions,
+    tools: &[provider::ToolDefinition],
+) -> provider::RequestOptions {
     let mut options = options.clone();
-    options.tool_choice = None;
-    options.parallel_tool_calls = None;
+    // Tool-less subcalls behave like pure inference helpers such as summary
+    // generation. When a loop provides its own subcall-local tools, preserve
+    // the caller's tool-related options so the provider can use that private
+    // semantic tool surface.
+    if tools.is_empty() {
+        options.tool_choice = None;
+        options.parallel_tool_calls = None;
+    }
     options
 }
 
@@ -5018,6 +5027,7 @@ mod tests {
                         request: SubcallRequest {
                             purpose: "handoff_summary".into(),
                             messages: vec![Message::user_text("summarize this turn")],
+                            tools: Vec::new(),
                             model_override: None,
                         },
                     });

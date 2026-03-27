@@ -8,7 +8,7 @@ use std::path::Path;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use agent_loops::SimpleLoop;
+use agent_loops::{RobustLoop, SimpleLoop, Terminus2Loop, TerminusKiraLoop};
 use agent_runtime::{
     LoopStrategy, Message, RuntimeConfig, RuntimeError, RuntimeEvent, SessionCommand,
     SessionEngine, SessionState, ToolExecutor,
@@ -427,6 +427,11 @@ impl AgentCoreNativeBuilder {
     pub async fn build(mut self) -> Result<AgentCoreNative, CoreError> {
         if self.loops.is_empty() {
             self.loops.insert("simple".into(), Arc::new(SimpleLoop));
+            self.loops.insert("robust".into(), Arc::new(RobustLoop));
+            self.loops
+                .insert("terminus2".into(), Arc::new(Terminus2Loop));
+            self.loops
+                .insert("terminus_kira".into(), Arc::new(TerminusKiraLoop));
         }
         if self.default_loop_name.is_none() {
             self.default_loop_name = Some("simple".into());

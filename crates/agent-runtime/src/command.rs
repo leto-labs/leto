@@ -1,4 +1,4 @@
-use provider::{FinishReason, Message};
+use provider::{FinishReason, Message, ToolDefinition};
 use serde::{Deserialize, Serialize};
 use ulid::Ulid;
 
@@ -169,6 +169,15 @@ pub struct SubcallRequest {
     pub purpose: String,
     /// Provider messages for the isolated subcall.
     pub messages: Vec<Message>,
+    /// Optional loop-authored tool definitions exposed only to the subcall.
+    ///
+    /// This currently lets specialized loop strategies run a provider step
+    /// with a private semantic tool vocabulary without polluting the global
+    /// runtime tool registry. The intended long-term direction is a more
+    /// principled loop-aware tool-selection surface rather than treating
+    /// subcalls as the only place loops can define supported tools.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tools: Vec<ToolDefinition>,
     /// Optional model override applied only to the subcall.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model_override: Option<String>,
@@ -954,6 +963,7 @@ mod tests {
         let request = SubcallRequest {
             purpose: "handoff_summary".into(),
             messages: vec![Message::user_text("summarize this")],
+            tools: Vec::new(),
             model_override: Some("summary-model".into()),
         };
 

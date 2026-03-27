@@ -6,6 +6,8 @@ version.workspace = true
 [dependencies]
 agent-runtime = { path = "../agent-runtime" }
 futures = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
 tokio = { workspace = true, features = ["sync", "rt"] }
 tokio-stream = { workspace = true }
 tokio-util = { workspace = true }
