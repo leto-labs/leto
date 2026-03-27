@@ -4,3 +4,6 @@
 [submodule "submodules/opencode"]
 	path = submodules/opencode
 	url = https://github.com/leto-labs/opencode.git
+[submodule "submodules/atif-rust"]
+	path = submodules/atif-rust
+	url = git@github.com:leto-labs/atif-rust.git
