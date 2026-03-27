@@ -18,7 +18,6 @@ The parity baseline comes from the combined behavior of:
 
 - legacy OpenAI API-key and OAuth providers
 - legacy credential-pool strategy and health behavior
-- legacy project bootstrap and config defaults
 - legacy advanced loops (`robust`, `terminus2`, `terminus-kira`)
 - legacy terminal-session tool behavior
 - legacy user-facing composition surfaces
@@ -38,10 +37,10 @@ store-backed activation layer in `agent-core`.
 
 ### Core composition
 
-`agent-core` becomes the canonical replacement for legacy runtime assembly. It
-must still restore project bootstrap, persisted defaults, prompt/loop
-selection, and any remaining assembly behavior so future CLI or hosted
-consumers do not need legacy composition code.
+The bootstrap/defaults tranche has been split into a focused change so it can
+be archived independently of the remaining parity program. Any later
+`agent-core` work tracked by this umbrella change should be limited to assembly
+needs that are downstream of the advanced loops and terminal-session surfaces.
 
 ### Loops and terminal behavior
 
@@ -60,14 +59,12 @@ to real behaviors backed by the shared core/runtime stack.
 
 Implementation should proceed in dependency order:
 
-1. project/store/bootstrap parity
-2. any remaining provider assembly parity in `agent-core`
-3. advanced loop parity
-4. terminal-session parity
-5. hosted compat-route parity
+1. advanced loop parity
+2. terminal-session parity
+3. hosted compat-route parity
 
 This order minimizes rework because the later user-facing surfaces depend on the
-earlier auth, store, and composition layers.
+earlier runtime and tooling layers.
 
 ## Tradeoffs
 

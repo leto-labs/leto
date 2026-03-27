@@ -1,16 +1,12 @@
 - [x] Split the completed provider-credential tranche into a focused OpenSpec
       change so it can be archived independently.
-- [ ] Extend `agent-store` requirements to persist parity-required project
-      defaults.
-- [ ] Extend `agent-core` requirements to cover project bootstrap, prompt/loop
-      defaults, and remaining assembly behavior.
+- [x] Split the completed bootstrap/defaults tranche into a focused OpenSpec
+      change so it can be archived independently.
 - [ ] Add `agent-loops` parity requirements for strategies equivalent to legacy
       `robust`, `terminus2`, and `terminus-kira`.
 - [ ] Extend `agent-tools` requirements to cover terminal-session parity.
 - [ ] Extend `agent-server` requirements so documented compat auth and PTY
       routes require real implementations rather than placeholders.
-- [ ] Implement project bootstrap and persisted-default parity in `agent-core`
-      and `agent-store`.
 - [ ] Implement advanced loop parity in `agent-loops`.
 - [ ] Implement terminal-session parity in `agent-tools` and wire it through
       the default core assembly.
