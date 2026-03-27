@@ -446,7 +446,13 @@ mod tests {
             .create(Project::new(
                 Some("demo".into()),
                 None,
-                ProjectConfig::default(),
+                ProjectConfig {
+                    system_prompt: Some("project prompt".into()),
+                    default_loop: Some("planner".into()),
+                    default_provider: Some("openai".into()),
+                    default_model: Some("gpt-5".into()),
+                    ..ProjectConfig::default()
+                },
             ))
             .await
             .unwrap();
@@ -469,11 +475,13 @@ mod tests {
             .unwrap();
 
         let reopened = FileStore::new(temp.path()).await.unwrap();
+        let reopened_project = reopened.projects().get(project.id).await.unwrap();
         let messages = reopened
             .messages()
             .list_for_session(session.id)
             .await
             .unwrap();
+        assert_eq!(reopened_project.config, project.config);
         assert_eq!(messages.len(), 1);
         assert_eq!(messages[0].message.plain_text_lossy(), "hello");
     }

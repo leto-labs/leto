@@ -1,6 +1,8 @@
 //! Application-facing runtime SDK that assembles stores, providers, loops, and
 //! the per-session `agent-runtime` engine.
 
+mod bootstrap;
+
 use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 use std::pin::Pin;
@@ -32,6 +34,8 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex, broadcast, mpsc};
 use tokio_stream::wrappers::{BroadcastStream, ReceiverStream};
 use tokio_util::sync::CancellationToken;
+
+use crate::bootstrap::resolve_project_config;
 
 const CORE_EVENT_CAPACITY: usize = 1024;
 
@@ -67,6 +71,8 @@ pub enum CoreError {
     Store(#[from] StoreError),
     #[error(transparent)]
     Runtime(#[from] RuntimeError),
+    #[error(transparent)]
+    Bootstrap(#[from] bootstrap::BootstrapError),
     #[error(transparent)]
     ProviderOpenAi(#[from] provider_openai::Error),
     #[error("provider not registered: {0}")]
@@ -543,14 +549,11 @@ impl AgentCoreNative {
             .file_name()
             .and_then(|segment| segment.to_str())
             .map(|segment| segment.to_owned());
+        let config = resolve_project_config(&normalized)?;
         Ok(self
             .store
             .projects()
-            .create(Project::new(
-                name,
-                Some(normalized),
-                ProjectConfig::default(),
-            ))
+            .create(Project::new(name, Some(normalized), config))
             .await?)
     }
 
@@ -641,8 +644,11 @@ impl AgentCoreNative {
         session_id: SessionId,
     ) -> Result<String, CoreError> {
         let session = self.store.sessions().get(session_id).await?;
+        let project = self.store.projects().get(session.project_id).await?;
+        let project_default_loop = project.config.default_loop.clone();
         Ok(session
             .loop_name
+            .or(project_default_loop)
             .unwrap_or_else(|| self.default_loop_name.clone()))
     }
 
@@ -720,6 +726,8 @@ impl AgentCoreNative {
             .into_iter()
             .map(|stored| stored.message)
             .collect::<Vec<_>>();
+        let transcript =
+            seed_project_prompt(project.config.system_prompt.as_deref(), transcript, &input);
         let initial_state = SessionState::with_transcript(session_id, transcript);
         let engine = SessionEngine::new(
             resolved.provider,
@@ -825,6 +833,7 @@ impl AgentCoreNative {
         let loop_name = session
             .loop_name
             .clone()
+            .or_else(|| project.config.default_loop.clone())
             .unwrap_or_else(|| self.default_loop_name.clone());
         let provider = self
             .providers
@@ -1061,6 +1070,26 @@ fn resolve_runtime_config(project: &ProjectConfig, session: &Session) -> Runtime
         .or_else(|| config.model.clone());
     config.request = merge_request_options(&project.runtime.request, &session.request);
     config
+}
+
+fn seed_project_prompt(
+    system_prompt: Option<&str>,
+    mut transcript: Vec<Message>,
+    input: &[Message],
+) -> Vec<Message> {
+    let Some(system_prompt) = system_prompt else {
+        return transcript;
+    };
+    let has_explicit_prompt = transcript.iter().chain(input.iter()).any(|message| {
+        matches!(
+            message.role,
+            provider::MessageRole::System | provider::MessageRole::Developer
+        )
+    });
+    if !has_explicit_prompt {
+        transcript.insert(0, Message::system_text(system_prompt));
+    }
+    transcript
 }
 
 fn merge_request_options(base: &RequestOptions, overlay: &RequestOptions) -> RequestOptions {
@@ -1364,6 +1393,114 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn resolve_or_create_project_loads_project_local_defaults() {
+        let temp = TempDir::new().unwrap();
+        let agents_dir = temp.path().join(".agents");
+        std::fs::create_dir_all(&agents_dir).unwrap();
+        std::fs::write(
+            agents_dir.join("config.toml"),
+            r#"[agent]
+loop_name = "planner"
+max_iterations = 64
+max_retries = 2
+
+[agent.inference]
+provider = "mock"
+model = "mock-model"
+reasoning = "high"
+max_tokens = 512
+"#,
+        )
+        .unwrap();
+        std::fs::write(agents_dir.join("AGENTS.md"), "root prompt").unwrap();
+
+        let store = Arc::new(InMemoryStore::new());
+        let core = AgentCoreNative::builder(store)
+            .with_provider("mock", Arc::new(MockProvider::new()))
+            .with_loop("planner", Arc::new(SimpleLoop))
+            .build()
+            .await
+            .unwrap();
+
+        let project = core.resolve_or_create_project(temp.path()).await.unwrap();
+
+        assert_eq!(project.config.default_loop.as_deref(), Some("planner"));
+        assert_eq!(project.config.default_provider.as_deref(), Some("mock"));
+        assert_eq!(project.config.default_model.as_deref(), Some("mock-model"));
+        assert_eq!(project.config.runtime.max_iterations, 64);
+        assert_eq!(project.config.runtime.max_retries, 2);
+        assert_eq!(project.config.runtime.request.max_output_tokens, Some(512));
+        assert_eq!(project.config.system_prompt.as_deref(), Some("root prompt"));
+        assert_eq!(
+            project
+                .config
+                .runtime
+                .request
+                .reasoning
+                .as_ref()
+                .and_then(|reasoning| reasoning.effort.as_deref()),
+            Some("high")
+        );
+    }
+
+    #[tokio::test]
+    async fn resolve_or_create_project_prefers_explicit_prompt_over_agents() {
+        let temp = TempDir::new().unwrap();
+        let agents_dir = temp.path().join(".agents");
+        std::fs::create_dir_all(&agents_dir).unwrap();
+        std::fs::write(
+            agents_dir.join("config.toml"),
+            "[agent]\nsystem_prompt = \"config prompt\"\n",
+        )
+        .unwrap();
+        std::fs::write(agents_dir.join("AGENTS.md"), "root prompt").unwrap();
+
+        let store = Arc::new(InMemoryStore::new());
+        let core = AgentCoreNative::builder(store)
+            .with_provider("mock", Arc::new(MockProvider::new()))
+            .build()
+            .await
+            .unwrap();
+
+        let project = core.resolve_or_create_project(temp.path()).await.unwrap();
+        assert_eq!(
+            project.config.system_prompt.as_deref(),
+            Some("config prompt")
+        );
+    }
+
+    #[tokio::test]
+    async fn current_loop_name_uses_project_default_loop() {
+        let store = Arc::new(InMemoryStore::new());
+        let core = AgentCoreNative::builder(store.clone())
+            .with_provider("mock", Arc::new(MockProvider::new()))
+            .with_loop("planner", Arc::new(SimpleLoop))
+            .build()
+            .await
+            .unwrap();
+
+        let project = store
+            .projects()
+            .create(Project::new(
+                Some("demo".into()),
+                Some("/tmp/demo".into()),
+                ProjectConfig {
+                    default_loop: Some("planner".into()),
+                    ..ProjectConfig::default()
+                },
+            ))
+            .await
+            .unwrap();
+        let session = core.create_session(project.id).await.unwrap();
+
+        let loop_name = core
+            .current_loop_name_for_session(session.id)
+            .await
+            .unwrap();
+        assert_eq!(loop_name, "planner");
+    }
+
+    #[tokio::test]
     async fn turn_persists_transcript_back_to_store() {
         let store = Arc::new(InMemoryStore::new());
         let core = AgentCoreNative::builder(store.clone())
@@ -1402,6 +1539,81 @@ mod tests {
         let messages = core.messages(session.id).await.unwrap();
         assert_eq!(messages.len(), 2);
         assert_eq!(messages[0].message.plain_text_lossy(), "hello there");
+    }
+
+    #[tokio::test]
+    async fn turn_seeds_project_prompt_once_and_preserves_original_prompt() {
+        let store = Arc::new(InMemoryStore::new());
+        let core = AgentCoreNative::builder(store.clone())
+            .with_provider("mock", Arc::new(MockProvider::new()))
+            .build()
+            .await
+            .unwrap();
+        let project = store
+            .projects()
+            .create(Project::new(
+                Some("demo".into()),
+                Some("/tmp/prompt-demo".into()),
+                ProjectConfig {
+                    system_prompt: Some("prompt a".into()),
+                    ..ProjectConfig::default()
+                },
+            ))
+            .await
+            .unwrap();
+        let session = core.create_session(project.id).await.unwrap();
+
+        let mut first = core
+            .turn(session.id, vec![Message::user_text("hello there")])
+            .await
+            .unwrap();
+        while let Some(event) = timeout(Duration::from_secs(1), first.next()).await.unwrap() {
+            if matches!(
+                event,
+                CoreEvent::Turn {
+                    event: RuntimeEvent::TurnFinished { .. },
+                    ..
+                }
+            ) {
+                break;
+            }
+        }
+
+        let mut updated_project = project.clone();
+        updated_project.config.system_prompt = Some("prompt b".into());
+        store
+            .projects()
+            .update(project.id, updated_project)
+            .await
+            .unwrap();
+
+        let mut second = core
+            .turn(session.id, vec![Message::user_text("follow up")])
+            .await
+            .unwrap();
+        while let Some(event) = timeout(Duration::from_secs(1), second.next())
+            .await
+            .unwrap()
+        {
+            if matches!(
+                event,
+                CoreEvent::Turn {
+                    event: RuntimeEvent::TurnFinished { .. },
+                    ..
+                }
+            ) {
+                break;
+            }
+        }
+
+        let messages = core.messages(session.id).await.unwrap();
+        assert_eq!(messages[0].message.role, provider::MessageRole::System);
+        assert_eq!(messages[0].message.plain_text_lossy(), "prompt a");
+        let system_messages = messages
+            .iter()
+            .filter(|message| message.message.role == provider::MessageRole::System)
+            .count();
+        assert_eq!(system_messages, 1);
     }
 
     #[tokio::test]

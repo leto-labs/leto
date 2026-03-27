@@ -776,6 +776,14 @@ fn core_error_response(error: CoreError) -> Response {
             Json(ErrorResponse::new("runtime_error", error.to_string())),
         )
             .into_response(),
+        CoreError::Bootstrap(error) => (
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse::new(
+                "project_bootstrap_error",
+                error.to_string(),
+            )),
+        )
+            .into_response(),
         CoreError::ProviderOpenAi(error) => (
             StatusCode::BAD_GATEWAY,
             Json(ErrorResponse::new(

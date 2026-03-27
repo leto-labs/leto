@@ -16,6 +16,11 @@ pub type CredentialStoreKey = (String, String);
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ProjectConfig {
+    /// Optional project-level system prompt persisted as durable transcript
+    /// bootstrap guidance.
+    pub system_prompt: Option<String>,
+    /// Optional default loop name for sessions in the project.
+    pub default_loop: Option<String>,
     /// Default runtime configuration applied to sessions in the project.
     pub runtime: RuntimeConfig,
     /// Optional default provider name.
@@ -27,6 +32,8 @@ pub struct ProjectConfig {
 impl Default for ProjectConfig {
     fn default() -> Self {
         Self {
+            system_prompt: None,
+            default_loop: None,
             runtime: RuntimeConfig::default(),
             default_provider: None,
             default_model: None,
@@ -363,5 +370,24 @@ mod tests {
     fn normalize_project_root_elides_dot_segments() {
         let normalized = normalize_project_root(Path::new("/tmp/work/./src/../repo"));
         assert_eq!(normalized, PathBuf::from("/tmp/work/repo"));
+    }
+
+    #[test]
+    fn project_config_roundtrips_prompt_and_loop_defaults() {
+        let config = ProjectConfig {
+            system_prompt: Some("You are helpful.".into()),
+            default_loop: Some("planner".into()),
+            runtime: RuntimeConfig::default(),
+            default_provider: Some("openai".into()),
+            default_model: Some("gpt-5".into()),
+        };
+
+        let json = serde_json::to_string(&config).unwrap();
+        let decoded: ProjectConfig = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(decoded.system_prompt.as_deref(), Some("You are helpful."));
+        assert_eq!(decoded.default_loop.as_deref(), Some("planner"));
+        assert_eq!(decoded.default_provider.as_deref(), Some("openai"));
+        assert_eq!(decoded.default_model.as_deref(), Some("gpt-5"));
     }
 }
