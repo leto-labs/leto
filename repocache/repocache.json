@@ -63,6 +63,14 @@
     "enabled": true
   },
   {
+    "name": "agent-browser",
+    "url": "git@github.com:vercel-labs/agent-browser.git",
+    "tag": "v0.22.3",
+    "searchPath": "cli/src",
+    "notes": "Vercel Labs browser automation CLI for AI agents. Pin matches the locally installed CLI version. Start with cli/src for the Rust command/runtime implementation; use skills/agent-browser/SKILL.md for the upstream coding-agent workflow, README.md for the full CLI surface, bin/agent-browser.js for the JS launcher wrapper, and docs/src when researching auth, sessions, dashboard, or provider-specific behavior.",
+    "enabled": true
+  },
+  {
     "name": "openai-node",
     "url": "https://github.com/openai/openai-node",
     "tag": "v6.32.0",

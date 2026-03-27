@@ -1,0 +1,5 @@
+{
+  "args": "--no-sandbox",
+  "screenshotDir": "./.agent-browser",
+  "downloadPath": "./.agent-browser"
+}

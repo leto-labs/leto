@@ -295,9 +295,52 @@ bun install
 bun --cwd packages/app dev -- --host 0.0.0.0 --port 3000
 ```
 
-Open `http://127.0.0.1:3000`. On localhost, the OpenCode web app will target
-`http://localhost:4096` by default, so the pinned UI should connect to the
-local `agent-server` without a Brain-specific frontend flow.
+Open `http://127.0.0.1:3000`.
+
+### Agent Browser Loop
+
+The repository root now includes a project-level `agent-browser.json`. The
+installed `agent-browser` CLI auto-loads that file when run from the repository
+root, so local browser automation inherits the machine-specific Chromium launch
+workaround and local artifact paths without repeating extra flags on every
+command.
+
+From the repository root, a minimal `agent-browser` workflow is:
+
+```bash
+agent-browser --session mauser-opencode open http://127.0.0.1:3000
+agent-browser --session mauser-opencode snapshot -i
+agent-browser --session mauser-opencode stream enable
+agent-browser --session mauser-opencode stream status
+```
+
+Browser screenshots and downloads are written to:
+
+```text
+./.agent-browser/
+```
+
+The frontend runs on port `3000`, but the OpenCode web app still defaults its
+backend target to `http://localhost:4096` during local development. That
+default is not sufficient for `agent-server`, because the OpenCode
+compatibility surface is mounted under `/v1/compat/opencode`, not at the HTTP
+root.
+
+On first attach, open the server picker in the UI, add the following server,
+and set it as the default:
+
+```text
+http://127.0.0.1:4096/v1/compat/opencode
+```
+
+Using the root URL `http://127.0.0.1:4096` or `http://localhost:4096` will
+produce expected `404` responses for OpenCode routes like `/global/health`.
+
+The Vite environment variables `VITE_OPENCODE_SERVER_HOST` and
+`VITE_OPENCODE_SERVER_PORT` only control the host and port of the default local
+URL. They cannot encode the required `/v1/compat/opencode` path. Use the server
+picker's persisted default server selection instead of trying to express the
+compat mount path through environment variables.
 
 ### Smoke Test
 
@@ -309,8 +352,20 @@ bunx playwright install chromium
 bun --cwd packages/app test:e2e e2e/app/home.spec.ts
 ```
 
-That verifies the pinned web UI boots against the local server baseline and the
-core server-selection surface renders.
+That verifies the pinned web UI boots and the core server-selection surface
+renders. It does not, by itself, prove that the default root URL
+`http://localhost:4096` is attachable against `agent-server`.
+
+To confirm the compat mount explicitly, compare the root and compat health
+endpoints:
+
+```bash
+curl -si http://127.0.0.1:4096/global/health
+curl -si http://127.0.0.1:4096/v1/compat/opencode/global/health
+```
+
+The first request should return `404 Not Found`, while the second should return
+`200 OK`.
 
 ### Patch Policy
 
