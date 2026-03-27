@@ -1,27 +1,30 @@
 ## ADDED Requirements
 
-### Requirement: Agent Tools Provide Terminal-Session Parity
+### Requirement: Refactored Stack Provides Runtime-Native Terminal-Session Parity
 
-The `agent-tools` crate SHALL provide a terminal-session tool surface that
-restores the user-visible behavior of the legacy terminal session tooling on the
-refactored stack.
+The refactored stack SHALL provide terminal-session behavior that restores the
+user-visible behavior of the legacy terminal session tooling without requiring a
+duplicate public terminal tool surface on top of `agent-runtime`.
 
 This SHALL include:
 
 - stable terminal-session identity across calls
 - command execution against an existing session
 - explicit lifecycle operations such as close or equivalent cleanup
-- typed contracts suitable for default local core assembly
+- typed runtime-facing contracts suitable for advanced loop orchestration and
+  default local core assembly
 
 #### Scenario: Caller reuses a terminal session across multiple tool calls
 
 - **WHEN** a model or caller opens a terminal session and later issues more
   terminal operations against that same session
-- **THEN** `agent-tools` SHALL preserve the session identity and route those
-  operations to the same live terminal context
+- **THEN** the refactored runtime SHALL preserve the session identity and route
+  those operations to the same live terminal context
 
-#### Scenario: Terminal-session tool definitions are available in default assembly
+#### Scenario: Advanced loops depend on runtime-native terminal sessions
 
-- **WHEN** a caller builds the default native tool registry
-- **THEN** the registry SHALL expose the terminal-session parity surface as part
-  of the available tool definitions
+- **WHEN** a caller uses advanced terminal-oriented loop strategies on the
+  refactored stack
+- **THEN** those loops SHALL execute through `agent-runtime` PTY/session
+  surfaces and typed loop/runtime contracts rather than a legacy-style
+  terminal-session tool wrapper

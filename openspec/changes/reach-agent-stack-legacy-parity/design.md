@@ -46,8 +46,9 @@ needs that are downstream of the advanced loops and terminal-session surfaces.
 
 `agent-loops` must expose advanced loop strategies with legacy-equivalent
 outcomes, while continuing to use the runtime-native v2 control surface.
-`agent-tools` must expose terminal-session behavior at the v2 tool layer rather
-than leaving PTY behavior implicit inside runtime internals only.
+Terminal-session parity for those loops should be delivered through
+`agent-runtime` PTY/session surfaces and loop-private orchestration rather than
+through a duplicate public terminal tool wrapper.
 
 ### Hosted compatibility
 
@@ -60,7 +61,7 @@ to real behaviors backed by the shared core/runtime stack.
 Implementation should proceed in dependency order:
 
 1. advanced loop parity
-2. terminal-session parity
+2. runtime-native terminal-session parity
 3. hosted compat-route parity
 
 This order minimizes rework because the later user-facing surfaces depend on the
