@@ -60,8 +60,26 @@ impl Client {
         &self.http
     }
 
+    pub(crate) fn http_client(&self) -> reqwest::Client {
+        self.http.clone()
+    }
+
     pub(crate) fn auth_header(&self) -> String {
         format!("Bearer {}", self.config.api_key)
+    }
+
+    pub(crate) fn apply_default_headers(
+        &self,
+        mut builder: reqwest::RequestBuilder,
+    ) -> reqwest::RequestBuilder {
+        for (name, value) in &self.config.default_headers {
+            builder = builder.header(name, value);
+        }
+        builder
+    }
+
+    pub(crate) fn default_headers(&self) -> &std::collections::BTreeMap<String, String> {
+        &self.config.default_headers
     }
 
     pub(crate) fn endpoint_url(&self, path: &str) -> String {
@@ -110,6 +128,19 @@ mod tests {
         assert_eq!(
             url.unwrap().as_str(),
             "http://localhost:11434/v1/responses/abc/input_items"
+        );
+    }
+
+    #[test]
+    fn stores_default_headers() {
+        let client =
+            Client::new(Config::new("test").with_default_header("x-provider", "provider-openai"));
+        assert_eq!(
+            client
+                .default_headers()
+                .get("x-provider")
+                .map(String::as_str),
+            Some("provider-openai")
         );
     }
 }

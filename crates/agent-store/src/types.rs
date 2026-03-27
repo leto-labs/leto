@@ -155,26 +155,77 @@ pub enum ProviderCredential {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct OAuthCredentials {
     pub access_token: String,
-    pub refresh_token: Option<String>,
+    pub refresh_token: String,
+    pub client_id: String,
+    pub token_endpoint: String,
+    pub account_id: Option<String>,
     pub token_type: Option<String>,
-    pub expires_at: Option<DateTime<Utc>>,
+    pub expires_at: DateTime<Utc>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub scopes: Vec<String>,
+}
+
+const REFRESH_BUFFER_SECS: i64 = 60;
+
+impl OAuthCredentials {
+    /// Returns true when the access token is expired or within the proactive
+    /// refresh window.
+    pub fn needs_refresh(&self) -> bool {
+        Utc::now() >= self.expires_at - chrono::Duration::seconds(REFRESH_BUFFER_SECS)
+    }
 }
 
 /// Credential health information.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CredentialHealth {
+    pub last_ok: Option<DateTime<Utc>>,
     pub last_error: Option<CredentialError>,
+    pub consecutive_errors: u32,
     pub updated_at: DateTime<Utc>,
 }
 
 impl Default for CredentialHealth {
     fn default() -> Self {
         Self {
+            last_ok: None,
             last_error: None,
+            consecutive_errors: 0,
             updated_at: Utc::now(),
         }
+    }
+}
+
+impl CredentialHealth {
+    /// Returns true when the credential has no outstanding recorded failure.
+    pub fn is_healthy(&self) -> bool {
+        self.consecutive_errors == 0
+            || self
+                .last_ok
+                .map(|ok| {
+                    self.last_error
+                        .as_ref()
+                        .map_or(true, |err| ok > err.recorded_at)
+                })
+                .unwrap_or(false)
+    }
+
+    /// Records a successful use and clears prior error state.
+    pub fn record_ok(&mut self) {
+        self.last_ok = Some(Utc::now());
+        self.last_error = None;
+        self.consecutive_errors = 0;
+        self.updated_at = Utc::now();
+    }
+
+    /// Records a failed use and increments the consecutive error count.
+    pub fn record_error(&mut self, message: impl Into<String>, code: Option<String>) {
+        self.last_error = Some(CredentialError {
+            message: message.into(),
+            code,
+            recorded_at: Utc::now(),
+        });
+        self.consecutive_errors += 1;
+        self.updated_at = Utc::now();
     }
 }
 
@@ -182,25 +233,50 @@ impl Default for CredentialHealth {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CredentialError {
     pub message: String,
+    pub code: Option<String>,
     pub recorded_at: DateTime<Utc>,
 }
 
 /// Durable credential entry scoped under a provider and credential id.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CredentialEntry {
+    pub id: String,
     pub label: String,
     pub credential: ProviderCredential,
+    pub enabled: bool,
+    pub created_at: DateTime<Utc>,
     pub health: CredentialHealth,
 }
 
 impl CredentialEntry {
     /// Creates an API-key credential entry.
     pub fn api_key(label: impl Into<String>, api_key: impl Into<String>) -> Self {
+        let label = label.into();
         Self {
-            label: label.into(),
+            id: label.clone(),
+            label,
             credential: ProviderCredential::ApiKey {
                 api_key: api_key.into(),
             },
+            enabled: true,
+            created_at: Utc::now(),
+            health: CredentialHealth::default(),
+        }
+    }
+
+    /// Creates an OAuth credential entry.
+    pub fn oauth(label: impl Into<String>, credential: OAuthCredentials) -> Self {
+        let label = label.into();
+        let id = credential
+            .account_id
+            .clone()
+            .unwrap_or_else(|| Ulid::new().to_string());
+        Self {
+            id,
+            label,
+            credential: ProviderCredential::OAuth(credential),
+            enabled: true,
+            created_at: Utc::now(),
             health: CredentialHealth::default(),
         }
     }
@@ -230,6 +306,57 @@ mod tests {
     fn stored_message_wraps_provider_message() {
         let stored = StoredMessage::new(Ulid::new(), 0, Message::user_text("hi"));
         assert_eq!(stored.message.plain_text_lossy(), "hi");
+    }
+
+    #[test]
+    fn oauth_credentials_near_expiry_need_refresh() {
+        let credentials = OAuthCredentials {
+            access_token: "access".into(),
+            refresh_token: "refresh".into(),
+            client_id: "client".into(),
+            token_endpoint: "https://example.com/token".into(),
+            account_id: Some("acct_123".into()),
+            token_type: Some("Bearer".into()),
+            expires_at: Utc::now() + chrono::Duration::seconds(30),
+            scopes: vec!["openid".into()],
+        };
+        assert!(credentials.needs_refresh());
+    }
+
+    #[test]
+    fn credential_health_tracks_failures_and_recovery() {
+        let mut health = CredentialHealth::default();
+        assert!(health.is_healthy());
+        health.record_error("bad gateway", Some("502".into()));
+        assert!(!health.is_healthy());
+        assert_eq!(health.consecutive_errors, 1);
+        assert_eq!(
+            health
+                .last_error
+                .as_ref()
+                .and_then(|err| err.code.as_deref()),
+            Some("502")
+        );
+        health.record_ok();
+        assert!(health.is_healthy());
+        assert_eq!(health.consecutive_errors, 0);
+    }
+
+    #[test]
+    fn oauth_entry_uses_account_id_as_stable_identifier() {
+        let credentials = OAuthCredentials {
+            access_token: "access".into(),
+            refresh_token: "refresh".into(),
+            client_id: "client".into(),
+            token_endpoint: "https://example.com/token".into(),
+            account_id: Some("acct_123".into()),
+            token_type: None,
+            expires_at: Utc::now() + chrono::Duration::seconds(600),
+            scopes: Vec::new(),
+        };
+        let entry = CredentialEntry::oauth("OpenAI", credentials);
+        assert_eq!(entry.id, "acct_123");
+        assert!(entry.enabled);
     }
 
     #[test]

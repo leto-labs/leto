@@ -304,17 +304,13 @@ async fn provider_oauth_callback(
     Path(ProviderIdPath { provider_id }): Path<ProviderIdPath>,
     Json(body): Json<ProviderOAuthCallbackRequest>,
 ) -> Response {
-    let entry = CredentialEntry {
-        label: provider_id.clone(),
-        credential: ProviderCredential::OAuth(OAuthCredentials {
-            access_token: body.code.unwrap_or_default(),
-            refresh_token: Some("compat-refresh".to_owned()),
-            token_type: Some("bearer".to_owned()),
-            expires_at: Some(Utc::now() + chrono::Duration::hours(1)),
-            scopes: Vec::new(),
-        }),
-        health: Default::default(),
-    };
+    let entry = compat_oauth_entry(
+        provider_id.clone(),
+        body.code.unwrap_or_default(),
+        "compat-refresh".to_owned(),
+        Utc::now() + chrono::Duration::hours(1),
+        None,
+    );
     let _ = upsert_auth_credential(&server, &provider_id, entry).await;
     Json(true).into_response()
 }
@@ -332,18 +328,16 @@ async fn auth_set(
             access,
             refresh,
             expires,
+            account_id,
             ..
-        }) => CredentialEntry {
-            label: provider_id.clone(),
-            credential: ProviderCredential::OAuth(OAuthCredentials {
-                access_token: access,
-                refresh_token: Some(refresh),
-                token_type: Some("bearer".to_owned()),
-                expires_at: DateTime::<Utc>::from_timestamp_millis(expires as i64),
-                scopes: Vec::new(),
-            }),
-            health: Default::default(),
-        },
+        }) => compat_oauth_entry(
+            provider_id.clone(),
+            access,
+            refresh,
+            DateTime::<Utc>::from_timestamp_millis(expires as i64)
+                .unwrap_or_else(|| Utc::now() + chrono::Duration::hours(1)),
+            account_id,
+        ),
         AuthSetRequest::Wellknown(WellKnownAuthRequest { key, token, .. }) => {
             CredentialEntry::api_key(if key.is_empty() { &provider_id } else { &key }, &token)
         }
@@ -365,6 +359,32 @@ async fn auth_remove(
         .delete((provider_id, "default".to_owned()))
         .await;
     Json(true).into_response()
+}
+
+fn compat_oauth_entry(
+    provider_id: String,
+    access_token: String,
+    refresh_token: String,
+    expires_at: DateTime<Utc>,
+    account_id: Option<String>,
+) -> CredentialEntry {
+    CredentialEntry {
+        id: "default".to_owned(),
+        label: provider_id,
+        credential: ProviderCredential::OAuth(OAuthCredentials {
+            access_token,
+            refresh_token,
+            client_id: "compat-client".to_owned(),
+            token_endpoint: "https://example.invalid/oauth/token".to_owned(),
+            account_id,
+            token_type: Some("bearer".to_owned()),
+            expires_at,
+            scopes: Vec::new(),
+        }),
+        enabled: true,
+        created_at: Utc::now(),
+        health: Default::default(),
+    }
 }
 
 #[cfg(test)]

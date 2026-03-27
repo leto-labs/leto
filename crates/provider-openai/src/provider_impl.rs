@@ -8,19 +8,23 @@
 //! - Chat Completions streaming events: <https://developers.openai.com/api/reference/resources/chat/subresources/completions/streaming-events>
 
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use async_stream::stream;
 use futures::{StreamExt, future::BoxFuture};
 use provider::{
-    Block, BlockDelta, BlockKind, Error as ProviderError, Event, EventStream, FinishReason,
-    Message, MessageRole, Provider, ProviderCapabilities, ProviderInfo, Request, StreamGranularity,
-    ToolChoice, Usage,
+    Block, BlockDelta, BlockKind, CredentialFailure, CredentialPool as SharedCredentialPool,
+    Error as ProviderError, Event, EventStream, FinishReason, Message, MessageRole, Provider,
+    ProviderCapabilities, ProviderInfo, Request, StreamGranularity, ToolChoice, Usage,
 };
 
 use crate::chat_completions::{
     ChatCompletionContentPart, ChatCompletionFunctionCall, ChatCompletionImageUrlPart,
     ChatCompletionMessage, ChatCompletionMessageContent, ChatCompletionRequest, ChatCompletionRole,
     ChatCompletionTool, ChatCompletionToolCall,
+};
+use crate::oauth::{
+    config_with_resolved_credential, mark_credential_error, mark_credential_ok, resolve_credential,
 };
 use crate::responses::{
     ResponseEvent, ResponseInputContentPart, ResponseInputItem, ResponseInputRole,
@@ -30,12 +34,15 @@ use crate::responses::{
 };
 use crate::{Client, Config, Error, OpenAiApiSurface};
 
+const DEFAULT_CODEX_INSTRUCTIONS: &str = "You are a concise and helpful coding assistant.";
+
 /// Shared [`provider::Provider`] adapter backed by the resolved
 /// OpenAI-compatible API surface.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct OpenAiProvider {
     client: Client,
     transport: ResponseStreamTransport,
+    credential_pool: Option<Arc<SharedCredentialPool>>,
 }
 
 impl OpenAiProvider {
@@ -49,6 +56,17 @@ impl OpenAiProvider {
         Self {
             client,
             transport: ResponseStreamTransport::Sse,
+            credential_pool: None,
+        }
+    }
+
+    /// Creates an adapter that resolves credentials per request using the
+    /// shared standalone credential pool.
+    pub fn from_pool(config: Config, pool: Arc<SharedCredentialPool>) -> Self {
+        Self {
+            client: Client::new(config),
+            transport: ResponseStreamTransport::Sse,
+            credential_pool: Some(pool),
         }
     }
 
@@ -58,9 +76,40 @@ impl OpenAiProvider {
         self
     }
 
-    fn map_responses_request(request: &Request) -> Result<ResponseRequest, ProviderError> {
+    fn session_id_for_request(request: &Request) -> Option<&str> {
+        request
+            .options
+            .metadata
+            .get("session_id")
+            .and_then(|value| value.as_str())
+    }
+
+    pub(crate) async fn stream_for_surface<'a>(
+        client: &Client,
+        transport: ResponseStreamTransport,
+        request: &'a Request,
+    ) -> Result<EventStream<'a>, ProviderError> {
+        match client.config().resolved_api_surface().ok_or_else(|| {
+            ProviderError::Configuration("OpenAI config resolved no supported API surface".into())
+        })? {
+            OpenAiApiSurface::Responses => {
+                Self::stream_responses_with(client, transport, request).await
+            }
+            OpenAiApiSurface::ChatCompletions => {
+                Self::stream_chat_completions_with(client, request).await
+            }
+        }
+    }
+
+    fn map_responses_request(
+        request: &Request,
+        require_instructions: bool,
+    ) -> Result<ResponseRequest, ProviderError> {
         let mut input = Vec::new();
         for message in &request.messages {
+            if matches!(message.role, MessageRole::System | MessageRole::Developer) {
+                continue;
+            }
             input.extend(map_responses_message(message)?);
         }
 
@@ -92,8 +141,12 @@ impl OpenAiProvider {
                     summary: reasoning.summary.clone(),
                 });
 
+        let instructions = collect_responses_instructions(&request.messages)
+            .or_else(|| require_instructions.then_some(DEFAULT_CODEX_INSTRUCTIONS.to_owned()));
+
         Ok(ResponseRequest {
             model: request.model.clone(),
+            instructions,
             input,
             tools,
             tool_choice,
@@ -153,22 +206,23 @@ impl OpenAiProvider {
         })
     }
 
-    async fn stream_responses<'a>(
-        &'a self,
+    async fn stream_responses_with<'a>(
+        client: &Client,
+        transport: ResponseStreamTransport,
         request: &'a Request,
     ) -> Result<EventStream<'a>, ProviderError> {
-        let mapped_request = Self::map_responses_request(request)?;
-        let response_stream = self
-            .client
+        let require_instructions = client.config().base_url.contains("backend-api/codex");
+        let mapped_request = Self::map_responses_request(request, require_instructions)?;
+        let response_stream = client
             .responses()
-            .stream(&mapped_request, self.transport)
+            .stream(&mapped_request, transport)
             .await
             .map_err(map_openai_error)?;
 
         let initial_model = request
             .model
             .clone()
-            .or_else(|| Some(self.client.config().default_model.clone()));
+            .or_else(|| Some(client.config().default_model.clone()));
 
         let output_stream = stream! {
             let mut stream = response_stream;
@@ -457,13 +511,12 @@ impl OpenAiProvider {
         Ok(Box::pin(output_stream) as EventStream<'a>)
     }
 
-    async fn stream_chat_completions<'a>(
-        &'a self,
+    async fn stream_chat_completions_with<'a>(
+        client: &Client,
         request: &'a Request,
     ) -> Result<EventStream<'a>, ProviderError> {
         let mapped_request = Self::map_chat_completions_request(request)?;
-        let completion_stream = self
-            .client
+        let completion_stream = client
             .chat_completions()
             .stream(&mapped_request)
             .await
@@ -472,7 +525,7 @@ impl OpenAiProvider {
         let initial_model = request
             .model
             .clone()
-            .or_else(|| Some(self.client.config().default_model.clone()));
+            .or_else(|| Some(client.config().default_model.clone()));
 
         let output_stream = stream! {
             let mut stream = completion_stream;
@@ -614,14 +667,58 @@ impl Provider for OpenAiProvider {
         request: &'a Request,
     ) -> BoxFuture<'a, Result<EventStream<'a>, ProviderError>> {
         Box::pin(async move {
-            match self.client.config().resolved_api_surface().ok_or_else(|| {
-                ProviderError::Configuration(
-                    "OpenAI config resolved no supported API surface".into(),
+            if let Some(credential_pool) = &self.credential_pool {
+                let resolved = resolve_credential(
+                    credential_pool.as_ref(),
+                    &self.client.config().name,
+                    Self::session_id_for_request(request),
                 )
-            })? {
-                OpenAiApiSurface::Responses => self.stream_responses(request).await,
-                OpenAiApiSurface::ChatCompletions => self.stream_chat_completions(request).await,
+                .await
+                .map_err(map_openai_error)?;
+                let credential_id = resolved.credential_id.clone();
+                let client = Client::with_http_client(
+                    config_with_resolved_credential(self.client.config().clone(), &resolved)
+                        .map_err(map_openai_error)?,
+                    self.client.http_client(),
+                );
+                let provider_name = self.client.config().name.clone();
+                let credential_pool = credential_pool.clone();
+                let mut stream = Self::stream_for_surface(&client, self.transport, request).await?;
+                return Ok(Box::pin(stream! {
+                    let mut saw_completed = false;
+                    while let Some(event) = stream.next().await {
+                        match event {
+                            Ok(event) => {
+                                if matches!(event, Event::Completed { .. }) {
+                                    saw_completed = true;
+                                }
+                                yield Ok(event);
+                            }
+                            Err(err) => {
+                                mark_credential_error(
+                                    credential_pool.as_ref(),
+                                    &provider_name,
+                                    &credential_id,
+                                    CredentialFailure::new(err.to_string()),
+                                ).await;
+                                yield Err(err);
+                                return;
+                            }
+                        }
+                    }
+                    if saw_completed {
+                        mark_credential_ok(credential_pool.as_ref(), &provider_name, &credential_id).await;
+                    } else {
+                        mark_credential_error(
+                            credential_pool.as_ref(),
+                            &provider_name,
+                            &credential_id,
+                            CredentialFailure::new("stream closed before terminal event"),
+                        ).await;
+                    }
+                }) as EventStream<'a>);
             }
+            Self::stream_for_surface(&self.client, self.transport, request).await
         })
     }
 
@@ -645,9 +742,25 @@ impl Provider for OpenAiProvider {
 
 fn map_openai_error(err: Error) -> ProviderError {
     match err {
+        Error::Auth(message) => ProviderError::Remote(message),
         Error::Inference(message) => ProviderError::Inference(message),
         Error::Internal(message) => ProviderError::Configuration(message),
         Error::Json(err) => ProviderError::Json(err),
+    }
+}
+
+fn collect_responses_instructions(messages: &[Message]) -> Option<String> {
+    let instructions: Vec<String> = messages
+        .iter()
+        .filter(|message| matches!(message.role, MessageRole::System | MessageRole::Developer))
+        .map(Message::plain_text_lossy)
+        .filter(|text| !text.trim().is_empty())
+        .collect();
+
+    if instructions.is_empty() {
+        None
+    } else {
+        Some(instructions.join("\n\n"))
     }
 }
 

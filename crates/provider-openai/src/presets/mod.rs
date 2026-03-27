@@ -71,6 +71,7 @@ impl OpenAiConfigPreset {
             models: self.models,
             supported_api_surfaces: self.supported_api_surfaces,
             api_surface_mode: OpenAiApiMode::Auto,
+            default_headers: Default::default(),
         }
     }
 }

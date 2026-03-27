@@ -20,6 +20,7 @@ pub mod chat_completions;
 pub mod client;
 pub mod config;
 pub mod error;
+pub mod oauth;
 pub mod presets;
 pub mod provider_impl;
 pub mod responses;
@@ -29,6 +30,10 @@ pub use chat_completions::*;
 pub use client::Client;
 pub use config::{Config, OpenAiApiMode, OpenAiApiSurface};
 pub use error::Error;
+pub use oauth::{
+    BrowserFlowPrompt, DeviceUserPrompt, OAuthFlow, OpenAiOAuthCredentials, OpenAiOAuthPreset,
+    OpenAiOAuthProvider, refresh_access_token,
+};
 pub use presets::OpenAiConfigPreset;
 pub use provider_impl::OpenAiProvider;
 pub use responses::*;

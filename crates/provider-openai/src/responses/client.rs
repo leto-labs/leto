@@ -15,7 +15,7 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message as WsMessage;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
-use tokio_tungstenite::tungstenite::http::HeaderValue;
+use tokio_tungstenite::tungstenite::http::{HeaderName, HeaderValue};
 
 use crate::Error;
 use crate::client::Client;
@@ -172,9 +172,12 @@ impl<'a> ResponsesClient<'a> {
 
         let response = self
             .client
-            .http()
-            .post(self.responses_url())
-            .header("Authorization", self.client.auth_header())
+            .apply_default_headers(
+                self.client
+                    .http()
+                    .post(self.responses_url())
+                    .header("Authorization", self.client.auth_header()),
+            )
             .json(&body)
             .send()
             .await
@@ -196,10 +199,13 @@ impl<'a> ResponsesClient<'a> {
             ResponseStreamTransport::Sse => {
                 let response = self
                     .client
-                    .http()
-                    .post(self.responses_url())
-                    .header("Authorization", self.client.auth_header())
-                    .header("accept", "text/event-stream")
+                    .apply_default_headers(
+                        self.client
+                            .http()
+                            .post(self.responses_url())
+                            .header("Authorization", self.client.auth_header())
+                            .header("accept", "text/event-stream"),
+                    )
                     .json(&StreamingResponseRequest {
                         request: &body,
                         stream: true,
@@ -224,6 +230,14 @@ impl<'a> ResponsesClient<'a> {
                 request
                     .headers_mut()
                     .insert("originator", HeaderValue::from_static("provider-openai"));
+                for (name, value) in self.client.default_headers() {
+                    let header_name = HeaderName::from_bytes(name.as_bytes())
+                        .map_err(|e| Error::Internal(format!("invalid header name: {e}")))?;
+                    request.headers_mut().insert(
+                        header_name,
+                        HeaderValue::from_str(value).map_err(|e| Error::Internal(e.to_string()))?,
+                    );
+                }
 
                 let (mut socket, _) = connect_async(request)
                     .await
@@ -252,9 +266,12 @@ impl<'a> ResponsesClient<'a> {
     ) -> Result<ResponseObject, Error> {
         let response = self
             .client
-            .http()
-            .get(self.response_url(response_id)?)
-            .header("Authorization", self.client.auth_header())
+            .apply_default_headers(
+                self.client
+                    .http()
+                    .get(self.response_url(response_id)?)
+                    .header("Authorization", self.client.auth_header()),
+            )
             .query(&self.response_retrieve_query(request, false))
             .send()
             .await
@@ -272,10 +289,13 @@ impl<'a> ResponsesClient<'a> {
     ) -> Result<ResponseStream, Error> {
         let response = self
             .client
-            .http()
-            .get(self.response_url(response_id)?)
-            .header("Authorization", self.client.auth_header())
-            .header("accept", "text/event-stream")
+            .apply_default_headers(
+                self.client
+                    .http()
+                    .get(self.response_url(response_id)?)
+                    .header("Authorization", self.client.auth_header())
+                    .header("accept", "text/event-stream"),
+            )
             .query(&self.response_retrieve_query(request, true))
             .send()
             .await
@@ -292,9 +312,12 @@ impl<'a> ResponsesClient<'a> {
             .endpoint_joined_url(&["responses", response_id, "cancel"])?;
         let response = self
             .client
-            .http()
-            .post(url)
-            .header("Authorization", self.client.auth_header())
+            .apply_default_headers(
+                self.client
+                    .http()
+                    .post(url)
+                    .header("Authorization", self.client.auth_header()),
+            )
             .send()
             .await
             .map_err(|e| Error::Inference(e.to_string()))?;
@@ -307,9 +330,12 @@ impl<'a> ResponsesClient<'a> {
     pub async fn delete(&self, response_id: &str) -> Result<(), Error> {
         let response = self
             .client
-            .http()
-            .delete(self.response_url(response_id)?)
-            .header("Authorization", self.client.auth_header())
+            .apply_default_headers(
+                self.client
+                    .http()
+                    .delete(self.response_url(response_id)?)
+                    .header("Authorization", self.client.auth_header()),
+            )
             .send()
             .await
             .map_err(|e| Error::Inference(e.to_string()))?;
@@ -325,9 +351,12 @@ impl<'a> ResponsesClient<'a> {
     ) -> Result<ResponseCompaction, Error> {
         let response = self
             .client
-            .http()
-            .post(self.responses_compact_url())
-            .header("Authorization", self.client.auth_header())
+            .apply_default_headers(
+                self.client
+                    .http()
+                    .post(self.responses_compact_url())
+                    .header("Authorization", self.client.auth_header()),
+            )
             .json(request)
             .send()
             .await
@@ -345,9 +374,12 @@ impl<'a> ResponsesClient<'a> {
     ) -> Result<ResponseItemPage, Error> {
         let response = self
             .client
-            .http()
-            .get(self.response_input_items_url(response_id)?)
-            .header("Authorization", self.client.auth_header())
+            .apply_default_headers(
+                self.client
+                    .http()
+                    .get(self.response_input_items_url(response_id)?)
+                    .header("Authorization", self.client.auth_header()),
+            )
             .query(&self.response_item_list_query(request))
             .send()
             .await
@@ -367,9 +399,12 @@ impl<'a> ResponsesClient<'a> {
 
         let response = self
             .client
-            .http()
-            .post(self.responses_input_tokens_url())
-            .header("Authorization", self.client.auth_header())
+            .apply_default_headers(
+                self.client
+                    .http()
+                    .post(self.responses_input_tokens_url())
+                    .header("Authorization", self.client.auth_header()),
+            )
             .json(&body)
             .send()
             .await

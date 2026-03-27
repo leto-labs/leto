@@ -46,9 +46,12 @@ impl<'a> ChatCompletionsClient<'a> {
 
         let response = self
             .client
-            .http()
-            .post(self.client.endpoint_url("chat/completions"))
-            .header("Authorization", self.client.auth_header())
+            .apply_default_headers(
+                self.client
+                    .http()
+                    .post(self.client.endpoint_url("chat/completions"))
+                    .header("Authorization", self.client.auth_header()),
+            )
             .json(&body)
             .send()
             .await
@@ -79,10 +82,13 @@ impl<'a> ChatCompletionsClient<'a> {
 
         let response = self
             .client
-            .http()
-            .post(self.client.endpoint_url("chat/completions"))
-            .header("Authorization", self.client.auth_header())
-            .header("accept", "text/event-stream")
+            .apply_default_headers(
+                self.client
+                    .http()
+                    .post(self.client.endpoint_url("chat/completions"))
+                    .header("Authorization", self.client.auth_header())
+                    .header("accept", "text/event-stream"),
+            )
             .json(&payload)
             .send()
             .await

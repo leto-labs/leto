@@ -216,10 +216,13 @@ async fn remote_store_proxy_round_trips_full_surface() {
     assert_eq!(updated_credential.label, "Updated");
 
     let health = CredentialHealth {
+        last_ok: None,
         last_error: Some(CredentialError {
             message: "boom".into(),
+            code: None,
             recorded_at: Utc::now(),
         }),
+        consecutive_errors: 1,
         updated_at: Utc::now(),
     };
     store

@@ -1,5 +1,7 @@
 //! Configuration for the OpenAI wire client.
 
+use std::collections::BTreeMap;
+
 use provider::ModelInfo;
 
 use crate::presets::OpenAiConfigPreset;
@@ -41,12 +43,20 @@ pub struct Config {
     pub supported_api_surfaces: &'static [OpenAiApiSurface],
     /// Surface selection mode used by higher-level integrations.
     pub api_surface_mode: OpenAiApiMode,
+    /// Extra headers added to every outbound request.
+    pub default_headers: BTreeMap<String, String>,
 }
 
 impl Config {
     /// Creates a configuration with the default OpenAI base URL and model.
     pub fn new(api_key: impl Into<String>) -> Self {
         OpenAiConfigPreset::OPENAI.into_config(api_key)
+    }
+
+    /// Overrides the bearer token or API key.
+    pub fn with_api_key(mut self, api_key: impl Into<String>) -> Self {
+        self.api_key = api_key.into();
+        self
     }
 
     /// Overrides the base URL.
@@ -70,6 +80,16 @@ impl Config {
     /// Overrides the API surface selection mode.
     pub fn with_api_surface_mode(mut self, mode: OpenAiApiMode) -> Self {
         self.api_surface_mode = mode;
+        self
+    }
+
+    /// Adds or replaces a default outbound header.
+    pub fn with_default_header(
+        mut self,
+        name: impl Into<String>,
+        value: impl Into<String>,
+    ) -> Self {
+        self.default_headers.insert(name.into(), value.into());
         self
     }
 

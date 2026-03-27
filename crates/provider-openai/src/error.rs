@@ -3,6 +3,9 @@
 /// Errors returned by the OpenAI wire client and parser layers.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    /// Authentication or OAuth lifecycle failure.
+    #[error("auth: {0}")]
+    Auth(String),
     /// Upstream inference or transport failure.
     #[error("inference: {0}")]
     Inference(String),

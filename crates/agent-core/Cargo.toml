@@ -9,9 +9,11 @@ agent-tools = { workspace = true }
 agent-runtime = { workspace = true }
 agent-store = { workspace = true }
 atif = { workspace = true }
+chrono = { workspace = true }
 futures = { workspace = true }
 provider = { workspace = true }
 provider-openai = { workspace = true }
+reqwest = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
@@ -22,4 +24,4 @@ tokio-util = { workspace = true }
 [dev-dependencies]
 async-stream = { workspace = true }
 tempfile = { workspace = true }
-tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time", "net", "io-util"] }

@@ -26,6 +26,7 @@
 //! ```
 
 pub mod capability;
+pub mod credential;
 pub mod error;
 pub mod event;
 pub mod mock;
@@ -36,6 +37,7 @@ pub mod tool;
 pub mod usage;
 
 pub use capability::*;
+pub use credential::*;
 pub use error::*;
 pub use event::*;
 pub use mock::*;

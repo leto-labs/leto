@@ -776,6 +776,19 @@ fn core_error_response(error: CoreError) -> Response {
             Json(ErrorResponse::new("runtime_error", error.to_string())),
         )
             .into_response(),
+        CoreError::ProviderOpenAi(error) => (
+            StatusCode::BAD_GATEWAY,
+            Json(ErrorResponse::new(
+                "provider_openai_error",
+                error.to_string(),
+            )),
+        )
+            .into_response(),
+        CoreError::Internal(message) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse::new("internal_error", message)),
+        )
+            .into_response(),
     }
 }
 
