@@ -675,11 +675,18 @@ mod tests {
             schema_version: atif::SchemaVersion::V1_6,
             session_id,
             agent: atif::Agent {
-                name: "ignored".into(),
-                version: "ignored".into(),
-                model_name: None,
+                name: "agent".into(),
+                version: env!("CARGO_PKG_VERSION").into(),
+                model_name: Some("mock-model".into()),
                 tool_definitions: None,
-                extra: None,
+                extra: Some(
+                    json!({
+                        "provider": "mock"
+                    })
+                    .as_object()
+                    .expect("expected object")
+                    .clone(),
+                ),
             },
         });
         state.observe(&RuntimeEvent::AtifTrajectoryCompleted {

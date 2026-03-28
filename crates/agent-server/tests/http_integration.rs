@@ -78,6 +78,26 @@ async fn canonical_health_and_status_are_available() {
 }
 
 #[tokio::test]
+async fn invalid_routes_return_not_found() {
+    let base = start_server().await;
+    let client = reqwest::Client::new();
+
+    let canonical = client
+        .get(format!("{base}/v1/does-not-exist"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(canonical.status(), reqwest::StatusCode::NOT_FOUND);
+
+    let compat = client
+        .get(format!("{base}/v1/compat/opencode/does-not-exist"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(compat.status(), reqwest::StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
 async fn canonical_project_and_session_routes_round_trip() {
     let base = start_server().await;
     let client = reqwest::Client::new();
