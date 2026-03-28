@@ -105,6 +105,10 @@ fn canonical_router() -> Router<AppState> {
             routing::post(routes::chat_completions::create_chat_completion),
         )
         .route(
+            "/embeddings",
+            routing::post(routes::embeddings::create_embeddings),
+        )
+        .route(
             "/sessions",
             routing::get(routes::sessions::list_sessions)
                 .post(routes::sessions::create_session_record),

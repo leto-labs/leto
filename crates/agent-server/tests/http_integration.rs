@@ -12,7 +12,7 @@ use agent_server::{AgentInfoRecord, AgentServer, AgentServerStatus, build_router
 use agent_store::{CredentialEntry, CredentialHealth, Project, Session, StoredMessage};
 use futures::StreamExt;
 use provider::{ContentBlock, FinishReason, Message, MessageRole, MockProvider};
-use provider_openai::ChatCompletionObject;
+use provider_openai::{ChatCompletionObject, Client, Config, EmbeddingInput, EmbeddingRequest};
 
 fn make_server() -> Arc<AgentServer> {
     let core: Arc<dyn AgentCore> = Arc::new(futures::executor::block_on(async {
@@ -1017,6 +1017,43 @@ async fn canonical_chat_completions_route_returns_non_streaming_completion() {
                 }
                 provider_openai::ChatCompletionMessageContent::Parts(_) => false,
             })
+    );
+}
+
+#[tokio::test]
+async fn canonical_embeddings_route_returns_embedding_vectors() {
+    let base = start_server().await;
+    let client = Client::new(
+        Config::new("sk-test")
+            .with_base_url(format!("{base}/v1"))
+            .with_model("mock-echo"),
+    );
+
+    let response = client
+        .embeddings()
+        .create(&EmbeddingRequest {
+            input: EmbeddingInput::Text("hello embeddings".into()),
+            ..EmbeddingRequest::default()
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(response.object, "list");
+    assert_eq!(response.model.as_deref(), Some("mock-echo"));
+    assert_eq!(response.data[0].object, "embedding");
+    assert_eq!(response.data[0].index, 0);
+
+    let embedding = &response.data[0].embedding;
+    assert_eq!(embedding.len(), 8);
+    assert!(embedding.iter().all(|value| value.is_finite()));
+
+    assert_eq!(
+        response.usage.as_ref().map(|usage| usage.prompt_tokens),
+        Some(4)
+    );
+    assert_eq!(
+        response.usage.as_ref().map(|usage| usage.total_tokens),
+        Some(4)
     );
 }
 
