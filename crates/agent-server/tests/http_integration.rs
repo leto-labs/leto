@@ -818,6 +818,65 @@ async fn metrics_routes_report_default_labels_and_empty_store_counts() {
 }
 
 #[tokio::test]
+async fn metrics_routes_export_live_status_snapshot() {
+    let base = start_server().await;
+    let client = reqwest::Client::new();
+
+    let project = create_project(&client, &base).await;
+    let _session = create_session(&client, &base, &project).await;
+
+    let status: AgentServerStatus = client
+        .get(format!("{base}/v1/status"))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let expected = format!(
+        concat!(
+            "# HELP agent_server_info Static agent-server build information.\n",
+            "# TYPE agent_server_info gauge\n",
+            "agent_server_info{{version=\"{}\",default_provider=\"{}\",default_loop=\"{}\"}} 1\n",
+            "# HELP agent_server_provider_count Number of configured providers.\n",
+            "# TYPE agent_server_provider_count gauge\n",
+            "agent_server_provider_count {}\n",
+            "# HELP agent_server_loop_count Number of registered loops.\n",
+            "# TYPE agent_server_loop_count gauge\n",
+            "agent_server_loop_count {}\n",
+            "# HELP agent_server_project_count Number of stored projects.\n",
+            "# TYPE agent_server_project_count gauge\n",
+            "agent_server_project_count {}\n",
+            "# HELP agent_server_session_count Number of stored sessions.\n",
+            "# TYPE agent_server_session_count gauge\n",
+            "agent_server_session_count {}\n"
+        ),
+        env!("CARGO_PKG_VERSION"),
+        status.default_provider_name,
+        status.default_loop_name,
+        status.provider_names.len(),
+        status.loop_names.len(),
+        status.project_count,
+        status.session_count,
+    );
+
+    for path in ["/metrics", "/v1/metrics"] {
+        let response = client
+            .get(format!("{base}{path}"))
+            .send()
+            .await
+            .unwrap()
+            .error_for_status()
+            .unwrap();
+        let body = response.text().await.unwrap();
+
+        assert_eq!(body, expected);
+    }
+}
+
+#[tokio::test]
 async fn metrics_route_handles_benchmark_style_keep_alive_probes() {
     let server = make_server();
     let router = build_router(server);
