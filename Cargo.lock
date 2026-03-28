@@ -19,6 +19,24 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
+name = "agent-acp"
+version = "0.1.0"
+dependencies = [
+ "agent-client-protocol",
+ "agent-core",
+ "agent-runtime",
+ "agent-store",
+ "async-trait",
+ "futures",
+ "provider",
+ "serde_json",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "ulid",
+]
+
+[[package]]
 name = "agent-client-protocol"
 version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"

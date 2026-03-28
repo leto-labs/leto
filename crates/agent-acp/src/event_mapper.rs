@@ -29,7 +29,7 @@ impl EventMapper {
 
     pub fn map(&mut self, event: CoreEvent) -> MappedEvent {
         match event {
-            CoreEvent::Store(_) => MappedEvent::Updates(vec![]),
+            CoreEvent::Store { event: _ } => MappedEvent::Updates(vec![]),
             CoreEvent::Turn { session_id: _, event } => self.map_runtime_event(event),
             CoreEvent::TurnCancelled { .. } => MappedEvent::Cancelled,
         }
@@ -72,7 +72,10 @@ impl EventMapper {
                             .title(presentation.title)
                             .kind(presentation.kind)
                             .status(acp::ToolCallStatus::Completed)
-                            .content(vec![acp::ContentBlock::text(render_tool_result(&result))]),
+                            .content(vec![acp::ToolCallContent::from(acp::ContentBlock::Text(
+                                acp::TextContent::new(render_tool_result(&result)),
+                            ))])
+                            .raw_output(result.output.clone()),
                     ),
                 )])
             }
@@ -130,11 +133,13 @@ impl EventMapper {
             BlockDelta::Text { text } | BlockDelta::Refusal { text } => {
                 self.streamed_assistant_text = true;
                 MappedEvent::Updates(vec![acp::SessionUpdate::AgentMessageChunk(
-                    acp::ContentChunk::new(text.into()),
+                    acp::ContentChunk::new(acp::ContentBlock::Text(acp::TextContent::new(text))),
                 )])
             }
             BlockDelta::Reasoning { text } => MappedEvent::Updates(vec![
-                acp::SessionUpdate::AgentThoughtChunk(acp::ContentChunk::new(text.into())),
+                acp::SessionUpdate::AgentThoughtChunk(acp::ContentChunk::new(
+                    acp::ContentBlock::Text(acp::TextContent::new(text)),
+                )),
             ]),
             BlockDelta::Json { .. } | BlockDelta::Signature { .. } | BlockDelta::Unknown { .. } => {
                 MappedEvent::Updates(vec![])
@@ -153,12 +158,12 @@ impl EventMapper {
                             if !self.streamed_assistant_text =>
                         {
                             Some(acp::SessionUpdate::AgentMessageChunk(acp::ContentChunk::new(
-                                text.clone().into(),
+                                acp::ContentBlock::Text(acp::TextContent::new(text.clone())),
                             )))
                         }
                         ContentBlock::Reasoning { text } => Some(
                             acp::SessionUpdate::AgentThoughtChunk(acp::ContentChunk::new(
-                                text.clone().into(),
+                                acp::ContentBlock::Text(acp::TextContent::new(text.clone())),
                             )),
                         ),
                         ContentBlock::ToolCall { id, name, input } => {
@@ -178,6 +183,7 @@ impl EventMapper {
                         }
                         ContentBlock::ImageUrl { .. } | ContentBlock::ToolResult { .. } => None,
                         ContentBlock::Text { .. } => None,
+                        ContentBlock::Refusal { .. } => None,
                     })
                     .collect();
                 MappedEvent::Updates(updates)
@@ -256,6 +262,6 @@ fn content_block_to_user_update(block: &ContentBlock) -> Option<acp::SessionUpda
         }
     };
     Some(acp::SessionUpdate::UserMessageChunk(acp::ContentChunk::new(
-        text.into(),
+        acp::ContentBlock::Text(acp::TextContent::new(text)),
     )))
 }

@@ -11,5 +11,11 @@ pub const CONFIG_LOOP: &str = "loop";
 pub fn initialize_response(protocol_version: acp::ProtocolVersion) -> acp::InitializeResponse {
     acp::InitializeResponse::new(protocol_version)
         .agent_info(acp::Implementation::new("agent-acp", env!("CARGO_PKG_VERSION")).title("Agent ACP"))
-        .capabilities(acp::AgentCapabilities::new().load_session(true).list_sessions(true))
+        .agent_capabilities(
+            acp::AgentCapabilities::new()
+                .load_session(true)
+                .session_capabilities(
+                    acp::SessionCapabilities::new().list(acp::SessionListCapabilities::new()),
+                ),
+        )
 }

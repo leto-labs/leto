@@ -1,7 +1,5 @@
 //! ACP backend adapter wrapping AgentCore.
 
-use std::path::PathBuf;
-
 use agent_client_protocol as acp;
 use agent_core::AgentCore;
 use futures::StreamExt;
@@ -81,36 +79,68 @@ impl<C: AgentCore> AgentCoreAcpBackend<C> {
             .as_ref()
             .and_then(|reasoning| reasoning.effort.clone())
             .unwrap_or_else(|| "medium".to_owned());
-        let _models = self.core.list_models();
+        let models = self.core.list_models();
         let loops = self.core.loop_names();
 
         let mut options = Vec::new();
 
         // Model config
         if let Some(model_id) = current_model {
-            options.push(acp::SessionConfigOption::new(CONFIG_MODEL.into()).kind(
-                acp::SessionConfigKind::String(acp::StringConfig::new(model_id))
-            ));
+            let mut model_options: Vec<_> = models
+                .into_iter()
+                .map(|model| {
+                    acp::SessionConfigSelectOption::new(
+                        model.model.id.to_string(),
+                        model.model.name.to_string(),
+                    )
+                })
+                .collect();
+            if !model_options.iter().any(|option| option.value.0.as_ref() == model_id) {
+                model_options.push(acp::SessionConfigSelectOption::new(
+                    model_id.clone(),
+                    model_id.clone(),
+                ));
+            }
+            options.push(
+                acp::SessionConfigOption::select(
+                    CONFIG_MODEL,
+                    "Model",
+                    model_id,
+                    model_options,
+                )
+                .category(acp::SessionConfigOptionCategory::Model),
+            );
         }
 
-        // Thought level (placeholder)
-        options.push(acp::SessionConfigOption::new(CONFIG_THOUGHT_LEVEL.into()).kind(
-            acp::SessionConfigKind::Select(acp::SelectConfig::new_with_current(
+        options.push(
+            acp::SessionConfigOption::select(
+                CONFIG_THOUGHT_LEVEL,
+                "Thought Level",
+                current_thought_level,
                 vec![
-                    acp::SelectOption::new("low".into()),
-                    acp::SelectOption::new("medium".into()),
-                    acp::SelectOption::new("high".into()),
+                    acp::SessionConfigSelectOption::new("low", "Low"),
+                    acp::SessionConfigSelectOption::new("medium", "Medium"),
+                    acp::SessionConfigSelectOption::new("high", "High"),
                 ],
-                current_thought_level.into(),
-            ))
-        ));
+            )
+            .category(acp::SessionConfigOptionCategory::ThoughtLevel),
+        );
 
         // Loop config
         if !loops.is_empty() {
-            let loop_options: Vec<_> = loops.into_iter().map(|name| acp::SelectOption::new(name)).collect();
-            options.push(acp::SessionConfigOption::new(CONFIG_LOOP.into()).kind(
-                acp::SessionConfigKind::Select(acp::SelectConfig::new_with_current(loop_options, current_loop_name.into()))
-            ));
+            let loop_options: Vec<_> = loops
+                .into_iter()
+                .map(|name| acp::SessionConfigSelectOption::new(name.clone(), name))
+                .collect();
+            options.push(
+                acp::SessionConfigOption::select(
+                    CONFIG_LOOP,
+                    "Loop",
+                    current_loop_name,
+                    loop_options,
+                )
+                .category(acp::SessionConfigOptionCategory::Mode),
+            );
         }
 
         Ok(options)
@@ -166,11 +196,12 @@ impl<C: AgentCore> acp::Agent for AgentCoreAcpBackend<C> {
             let sessions = self.core.sessions_for_project(project.id).await.map_err(map_store_error)?;
             let cwd = project.root.unwrap_or(cwd);
             for session in sessions {
-                items.push(acp::SessionListItem::new(
+                items.push(acp::SessionInfo::new(
                     session_id_from_ulid(session.id),
-                    session.title.clone().unwrap_or_else(|| "ACP Session".to_owned()),
                     cwd.clone(),
-                ));
+                )
+                .title(session.title.clone())
+                .updated_at(Some(session.updated_at.to_rfc3339())));
             }
         }
 
@@ -223,7 +254,7 @@ impl<C: AgentCore> acp::Agent for AgentCoreAcpBackend<C> {
         match arguments.config_id.0.as_ref() {
             CONFIG_MODEL => {
                 self.core.update_session(session_id, agent_store::SessionUpdate {
-                    model: Some(Some(arguments.value.0.clone())),
+                    model: Some(Some(arguments.value.0.to_string())),
                     ..agent_store::SessionUpdate::default()
                 }).await.map_err(map_store_error)?;
             }
@@ -231,7 +262,7 @@ impl<C: AgentCore> acp::Agent for AgentCoreAcpBackend<C> {
                 let session = self.core.session(session_id).await.map_err(map_store_error)?;
                 let mut request = session.request;
                 let mut reasoning = request.reasoning.unwrap_or_default();
-                reasoning.effort = Some(arguments.value.0.clone());
+                reasoning.effort = Some(arguments.value.0.to_string());
                 request.reasoning = Some(reasoning);
                 self.core.update_session(session_id, agent_store::SessionUpdate {
                     request: Some(request),
@@ -240,7 +271,7 @@ impl<C: AgentCore> acp::Agent for AgentCoreAcpBackend<C> {
             }
             CONFIG_LOOP => {
                 self.core.update_session(session_id, agent_store::SessionUpdate {
-                    loop_name: Some(Some(arguments.value.0.clone())),
+                    loop_name: Some(Some(arguments.value.0.to_string())),
                     ..agent_store::SessionUpdate::default()
                 }).await.map_err(map_store_error)?;
             }
