@@ -139,6 +139,47 @@ async fn invalid_routes_return_not_found() {
 }
 
 #[tokio::test]
+async fn compat_auth_endpoints_require_bearer_token() {
+    let base = start_server().await;
+    let client = reqwest::Client::new();
+
+    let provider_auth = client
+        .get(format!("{base}/v1/compat/opencode/provider/auth"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(provider_auth.status(), reqwest::StatusCode::UNAUTHORIZED);
+
+    let oauth_authorize = client
+        .post(format!(
+            "{base}/v1/compat/opencode/provider/mock/oauth/authorize"
+        ))
+        .json(&serde_json::json!({ "method": 0 }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(oauth_authorize.status(), reqwest::StatusCode::UNAUTHORIZED);
+
+    let auth_set = client
+        .put(format!("{base}/v1/compat/opencode/auth/mock"))
+        .json(&serde_json::json!({
+            "type": "api",
+            "key": "sk-test"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(auth_set.status(), reqwest::StatusCode::UNAUTHORIZED);
+
+    let mcp_auth = client
+        .post(format!("{base}/v1/compat/opencode/mcp/test/auth"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(mcp_auth.status(), reqwest::StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
 async fn canonical_project_and_session_routes_round_trip() {
     let base = start_server().await;
     let client = reqwest::Client::new();
@@ -482,6 +523,7 @@ async fn compat_config_provider_and_prompt_routes_are_real() {
 
     let provider_auth = client
         .get(format!("{base}/v1/compat/opencode/provider/auth"))
+        .header(reqwest::header::AUTHORIZATION, "Bearer test-token")
         .send()
         .await
         .unwrap();

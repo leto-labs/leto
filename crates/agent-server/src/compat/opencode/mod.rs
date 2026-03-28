@@ -18,7 +18,8 @@ use agent_store::{
 };
 use axum::Router;
 use axum::extract::{Path, Query, State};
-use axum::http::StatusCode;
+use axum::http::header::AUTHORIZATION;
+use axum::http::{HeaderMap, StatusCode};
 use axum::response::sse::{Event as SseEvent, KeepAlive, Sse};
 use axum::response::{IntoResponse, Json, Response};
 use chrono::{DateTime, Utc};
@@ -956,6 +957,25 @@ fn compat_error(code: impl Into<String>, message: impl Into<String>) -> Response
         }),
     )
         .into_response()
+}
+
+fn require_bearer_token(headers: &HeaderMap) -> Result<(), Response> {
+    match headers
+        .get(AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .filter(|value| value.starts_with("Bearer "))
+    {
+        Some(_) => Ok(()),
+        None => Err((
+            StatusCode::UNAUTHORIZED,
+            Json(BadRequestErrorDoc {
+                data: json!({ "code": "unauthorized", "message": "missing bearer token" }),
+                errors: Vec::new(),
+                success: false,
+            }),
+        )
+            .into_response()),
+    }
 }
 
 fn invalid_request(code: &str) -> Response {

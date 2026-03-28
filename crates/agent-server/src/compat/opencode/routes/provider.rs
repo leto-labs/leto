@@ -262,9 +262,13 @@ fn provider_modalities(io: &ModelIoDoc) -> Vec<ProviderModalityDoc> {
 }
 
 async fn provider_auth(
+    headers: HeaderMap,
     State(server): State<AppState>,
     Query(_query): Query<CompatQuery>,
 ) -> Response {
+    if let Err(response) = require_bearer_token(&headers) {
+        return response;
+    }
     let payload = server
         .core()
         .provider_names()
@@ -284,10 +288,14 @@ async fn provider_auth(
 }
 
 async fn provider_oauth_authorize(
+    headers: HeaderMap,
     Query(_query): Query<CompatQuery>,
     Path(ProviderIdPath { provider_id }): Path<ProviderIdPath>,
     Json(_body): Json<ProviderOAuthAuthorizeRequest>,
 ) -> Response {
+    if let Err(response) = require_bearer_token(&headers) {
+        return response;
+    }
     Json(ProviderAuthAuthorizationDoc {
         url: format!("https://example.invalid/oauth/{provider_id}"),
         method: ProviderAuthAuthorizationMethodDoc::Code(
@@ -299,11 +307,15 @@ async fn provider_oauth_authorize(
 }
 
 async fn provider_oauth_callback(
+    headers: HeaderMap,
     State(server): State<AppState>,
     Query(_query): Query<CompatQuery>,
     Path(ProviderIdPath { provider_id }): Path<ProviderIdPath>,
     Json(body): Json<ProviderOAuthCallbackRequest>,
 ) -> Response {
+    if let Err(response) = require_bearer_token(&headers) {
+        return response;
+    }
     let entry = compat_oauth_entry(
         provider_id.clone(),
         body.code.unwrap_or_default(),
@@ -316,10 +328,14 @@ async fn provider_oauth_callback(
 }
 
 async fn auth_set(
+    headers: HeaderMap,
     State(server): State<AppState>,
     Path(ProviderIdPath { provider_id }): Path<ProviderIdPath>,
     Json(body): Json<AuthSetRequest>,
 ) -> Response {
+    if let Err(response) = require_bearer_token(&headers) {
+        return response;
+    }
     let entry = match body {
         AuthSetRequest::Api(ApiAuthRequest { key, .. }) => {
             CredentialEntry::api_key(provider_id.clone(), &key)
@@ -349,9 +365,13 @@ async fn auth_set(
 }
 
 async fn auth_remove(
+    headers: HeaderMap,
     State(server): State<AppState>,
     Path(ProviderIdPath { provider_id }): Path<ProviderIdPath>,
 ) -> Response {
+    if let Err(response) = require_bearer_token(&headers) {
+        return response;
+    }
     let _ = server
         .core()
         .store()

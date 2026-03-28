@@ -362,9 +362,13 @@ async fn mcp_add(
 }
 
 async fn mcp_auth_start(
+    headers: HeaderMap,
     Query(_query): Query<CompatQuery>,
     Path(NamedPath { name }): Path<NamedPath>,
 ) -> Response {
+    if let Err(response) = require_bearer_token(&headers) {
+        return response;
+    }
     Json(McpAuthStartResponseDoc {
         authorization_url: format!("https://example.invalid/mcp/{name}/oauth"),
     })
@@ -372,11 +376,15 @@ async fn mcp_auth_start(
 }
 
 async fn mcp_auth_callback(
+    headers: HeaderMap,
     State(server): State<AppState>,
     Query(_query): Query<CompatQuery>,
     Path(NamedPath { name }): Path<NamedPath>,
     Json(_body): Json<McpAuthCallbackRequest>,
 ) -> Response {
+    if let Err(response) = require_bearer_token(&headers) {
+        return response;
+    }
     let status = mcp_connected_status();
     server
         .compat()
@@ -388,14 +396,19 @@ async fn mcp_auth_callback(
 }
 
 async fn mcp_auth_authenticate(
+    headers: HeaderMap,
     State(server): State<AppState>,
     Query(_query): Query<CompatQuery>,
     Path(NamedPath { name }): Path<NamedPath>,
 ) -> Response {
+    if let Err(response) = require_bearer_token(&headers) {
+        return response;
+    }
     let body = McpAuthCallbackRequest {
         code: String::new(),
     };
     mcp_auth_callback(
+        headers,
         State(server),
         Query(CompatQuery::default()),
         Path(NamedPath { name }),
@@ -405,10 +418,14 @@ async fn mcp_auth_authenticate(
 }
 
 async fn mcp_auth_remove(
+    headers: HeaderMap,
     State(server): State<AppState>,
     Query(_query): Query<CompatQuery>,
     Path(NamedPath { name }): Path<NamedPath>,
 ) -> Response {
+    if let Err(response) = require_bearer_token(&headers) {
+        return response;
+    }
     server.compat().mcp_servers.write().await.remove(&name);
     Json(SuccessResponseDoc {
         success: super::super::types::provider::TrueConstDoc,
