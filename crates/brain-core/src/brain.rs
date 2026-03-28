@@ -652,6 +652,31 @@ system_prompt = "config prompt"
     }
 
     #[tokio::test]
+    async fn turn_emits_error_event_when_session_is_missing() {
+        let (brain, _project, _store) = make_brain().await;
+        let missing_session = Ulid::new();
+        let mut events = brain.turn(missing_session, "hello world", CancellationToken::new());
+
+        match events.next().await {
+            Some(Event::Error {
+                code,
+                message,
+                recoverable,
+            }) => {
+                assert_eq!(code, BrainErrorCode::StorageFailed);
+                assert!(message.contains(&missing_session.to_string()));
+                assert!(!recoverable);
+            }
+            other => panic!("expected storage error event, got {other:?}"),
+        }
+
+        assert!(
+            events.next().await.is_none(),
+            "error event should terminate stream"
+        );
+    }
+
+    #[tokio::test]
     async fn turn_emits_atif_completion_records_when_enabled() {
         let (brain, project, _store) = make_brain_with_config(ProjectConfig {
             agent: AgentConfig {
