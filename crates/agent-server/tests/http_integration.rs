@@ -138,6 +138,13 @@ fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
         .position(|window| window == needle)
 }
 
+fn build_json_request(method: &str, path: &str, addr: std::net::SocketAddr, body: &str) -> String {
+    format!(
+        "{method} {path} HTTP/1.1\r\nhost: {addr}\r\naccept: application/json\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: keep-alive\r\n\r\n{body}",
+        body.len()
+    )
+}
+
 struct RateLimitedProvider;
 
 impl Provider for RateLimitedProvider {
@@ -1307,6 +1314,45 @@ async fn canonical_health_route_supports_keep_alive_connection_reuse() {
     assert!(second_health.healthy);
     assert_eq!(first_health.version, env!("CARGO_PKG_VERSION"));
     assert_eq!(second_health.version, env!("CARGO_PKG_VERSION"));
+}
+
+#[tokio::test]
+async fn canonical_project_routes_support_connection_reuse_after_json_post() {
+    let server = make_server();
+    let router = build_router(server);
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, router).await.unwrap();
+    });
+
+    let mut connection = BufferedTcpConnection::connect(addr).await;
+    let create_project_request = build_json_request(
+        "POST",
+        "/v1/projects",
+        addr,
+        r#"{"name":"agent-server-keep-alive-project"}"#,
+    );
+
+    connection.send(&create_project_request).await;
+    let create_project_response = connection.read_response().await;
+    assert!(create_project_response.status_line.contains("201 Created"));
+
+    let project: Project = serde_json::from_slice(&create_project_response.body).unwrap();
+
+    let create_session_request = build_json_request(
+        "POST",
+        &format!("/v1/projects/{}/sessions", project.id),
+        addr,
+        "{}",
+    );
+
+    connection.send(&create_session_request).await;
+    let create_session_response = connection.read_response().await;
+    assert!(create_session_response.status_line.contains("201 Created"));
+
+    let session: Session = serde_json::from_slice(&create_session_response.body).unwrap();
+    assert_eq!(session.project_id, project.id);
 }
 
 #[tokio::test]
