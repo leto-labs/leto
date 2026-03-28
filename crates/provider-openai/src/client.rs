@@ -12,6 +12,7 @@ use crate::config::Config;
 use crate::embeddings::EmbeddingsClient;
 use crate::fine_tuning::FineTuningClient;
 use crate::responses::ResponsesClient;
+use crate::videos::VideosClient;
 
 /// Top-level OpenAI wire client that exposes explicit modern API surfaces.
 #[derive(Debug, Clone)]
@@ -72,6 +73,14 @@ impl Client {
     /// <https://platform.openai.com/docs/api-reference/embeddings>
     pub fn embeddings(&self) -> EmbeddingsClient<'_> {
         EmbeddingsClient::new(self)
+    }
+
+    /// Returns the Videos API surface.
+    ///
+    /// Official reference:
+    /// <https://platform.openai.com/docs/api-reference/videos>
+    pub fn videos(&self) -> VideosClient<'_> {
+        VideosClient::new(self)
     }
 
     pub(crate) fn http(&self) -> &reqwest::Client {

@@ -27,6 +27,7 @@ pub mod presets;
 pub mod provider_impl;
 pub mod responses;
 mod shared;
+pub mod videos;
 
 pub use chat_completions::*;
 pub use client::Client;
@@ -42,3 +43,4 @@ pub use presets::OpenAiConfigPreset;
 pub use provider_impl::OpenAiProvider;
 pub use responses::*;
 pub use shared::TokenUsage;
+pub use videos::*;
