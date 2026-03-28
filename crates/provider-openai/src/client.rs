@@ -12,6 +12,7 @@ use crate::config::Config;
 use crate::embeddings::EmbeddingsClient;
 use crate::fine_tuning::FineTuningClient;
 use crate::responses::ResponsesClient;
+use crate::vector_stores::VectorStoresClient;
 use crate::videos::VideosClient;
 
 /// Top-level OpenAI wire client that exposes explicit modern API surfaces.
@@ -73,6 +74,14 @@ impl Client {
     /// <https://platform.openai.com/docs/api-reference/embeddings>
     pub fn embeddings(&self) -> EmbeddingsClient<'_> {
         EmbeddingsClient::new(self)
+    }
+
+    /// Returns the Vector Stores API surface.
+    ///
+    /// Official reference:
+    /// <https://platform.openai.com/docs/api-reference/vector-stores>
+    pub fn vector_stores(&self) -> VectorStoresClient<'_> {
+        VectorStoresClient::new(self)
     }
 
     /// Returns the Videos API surface.
