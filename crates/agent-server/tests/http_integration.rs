@@ -661,6 +661,26 @@ async fn canonical_health_route_returns_current_health_payload() {
 }
 
 #[tokio::test]
+async fn root_health_route_returns_current_health_payload() {
+    let base = start_server().await;
+    let client = reqwest::Client::new();
+
+    let health: HealthResponse = client
+        .get(format!("{base}/health"))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert!(health.healthy);
+    assert_eq!(health.version, env!("CARGO_PKG_VERSION"));
+}
+
+#[tokio::test]
 async fn graceful_shutdown_waits_for_in_flight_turn_to_finish() {
     let (base, shutdown_tx, server_task) =
         start_server_with_shutdown(Arc::new(MockProvider::new().with_delay(500))).await;
