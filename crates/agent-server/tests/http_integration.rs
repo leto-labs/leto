@@ -1016,6 +1016,97 @@ async fn canonical_project_and_session_routes_round_trip() {
 }
 
 #[tokio::test]
+async fn canonical_project_routes_round_trip_project_config() {
+    let base = start_server().await;
+    let client = reqwest::Client::new();
+
+    let created: Project = client
+        .post(format!("{base}/v1/projects"))
+        .json(&serde_json::json!({
+            "name": "agent-server-config-test",
+            "config": {
+                "system_prompt": "initial prompt",
+                "default_loop": "simple",
+                "runtime": {
+                    "max_retries": 1,
+                    "retry_backoff_ms": 0,
+                },
+                "default_provider": "mock",
+                "default_model": "mock-echo",
+            }
+        }))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(
+        created.config.system_prompt.as_deref(),
+        Some("initial prompt")
+    );
+    assert_eq!(created.config.default_loop.as_deref(), Some("simple"));
+    assert_eq!(created.config.runtime.max_retries, 1);
+    assert_eq!(created.config.runtime.retry_backoff_ms, 0);
+    assert_eq!(created.config.default_provider.as_deref(), Some("mock"));
+    assert_eq!(created.config.default_model.as_deref(), Some("mock-echo"));
+
+    let updated: Project = client
+        .patch(format!("{base}/v1/projects/{}", created.id))
+        .json(&serde_json::json!({
+            "config": {
+                "system_prompt": "reloaded prompt",
+                "default_loop": "plan",
+                "runtime": {
+                    "max_retries": 3,
+                    "retry_backoff_ms": 25,
+                },
+                "default_provider": "mock",
+                "default_model": "mock-configured",
+            }
+        }))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(updated.id, created.id);
+    assert_eq!(updated.name, created.name);
+    assert_eq!(
+        updated.config.system_prompt.as_deref(),
+        Some("reloaded prompt")
+    );
+    assert_eq!(updated.config.default_loop.as_deref(), Some("plan"));
+    assert_eq!(updated.config.runtime.max_retries, 3);
+    assert_eq!(updated.config.runtime.retry_backoff_ms, 25);
+    assert_eq!(updated.config.default_provider.as_deref(), Some("mock"));
+    assert_eq!(
+        updated.config.default_model.as_deref(),
+        Some("mock-configured")
+    );
+
+    let fetched: Project = client
+        .get(format!("{base}/v1/projects/{}", created.id))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(fetched.config, updated.config);
+}
+
+#[tokio::test]
 async fn canonical_projects_route_returns_empty_list() {
     let base = start_server().await;
     let client = reqwest::Client::new();
