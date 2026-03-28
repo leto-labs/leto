@@ -37,12 +37,14 @@ fn decide_terminus2(ctx: LoopContext) -> Result<LoopDecision, RuntimeError> {
     let Some(loop_state) = loop_state else {
         let Some(pty) = find_owned_pty(state.ptys.values().cloned(), TerminusVariant::Terminus2)
         else {
-            let mut request = OpenPtyRequest::default();
-            request.label = Some(format!(
-                "{}:{}",
-                TerminusVariant::Terminus2.label_prefix(),
-                state.session_id
-            ));
+            let request = OpenPtyRequest {
+                label: Some(format!(
+                    "{}:{}",
+                    TerminusVariant::Terminus2.label_prefix(),
+                    state.session_id
+                )),
+                ..OpenPtyRequest::default()
+            };
             return Ok(LoopDecision::OpenPty { request });
         };
 

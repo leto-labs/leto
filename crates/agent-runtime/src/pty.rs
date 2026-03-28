@@ -565,10 +565,10 @@ impl PtyHandle {
     }
 
     pub(crate) fn close(&self) -> Result<PtySessionState, RuntimeError> {
-        if let Ok(mut killer) = self.killer.lock() {
-            if let Some(mut killer) = killer.take() {
-                let _ = killer.kill();
-            }
+        if let Ok(mut killer) = self.killer.lock()
+            && let Some(mut killer) = killer.take()
+        {
+            let _ = killer.kill();
         }
         let state = {
             let mut state = self
@@ -586,20 +586,20 @@ impl PtyHandle {
 impl Drop for PtyHandle {
     fn drop(&mut self) {
         let _ = self.close();
-        if let Ok(mut handle) = self.reader_handle.lock() {
-            if let Some(handle) = handle.take() {
-                handle.abort();
-            }
+        if let Ok(mut handle) = self.reader_handle.lock()
+            && let Some(handle) = handle.take()
+        {
+            handle.abort();
         }
-        if let Ok(mut handle) = self.writer_handle.lock() {
-            if let Some(handle) = handle.take() {
-                handle.abort();
-            }
+        if let Ok(mut handle) = self.writer_handle.lock()
+            && let Some(handle) = handle.take()
+        {
+            handle.abort();
         }
-        if let Ok(mut handle) = self.wait_handle.lock() {
-            if let Some(handle) = handle.take() {
-                handle.abort();
-            }
+        if let Ok(mut handle) = self.wait_handle.lock()
+            && let Some(handle) = handle.take()
+        {
+            handle.abort();
         }
     }
 }

@@ -86,10 +86,10 @@ pub fn agent_home() -> PathBuf {
 pub fn resolve_project_config(root: &Path) -> Result<ProjectConfig, BootstrapError> {
     let mut config = ProjectConfig::default();
 
-    if let Some(config_path) = find_config_path(root) {
-        if let Some(agent) = load_agent_config(&config_path)? {
-            apply_agent_config(&mut config, agent);
-        }
+    if let Some(config_path) = find_config_path(root)
+        && let Some(agent) = load_agent_config(&config_path)?
+    {
+        apply_agent_config(&mut config, agent);
     }
 
     if config.system_prompt.is_none()

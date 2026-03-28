@@ -47,7 +47,14 @@ impl BrainApi for BrainServer {
     // -- Project management --
 
     fn create_project(&self, project: Project) -> BoxFuture<'_, Result<Project, BrainError>> {
-        Box::pin(async move { self.inner.brain.store.projects().create(project.id, project).await })
+        Box::pin(async move {
+            self.inner
+                .brain
+                .store
+                .projects()
+                .create(project.id, project)
+                .await
+        })
     }
 
     fn list_projects(&self) -> BoxFuture<'_, Result<Vec<Project>, BrainError>> {
@@ -72,7 +79,12 @@ impl BrainApi for BrainServer {
                 project.config = config;
             }
             project.updated_at = Utc::now();
-            self.inner.brain.store.projects().update(id, project).await?;
+            self.inner
+                .brain
+                .store
+                .projects()
+                .update(id, project)
+                .await?;
             Ok(())
         })
     }
@@ -86,7 +98,12 @@ impl BrainApi for BrainServer {
     fn create_session(&self, project_id: ProjectId) -> BoxFuture<'_, Result<Session, BrainError>> {
         Box::pin(async move {
             let session = Session::new(project_id);
-            self.inner.brain.store.sessions().create(session.id, session).await
+            self.inner
+                .brain
+                .store
+                .sessions()
+                .create(session.id, session)
+                .await
         })
     }
 
@@ -94,7 +111,14 @@ impl BrainApi for BrainServer {
         &self,
         project_id: ProjectId,
     ) -> BoxFuture<'_, Result<Vec<Session>, BrainError>> {
-        Box::pin(async move { self.inner.brain.store.sessions().list_for_project(project_id).await })
+        Box::pin(async move {
+            self.inner
+                .brain
+                .store
+                .sessions()
+                .list_for_project(project_id)
+                .await
+        })
     }
 
     fn get_session(&self, id: Ulid) -> BoxFuture<'_, Result<Session, BrainError>> {
@@ -124,7 +148,12 @@ impl BrainApi for BrainServer {
                 }
             }
             session.updated_at = Utc::now();
-            self.inner.brain.store.sessions().update(id, session).await?;
+            self.inner
+                .brain
+                .store
+                .sessions()
+                .update(id, session)
+                .await?;
             Ok(())
         })
     }
@@ -136,7 +165,14 @@ impl BrainApi for BrainServer {
     // -- Message history --
 
     fn list_messages(&self, session_id: Ulid) -> BoxFuture<'_, Result<Vec<Message>, BrainError>> {
-        Box::pin(async move { self.inner.brain.store.messages().list_for_session(session_id).await })
+        Box::pin(async move {
+            self.inner
+                .brain
+                .store
+                .messages()
+                .list_for_session(session_id)
+                .await
+        })
     }
 
     // -- Turn management --
@@ -250,7 +286,14 @@ impl BrainApi for BrainServer {
         provider_name: &str,
     ) -> BoxFuture<'_, Result<Vec<CredentialEntry>, BrainError>> {
         let name = provider_name.to_owned();
-        Box::pin(async move { self.inner.brain.store.credentials().list_for_provider(&name).await })
+        Box::pin(async move {
+            self.inner
+                .brain
+                .store
+                .credentials()
+                .list_for_provider(&name)
+                .await
+        })
     }
 
     fn save_credential(
@@ -290,7 +333,14 @@ impl BrainApi for BrainServer {
     ) -> BoxFuture<'_, Result<(), BrainError>> {
         let name = provider_name.to_owned();
         let cid = credential_id.to_owned();
-        Box::pin(async move { self.inner.brain.store.credentials().delete((name, cid)).await })
+        Box::pin(async move {
+            self.inner
+                .brain
+                .store
+                .credentials()
+                .delete((name, cid))
+                .await
+        })
     }
 
     // -- Events & status --

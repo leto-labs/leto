@@ -104,7 +104,7 @@ impl ModelInfo {
     }
 }
 
-fn str_slice_is_empty(value: &Cow<'static, [&'static str]>) -> bool {
+fn str_slice_is_empty(value: &[&'static str]) -> bool {
     value.is_empty()
 }
 

@@ -286,10 +286,9 @@ impl OpenAiProvider {
                         break;
                     }
                     ResponseEvent::OutputItemAdded { output_index, item } => {
-                        if let Some(block) = map_openai_output_item_start(output_index, &item) {
-                            if let Some(start_event) = start_block_if_needed(&mut started, block) {
-                                yield Ok(start_event);
-                            }
+                        if let Some(block) = map_openai_output_item_start(output_index, &item)
+                            && let Some(start_event) = start_block_if_needed(&mut started, block) {
+                            yield Ok(start_event);
                         }
                     }
                     ResponseEvent::OutputItemDone { output_index, item } => {
@@ -448,11 +447,10 @@ impl OpenAiProvider {
                     }
                     ResponseEvent::ReasoningSummaryPartDone { item_id, summary_index, part, .. } => {
                         let block_id = openai_reasoning_block_id(&item_id, summary_index);
-                        if let Some(delta) = map_openai_reasoning_part_delta(&part) {
-                            if !saw_delta.contains(&block_id) {
-                                saw_delta.insert(block_id.clone());
-                                yield Ok(Event::BlockDelta { id: block_id.clone(), delta });
-                            }
+                        if let Some(delta) = map_openai_reasoning_part_delta(&part)
+                            && !saw_delta.contains(&block_id) {
+                            saw_delta.insert(block_id.clone());
+                            yield Ok(Event::BlockDelta { id: block_id.clone(), delta });
                         }
                         if started.remove(&block_id).is_some() {
                             yield Ok(Event::BlockStop { id: block_id });
@@ -929,10 +927,10 @@ fn map_chat_content(
         return None;
     }
 
-    if content_parts.len() == 1 {
-        if let ChatCompletionContentPart::Text { text } = &content_parts[0] {
-            return Some(ChatCompletionMessageContent::Text(text.clone()));
-        }
+    if content_parts.len() == 1
+        && let ChatCompletionContentPart::Text { text } = &content_parts[0]
+    {
+        return Some(ChatCompletionMessageContent::Text(text.clone()));
     }
 
     Some(ChatCompletionMessageContent::Parts(content_parts))

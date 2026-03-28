@@ -73,10 +73,10 @@ impl CredentialPool {
         provider_name: &str,
         session_id: Option<&str>,
     ) -> Result<ResolvedCredential, CredentialPoolError> {
-        if let Some(session_id) = session_id {
-            if let Some(bound) = self.try_bound(provider_name, session_id).await {
-                return Ok(bound);
-            }
+        if let Some(session_id) = session_id
+            && let Some(bound) = self.try_bound(provider_name, session_id).await
+        {
+            return Ok(bound);
         }
 
         let entries = self.entries.read().await;
@@ -115,13 +115,12 @@ impl CredentialPool {
     /// Records a successful use for one credential.
     pub async fn mark_ok(&self, provider_name: &str, credential_id: &str) {
         let mut entries = self.entries.write().await;
-        if let Some(provider_entries) = entries.get_mut(provider_name) {
-            if let Some(entry) = provider_entries
+        if let Some(provider_entries) = entries.get_mut(provider_name)
+            && let Some(entry) = provider_entries
                 .iter_mut()
                 .find(|entry| entry.id == credential_id)
-            {
-                entry.health.record_ok();
-            }
+        {
+            entry.health.record_ok();
         }
     }
 
@@ -133,13 +132,12 @@ impl CredentialPool {
         failure: CredentialFailure,
     ) {
         let mut entries = self.entries.write().await;
-        if let Some(provider_entries) = entries.get_mut(provider_name) {
-            if let Some(entry) = provider_entries
+        if let Some(provider_entries) = entries.get_mut(provider_name)
+            && let Some(entry) = provider_entries
                 .iter_mut()
                 .find(|entry| entry.id == credential_id)
-            {
-                entry.health.record_error(failure);
-            }
+        {
+            entry.health.record_error(failure);
         }
         drop(entries);
         self.unbind_credential(provider_name, credential_id).await;

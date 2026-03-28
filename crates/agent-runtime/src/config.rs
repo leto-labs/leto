@@ -2,17 +2,11 @@ use provider::RequestOptions;
 use serde::{Deserialize, Serialize};
 
 /// Configuration controlling runtime ATIF emission.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AtifConfig {
     /// Whether the runtime should emit native ATIF lifecycle events.
     pub emit_events: bool,
-}
-
-impl Default for AtifConfig {
-    fn default() -> Self {
-        Self { emit_events: false }
-    }
 }
 
 /// Configuration controlling transcript compaction support.

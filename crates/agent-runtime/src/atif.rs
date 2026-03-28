@@ -1,3 +1,6 @@
+#![allow(dead_code)]
+#![allow(clippy::too_many_arguments)]
+
 use chrono::{DateTime, Utc};
 use provider::{ContentBlock, Message, MessageRole, Provider, ToolDefinition, Usage};
 use serde_json::{Map, Value, json};
@@ -33,14 +36,14 @@ impl TurnSummary {
         accumulate_optional(&mut self.cache_write_tokens, usage.cache_write_tokens);
         accumulate_optional(&mut self.reasoning_tokens, usage.reasoning_tokens);
 
-        self.total_tokens = self.total_tokens.saturating_add(
-            usage.total_tokens.unwrap_or_else(|| {
+        self.total_tokens = self
+            .total_tokens
+            .saturating_add(usage.total_tokens.unwrap_or_else(|| {
                 usage
                     .input_tokens
                     .unwrap_or(0)
                     .saturating_add(usage.output_tokens.unwrap_or(0))
-            }),
-        );
+            }));
     }
 
     pub(crate) fn final_metrics(&self) -> atif::FinalMetrics {
@@ -390,11 +393,11 @@ fn tool_result_observations(
         .iter()
         .filter_map(|block| match block {
             ContentBlock::ToolResult {
-                call_id,
-                output,
-                ..
+                call_id, output, ..
             } => Some(atif::ObservationResult {
-                source_call_id: known_call_ids.contains(&call_id.as_str()).then(|| call_id.clone()),
+                source_call_id: known_call_ids
+                    .contains(&call_id.as_str())
+                    .then(|| call_id.clone()),
                 content: Some(json_value_to_string(output).into()),
                 subagent_trajectory_ref: None,
             }),

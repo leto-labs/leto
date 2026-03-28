@@ -92,7 +92,7 @@ impl Client {
 
     pub(crate) fn endpoint_joined_url(&self, segments: &[&str]) -> Result<Url, Error> {
         let base = self.config.base_url.trim_end_matches('/');
-        let mut url = Url::parse(&base).map_err(|e| Error::Internal(e.to_string()))?;
+        let mut url = Url::parse(base).map_err(|e| Error::Internal(e.to_string()))?;
         let mut path_segments = url
             .path_segments_mut()
             .map_err(|_| Error::Internal("base URL does not support path segments".into()))?;

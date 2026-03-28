@@ -666,8 +666,8 @@ impl AgentCoreNative {
         let project = self.store.projects().get(session.project_id).await?;
         Ok(session
             .model
-            .or_else(|| project.config.default_model)
-            .or_else(|| project.config.runtime.model))
+            .or(project.config.default_model)
+            .or(project.config.runtime.model))
     }
 
     /// Lists all registered models across all providers.
@@ -826,6 +826,7 @@ impl AgentCoreNative {
         Ok(())
     }
 
+    #[allow(clippy::result_large_err)]
     fn resolve_session_runtime(
         &self,
         project: &Project,

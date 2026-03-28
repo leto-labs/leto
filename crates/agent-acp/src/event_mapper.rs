@@ -137,8 +137,7 @@ impl EventMapper {
             | RuntimeEvent::AtifTrajectoryStarted { .. }
             | RuntimeEvent::AtifStepCompleted { .. }
             | RuntimeEvent::AtifFinalMetrics { .. }
-            | RuntimeEvent::AtifTrajectoryCompleted { .. }
-            => MappedEvent::Updates(vec![]),
+            | RuntimeEvent::AtifTrajectoryCompleted { .. } => MappedEvent::Updates(vec![]),
         }
     }
 

@@ -77,20 +77,20 @@ async fn main() -> Result<()> {
                 .context("failed to resolve project")?;
             cmd_chat(&core, project.id, None).await
         }
-        Some(Commands::Exec(_)) => unreachable!("exec command is handled before core initialization"),
+        Some(Commands::Exec(_)) => {
+            unreachable!("exec command is handled before core initialization")
+        }
     }
 }
 
 async fn build_core(store: Arc<dyn Store>) -> Result<AgentCoreNative, CoreError> {
     match AgentCoreNative::build_default_local(store.clone()).await {
         Ok(core) => Ok(core),
-        Err(CoreError::NoProvidersRegistered) => {
-            Ok(AgentCoreNative::builder(store)
-                .with_provider("mock", Arc::new(MockProvider::new()))
-                .default_provider("mock")
-                .build()
-                .await?)
-        }
+        Err(CoreError::NoProvidersRegistered) => Ok(AgentCoreNative::builder(store)
+            .with_provider("mock", Arc::new(MockProvider::new()))
+            .default_provider("mock")
+            .build()
+            .await?),
         Err(error) => return Err(error),
     }
 }

@@ -13,7 +13,7 @@ pub type MessageId = Ulid;
 pub type CredentialStoreKey = (String, String);
 
 /// Durable project-level configuration used by `agent-core`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ProjectConfig {
     /// Optional project-level system prompt persisted as durable transcript
@@ -27,18 +27,6 @@ pub struct ProjectConfig {
     pub default_provider: Option<String>,
     /// Optional default model identifier.
     pub default_model: Option<String>,
-}
-
-impl Default for ProjectConfig {
-    fn default() -> Self {
-        Self {
-            system_prompt: None,
-            default_loop: None,
-            runtime: RuntimeConfig::default(),
-            default_provider: None,
-            default_model: None,
-        }
-    }
 }
 
 /// Durable project record.
@@ -211,7 +199,7 @@ impl CredentialHealth {
                 .map(|ok| {
                     self.last_error
                         .as_ref()
-                        .map_or(true, |err| ok > err.recorded_at)
+                        .is_none_or(|err| ok > err.recorded_at)
                 })
                 .unwrap_or(false)
     }
