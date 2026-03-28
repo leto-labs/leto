@@ -2872,6 +2872,26 @@ async fn compat_thread_endpoints_create_list_fetch_and_fork_sessions() {
     assert_eq!(fetched["workspaceID"], created["workspaceID"]);
     assert_eq!(fetched["directory"], created["directory"]);
 
+    let initialized: bool = client
+        .post(format!(
+            "{base}/v1/compat/opencode/session/{session_id}/init"
+        ))
+        .json(&serde_json::json!({
+            "modelID": "mock-echo",
+            "providerID": "mock",
+            "messageID": "msg_init_test"
+        }))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert!(initialized);
+
     let forked: serde_json::Value = client
         .post(format!(
             "{base}/v1/compat/opencode/session/{session_id}/fork"
