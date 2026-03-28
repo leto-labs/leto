@@ -596,4 +596,36 @@ mod tests {
             Some(2)
         );
     }
+
+    #[test]
+    fn parses_token_tracking_from_prompt_and_completion_aliases() {
+        let raw = serde_json::json!({
+            "id": "resp_usage_aliases",
+            "object": "response",
+            "status": "completed",
+            "output": [],
+            "usage": {
+                "prompt_tokens": 13,
+                "completion_tokens": 8,
+                "total_tokens": 21,
+                "prompt_tokens_details": {
+                    "cached_tokens": 5,
+                    "cache_creation_tokens": 3
+                },
+                "completion_tokens_details": {
+                    "reasoning_tokens": 6
+                }
+            }
+        });
+
+        let parsed = parse_response_object_value(raw);
+        let usage = parsed.usage.expect("usage should parse");
+
+        assert_eq!(usage.prompt, 13);
+        assert_eq!(usage.completion, 8);
+        assert_eq!(usage.total, 21);
+        assert_eq!(usage.cache_read, Some(5));
+        assert_eq!(usage.cache_write, Some(3));
+        assert_eq!(usage.reasoning, Some(6));
+    }
 }
