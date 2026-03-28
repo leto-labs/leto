@@ -415,6 +415,61 @@ impl Provider for RetryOnceProvider {
     }
 }
 
+struct TimeoutProvider;
+
+impl Provider for TimeoutProvider {
+    fn stream<'a>(
+        &'a self,
+        _request: &'a Request,
+    ) -> futures::future::BoxFuture<'a, Result<EventStream<'a>, provider::Error>> {
+        Box::pin(async {
+            Err(provider::Error::Inference(
+                "request timed out after 30 seconds".into(),
+            ))
+        })
+    }
+
+    fn info(&self) -> ProviderInfo {
+        ProviderInfo {
+            name: "mock".into(),
+            default_model_id: Some("mock-echo".into()),
+            capabilities: ProviderCapabilities {
+                system_messages: true,
+                developer_messages: true,
+                input_text: true,
+                input_image_urls: false,
+                tool_calls: false,
+                tool_results: false,
+                reasoning_blocks: false,
+                refusal_blocks: false,
+                tool_call_argument_deltas: false,
+                parallel_tool_calls: false,
+                stream_granularity: StreamGranularity::Block,
+            },
+            models: vec![ModelInfo {
+                id: Cow::Borrowed("mock-echo"),
+                name: Cow::Borrowed("Mock Echo"),
+                family: Some(Cow::Borrowed("mock")),
+                reasoning_efforts: Cow::Borrowed(&[]),
+                tool_call: false,
+                attachment: false,
+                structured_output: Some(false),
+                temperature: Some(true),
+                knowledge: None,
+                release_date: None,
+                last_updated: None,
+                open_weights: None,
+                input_modalities: Cow::Borrowed(&["text"]),
+                output_modalities: Cow::Borrowed(&["text"]),
+                cost: None,
+                limit: None,
+                status: None,
+                capabilities: None,
+            }],
+        }
+    }
+}
+
 async fn read_sse_events_until<F>(response: reqwest::Response, predicate: F) -> Vec<CoreEvent>
 where
     F: Fn(&[CoreEvent]) -> bool,
@@ -748,6 +803,42 @@ async fn post_turns_emits_retry_event_before_turn_finished() {
             .plain_text_lossy()
             .contains("hello after retry")
     );
+}
+
+#[tokio::test]
+async fn post_turns_emit_timeout_error_and_finish_with_error() {
+    let base = start_server_with_provider(Arc::new(TimeoutProvider)).await;
+    let client = reqwest::Client::new();
+    let project = create_project(&client, &base).await;
+    let session = create_session(&client, &base, &project).await;
+
+    let response = post_turn(&client, &base, &session, "trigger provider timeout").await;
+
+    assert_eq!(response.status(), reqwest::StatusCode::OK);
+
+    let events = parse_ndjson_events(&response.text().await.unwrap());
+    assert!(events.iter().any(|event| {
+        matches!(
+            event,
+            CoreEvent::Turn {
+                session_id,
+                event: RuntimeEvent::Error { message, .. },
+            } if *session_id == session.id && message.contains("timed out")
+        )
+    }));
+    assert!(events.iter().any(|event| {
+        matches!(
+            event,
+            CoreEvent::Turn {
+                session_id,
+                event: RuntimeEvent::TurnFinished {
+                    session_id: finished_session_id,
+                    finish_reason: Some(FinishReason::Error),
+                    ..
+                },
+            } if *session_id == session.id && *finished_session_id == session.id
+        )
+    }));
 }
 
 #[tokio::test]
