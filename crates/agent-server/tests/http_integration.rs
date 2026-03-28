@@ -1500,6 +1500,118 @@ async fn compat_assistant_endpoint_returns_assistant_message_with_parts() {
 }
 
 #[tokio::test]
+async fn compat_thread_endpoints_create_list_fetch_and_fork_sessions() {
+    let base = start_server().await;
+    let client = reqwest::Client::new();
+
+    let temp_root = env::temp_dir().join(format!(
+        "agent-server-thread-endpoint-{}",
+        ulid::Ulid::new()
+    ));
+    fs::create_dir_all(&temp_root).unwrap();
+
+    let created: serde_json::Value = client
+        .post(format!("{base}/v1/compat/opencode/session"))
+        .query(&[("directory", temp_root.display().to_string())])
+        .json(&serde_json::json!({
+            "title": "Compat thread",
+            "workspaceID": "wrk_thread_test"
+        }))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    let session_id = created["id"]
+        .as_str()
+        .expect("compat thread create response should include a session id")
+        .to_owned();
+
+    assert!(
+        session_id.starts_with("ses"),
+        "compat thread session ids should use the ses prefix"
+    );
+    assert_eq!(created["title"], "Compat thread");
+    assert_eq!(created["workspaceID"], "wrk_thread_test");
+    assert_eq!(created["directory"], temp_root.display().to_string());
+    assert_eq!(created["parentID"], serde_json::Value::Null);
+
+    let listed: Vec<serde_json::Value> = client
+        .get(format!("{base}/v1/compat/opencode/session"))
+        .query(&[("directory", temp_root.display().to_string())])
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0]["id"], created["id"]);
+    assert_eq!(listed[0]["title"], created["title"]);
+    assert_eq!(listed[0]["directory"], created["directory"]);
+
+    let fetched: serde_json::Value = client
+        .get(format!("{base}/v1/compat/opencode/session/{session_id}"))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(fetched["id"], created["id"]);
+    assert_eq!(fetched["title"], created["title"]);
+    assert_eq!(fetched["workspaceID"], created["workspaceID"]);
+    assert_eq!(fetched["directory"], created["directory"]);
+
+    let forked: serde_json::Value = client
+        .post(format!(
+            "{base}/v1/compat/opencode/session/{session_id}/fork"
+        ))
+        .json(&serde_json::json!({}))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert_ne!(forked["id"], created["id"]);
+    assert_eq!(forked["parentID"], created["id"]);
+    assert_eq!(forked["title"], created["title"]);
+    assert_eq!(forked["directory"], created["directory"]);
+
+    let children: Vec<serde_json::Value> = client
+        .get(format!(
+            "{base}/v1/compat/opencode/session/{session_id}/children"
+        ))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(children.len(), 1);
+    assert_eq!(children[0]["id"], forked["id"]);
+    assert_eq!(children[0]["parentID"], created["id"]);
+    assert_eq!(children[0]["title"], created["title"]);
+}
+
+#[tokio::test]
 async fn compat_file_routes_list_directory_and_read_file_content() {
     let base = start_server().await;
     let client = reqwest::Client::new();
