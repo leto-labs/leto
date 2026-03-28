@@ -13,7 +13,8 @@ use agent_store::{CredentialEntry, CredentialHealth, Project, Session, StoredMes
 use futures::StreamExt;
 use provider::{ContentBlock, FinishReason, Message, MessageRole, MockProvider};
 use provider_openai::{
-    ChatCompletionObject, Client, Config, EmbeddingInput, EmbeddingRequest, VideoCreateRequest,
+    ChatCompletionObject, Client, Config, EmbeddingInput, EmbeddingRequest,
+    VectorStoreCreateRequest, VideoCreateRequest,
 };
 
 fn make_server() -> Arc<AgentServer> {
@@ -1131,6 +1132,36 @@ async fn canonical_embeddings_route_returns_embedding_vectors() {
         response.usage.as_ref().map(|usage| usage.total_tokens),
         Some(4)
     );
+}
+
+#[tokio::test]
+async fn canonical_vector_stores_route_returns_openai_style_payload() {
+    let base = start_server().await;
+    let client = Client::new(Config::new("sk-test").with_base_url(format!("{base}/v1")));
+
+    let response = client
+        .vector_stores()
+        .create(&VectorStoreCreateRequest {
+            name: Some("  Support FAQ  ".into()),
+            description: Some("  Contains support answers  ".into()),
+            metadata: Default::default(),
+        })
+        .await
+        .unwrap();
+
+    assert!(response.id.starts_with("vs_"));
+    assert_eq!(response.object, "vector_store");
+    assert_eq!(response.name.as_deref(), Some("Support FAQ"));
+    assert_eq!(
+        response.description.as_deref(),
+        Some("Contains support answers")
+    );
+    assert_eq!(response.bytes, Some(0));
+    assert_eq!(
+        response.file_counts.as_ref().map(|counts| counts.total),
+        Some(0)
+    );
+    assert!(response.created_at.is_some_and(|created_at| created_at > 0));
 }
 
 #[tokio::test]
