@@ -140,6 +140,98 @@ async fn canonical_project_and_session_routes_round_trip() {
 }
 
 #[tokio::test]
+async fn canonical_session_management_routes_cover_project_and_session_reads() {
+    let base = start_server().await;
+    let client = reqwest::Client::new();
+
+    let project = create_project(&client, &base).await;
+    let first_session = create_session(&client, &base, &project).await;
+    let second_session = create_session(&client, &base, &project).await;
+
+    let fetched_project: Project = client
+        .get(format!("{base}/v1/projects/{}", project.id))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(fetched_project.id, project.id);
+
+    let projects: Vec<Project> = client
+        .get(format!("{base}/v1/projects"))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(projects.len(), 1);
+    assert_eq!(projects[0].id, project.id);
+
+    let project_sessions: Vec<Session> = client
+        .get(format!("{base}/v1/projects/{}/sessions", project.id))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(project_sessions.len(), 2);
+    assert!(
+        project_sessions
+            .iter()
+            .any(|session| session.id == first_session.id)
+    );
+    assert!(
+        project_sessions
+            .iter()
+            .any(|session| session.id == second_session.id)
+    );
+
+    let sessions: Vec<Session> = client
+        .get(format!("{base}/v1/sessions"))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(sessions.len(), 2);
+    assert!(
+        sessions
+            .iter()
+            .any(|session| session.id == first_session.id)
+    );
+    assert!(
+        sessions
+            .iter()
+            .any(|session| session.id == second_session.id)
+    );
+
+    let fetched_session: Session = client
+        .get(format!("{base}/v1/sessions/{}", first_session.id))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(fetched_session.id, first_session.id);
+    assert_eq!(fetched_session.project_id, project.id);
+}
+
+#[tokio::test]
 async fn canonical_models_route_returns_provider_inventory() {
     let base = start_server().await;
     let client = reqwest::Client::new();
