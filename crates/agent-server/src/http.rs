@@ -30,9 +30,10 @@ use ulid::Ulid;
 use crate::compat;
 use crate::server::AgentServer;
 use crate::types::{
-    CreateProjectRequest, CreateSessionRequest, CredentialHealthRecord, CredentialRecord,
-    ErrorResponse, HealthResponse, ProjectRootRequest, ProviderCatalogEntry, ProviderModelRecord,
-    SessionRuntimeView, TrajectoryRecord, TurnRequest, UpdateCredentialHealthRequest,
+    BatchTurnRequest, CreateProjectRequest, CreateSessionRequest, CredentialHealthRecord,
+    CredentialRecord, ErrorResponse, HealthResponse, ProjectRootRequest, ProviderCatalogEntry,
+    ProviderModelRecord, SessionRuntimeView, TrajectoryRecord, TurnRequest,
+    UpdateCredentialHealthRequest,
 };
 
 type AppState = Arc<AgentServer>;
@@ -120,6 +121,10 @@ fn canonical_router() -> Router<AppState> {
         .route("/trajectories", routing::get(list_trajectories))
         .route("/sessions/{id}/runtime", routing::get(get_runtime_view))
         .route("/sessions/{id}/turns", routing::post(start_turn))
+        .route(
+            "/sessions/{id}/batch-turns",
+            routing::post(start_batch_turns),
+        )
         .route("/sessions/{id}/cancel", routing::post(cancel_turn))
         .route("/credentials", routing::get(list_credentials))
         .route("/credentials/health", routing::get(list_credential_health))
@@ -706,6 +711,37 @@ async fn start_turn(
         }
         Err(error) => core_error_response(error),
     }
+}
+
+async fn start_batch_turns(
+    State(server): State<AppState>,
+    Path(id): Path<String>,
+    Json(body): Json<BatchTurnRequest>,
+) -> Response {
+    let session_id = match parse_session_id(&id) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    let core = server.core();
+    let mut lines = Vec::new();
+
+    for turn in body.turns {
+        let mut stream = match core.turn(session_id, turn.input).await {
+            Ok(stream) => stream,
+            Err(error) => return core_error_response(error),
+        };
+        while let Some(event) = stream.next().await {
+            let mut line = serde_json::to_string(&event).unwrap_or_else(|_| "{}".to_owned());
+            line.push('\n');
+            lines.push(line);
+        }
+    }
+
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("content-type", "application/x-ndjson")
+        .body(Body::from(lines.concat()))
+        .unwrap()
 }
 
 async fn cancel_turn(State(server): State<AppState>, Path(id): Path<String>) -> Response {

@@ -70,6 +70,12 @@ pub struct TurnRequest {
     pub input: Vec<Message>,
 }
 
+/// Request body for starting multiple turns for one session sequentially.
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct BatchTurnRequest {
+    pub turns: Vec<TurnRequest>,
+}
+
 /// Effective runtime view for one session.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionRuntimeView {

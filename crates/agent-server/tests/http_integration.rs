@@ -1,14 +1,15 @@
 use std::sync::Arc;
 use std::{fs, path::Path};
 
-use agent_core::{AgentCore, AgentCoreNative};
+use agent_core::{AgentCore, AgentCoreNative, CoreEvent};
 use agent_core_remote::{
     CredentialHealthRecord, ErrorResponse, ProviderCatalogEntry, ProviderModelRecord,
     UpdateCredentialHealthRequest,
 };
+use agent_runtime::RuntimeEvent;
 use agent_server::{AgentServer, build_router};
 use agent_store::{CredentialEntry, CredentialHealth, Project, Session};
-use provider::MockProvider;
+use provider::{FinishReason, MockProvider};
 use provider_openai::ChatCompletionObject;
 
 fn make_server() -> Arc<AgentServer> {
@@ -91,6 +92,13 @@ fn sample_trajectory(session: &Session) -> atif::Trajectory {
         continued_trajectory_ref: None,
         extra: None,
     }
+}
+
+fn parse_ndjson_events(body: &str) -> Vec<CoreEvent> {
+    body.lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect()
 }
 
 #[tokio::test]
@@ -517,6 +525,68 @@ async fn canonical_turn_endpoint_streams_ndjson() {
     );
     let body = response.text().await.unwrap();
     assert!(body.contains("turn_finished"));
+}
+
+#[tokio::test]
+async fn canonical_batch_turns_endpoint_runs_turns_sequentially() {
+    let base = start_server().await;
+    let client = reqwest::Client::new();
+    let project = create_project(&client, &base).await;
+    let session = create_session(&client, &base, &project).await;
+
+    let response = client
+        .post(format!("{base}/v1/sessions/{}/batch-turns", session.id))
+        .json(&serde_json::json!({
+            "turns": [
+                {
+                    "input": [
+                        {
+                            "role": "user",
+                            "content": [{"type": "text", "text": "first batch turn"}]
+                        }
+                    ]
+                },
+                {
+                    "input": [
+                        {
+                            "role": "user",
+                            "content": [{"type": "text", "text": "second batch turn"}]
+                        }
+                    ]
+                }
+            ]
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), reqwest::StatusCode::OK);
+    assert_eq!(
+        response
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .unwrap(),
+        "application/x-ndjson"
+    );
+
+    let events = parse_ndjson_events(&response.text().await.unwrap());
+    let finished = events
+        .iter()
+        .filter(|event| {
+            matches!(
+                event,
+                CoreEvent::Turn {
+                    session_id,
+                    event: RuntimeEvent::TurnFinished {
+                        session_id: finished_session_id,
+                        finish_reason: Some(FinishReason::Stop),
+                        ..
+                    },
+                } if *session_id == session.id && *finished_session_id == session.id
+            )
+        })
+        .count();
+    assert_eq!(finished, 2);
 }
 
 #[tokio::test]
