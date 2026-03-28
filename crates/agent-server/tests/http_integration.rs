@@ -909,6 +909,60 @@ async fn compat_auth_endpoints_require_bearer_token() {
 }
 
 #[tokio::test]
+async fn compat_auth_set_and_remove_round_trip_with_bearer_token() {
+    let base = start_server().await;
+    let client = reqwest::Client::new();
+
+    let auth_set = client
+        .put(format!("{base}/v1/compat/opencode/auth/mock"))
+        .header(reqwest::header::AUTHORIZATION, "Bearer test-token")
+        .json(&serde_json::json!({
+            "type": "api",
+            "key": "sk-test"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(auth_set.status(), reqwest::StatusCode::OK);
+    assert_eq!(auth_set.json::<bool>().await.unwrap(), true);
+
+    let credential: CredentialEntry = client
+        .get(format!("{base}/v1/credentials/mock/default"))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(credential.id, "mock");
+    assert_eq!(credential.label, "mock");
+    assert!(credential.enabled);
+    match credential.credential {
+        ProviderCredential::ApiKey { api_key, .. } => assert_eq!(api_key, "sk-test"),
+        other => panic!("expected api key credential, got {other:?}"),
+    }
+
+    let auth_remove = client
+        .delete(format!("{base}/v1/compat/opencode/auth/mock"))
+        .header(reqwest::header::AUTHORIZATION, "Bearer test-token")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(auth_remove.status(), reqwest::StatusCode::OK);
+    assert_eq!(auth_remove.json::<bool>().await.unwrap(), true);
+
+    let missing = client
+        .get(format!("{base}/v1/credentials/mock/default"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(missing.status(), reqwest::StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
 async fn canonical_project_and_session_routes_round_trip() {
     let base = start_server().await;
     let client = reqwest::Client::new();

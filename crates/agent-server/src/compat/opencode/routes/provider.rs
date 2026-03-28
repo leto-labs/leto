@@ -372,12 +372,13 @@ async fn auth_remove(
     if let Err(response) = require_bearer_token(&headers) {
         return response.into_response();
     }
-    let _ = server
-        .core()
-        .store()
-        .credentials()
-        .delete((provider_id, "default".to_owned()))
+    let core = server.core();
+    let store = core.store();
+    let credentials = store.credentials();
+    let _ = credentials
+        .delete((provider_id.clone(), "default".to_owned()))
         .await;
+    let _ = credentials.delete((provider_id.clone(), provider_id)).await;
     Json(true).into_response()
 }
 
