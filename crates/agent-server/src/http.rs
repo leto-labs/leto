@@ -3,7 +3,7 @@ use std::convert::Infallible;
 use std::sync::Arc;
 use std::time::Duration;
 
-use agent_core::{AgentCore, CoreError};
+use agent_core::{AgentCore, CoreError, CoreEvent};
 use agent_runtime::RuntimeEvent;
 use agent_store::{
     CredentialEntry, CredentialStoreKey, Project, ProjectId, ProjectUpdate, Session, SessionId,
@@ -30,10 +30,10 @@ use ulid::Ulid;
 use crate::compat;
 use crate::server::AgentServer;
 use crate::types::{
-    BatchTurnRequest, CreateProjectRequest, CreateSessionRequest, CredentialHealthRecord,
-    CredentialRecord, ErrorResponse, HealthResponse, ProjectRootRequest, ProviderCatalogEntry,
-    ProviderModelRecord, SessionRuntimeView, ToolCallRequest, TrajectoryRecord, TurnRequest,
-    UpdateCredentialHealthRequest,
+    AgentInfoRecord, BatchTurnRequest, CreateProjectRequest, CreateSessionRequest,
+    CredentialHealthRecord, CredentialRecord, ErrorResponse, HealthResponse, ProjectRootRequest,
+    ProviderCatalogEntry, ProviderModelRecord, SessionRuntimeView, ToolCallRequest,
+    TrajectoryRecord, TurnRequest, UpdateCredentialHealthRequest,
 };
 
 type AppState = Arc<AgentServer>;
@@ -69,6 +69,7 @@ fn canonical_router() -> Router<AppState> {
     Router::new()
         .route("/health", routing::get(health))
         .route("/status", routing::get(status))
+        .route("/agents", routing::get(list_agents))
         .route("/events", routing::get(events))
         .route(
             "/projects",
@@ -120,6 +121,7 @@ fn canonical_router() -> Router<AppState> {
         )
         .route("/trajectories", routing::get(list_trajectories))
         .route("/sessions/{id}/runtime", routing::get(get_runtime_view))
+        .route("/sessions/{id}/events", routing::get(session_events))
         .route("/sessions/{id}/turns", routing::post(start_turn))
         .route("/sessions/{id}/stream-turns", routing::post(start_turn_sse))
         .route(
@@ -158,6 +160,10 @@ async fn status(State(server): State<AppState>) -> Response {
     }
 }
 
+async fn list_agents(State(server): State<AppState>) -> Response {
+    Json::<Vec<AgentInfoRecord>>(server.agent_info()).into_response()
+}
+
 async fn events(
     State(server): State<AppState>,
 ) -> Sse<impl futures::Stream<Item = Result<SseEvent, Infallible>>> {
@@ -167,6 +173,36 @@ async fn events(
         Ok::<_, Infallible>(SseEvent::default().data(data))
     });
     Sse::new(stream).keep_alive(KeepAlive::new().interval(Duration::from_secs(10)))
+}
+
+async fn session_events(State(server): State<AppState>, Path(id): Path<String>) -> Response {
+    let session_id = match parse_session_id(&id) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    let core = server.core();
+    let stream = core.subscribe().filter_map(move |event| {
+        let include = matches!(
+            &event,
+            CoreEvent::Turn {
+                session_id: event_session_id,
+                ..
+            }
+            | CoreEvent::TurnCancelled {
+                session_id: event_session_id,
+            } if *event_session_id == session_id
+        );
+        async move {
+            if !include {
+                return None;
+            }
+            let data = serde_json::to_string(&event).unwrap_or_else(|_| "{}".to_owned());
+            Some(Ok::<_, Infallible>(SseEvent::default().data(data)))
+        }
+    });
+    Sse::new(stream)
+        .keep_alive(KeepAlive::new().interval(Duration::from_secs(10)))
+        .into_response()
 }
 
 async fn list_projects(State(server): State<AppState>) -> Response {
