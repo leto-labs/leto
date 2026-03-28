@@ -66,7 +66,7 @@ That distinction matters because many behaviors that first look like "prompting"
 
 ```mermaid
 flowchart TD
-    Core[core / brain orchestration]
+    Core[agent-core orchestration]
     Runtime[agent-runtime<br/>live session engine]
     Loop[loop strategy]
     Provider[provider]
@@ -88,18 +88,20 @@ flowchart TD
 | Tool executor | Execute requested tools | Transcript control, phase/boundary control, child/PTy orchestration | Runtime decides when tools run and how results affect session state |
 | Loop strategy | Decide the next runtime action | Direct mutation of runtime internals, event routing, safe-boundary rules | Runtime asks the loop for policy only after required work is handled |
 | Store | Persist durable data when used | Live turn execution | Runtime owns the active in-memory control plane |
-| Core / Brain | Compose runtime + provider + tools + config into a product surface | Fine-grained live session mechanics | Runtime is the reusable execution substrate inside the larger system |
+| Core / AgentCore | Compose runtime + provider + tools + config into a product surface | Fine-grained live session mechanics | Runtime is the reusable execution substrate inside the larger system |
 
 ### Legacy Placement
 
-If you know the older `brain-core` architecture, treat `agent-runtime` as the newer reusable session engine underneath that broader "core" idea.
+If you know the older `brain-core` architecture, treat `agent-runtime` as the
+newer reusable session engine underneath the current `agent-core` product
+boundary.
 
-- `brain-core` is the larger orchestration shell
+- `agent-core` is the larger orchestration shell
 - `agent-runtime` is the session execution substrate
 
 In other words:
 
-- `brain-core` answers "how does the product assemble the whole stack?"
+- `agent-core` answers "how does the product assemble the whole stack?"
 - `agent-runtime` answers "how does one live agent session actually run?"
 
 ## Core Mental Model

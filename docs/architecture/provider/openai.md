@@ -1,8 +1,8 @@
 # OpenAI Provider Family
 
-This page covers the `openai` provider family in `brain-providers`: the
-OpenAI-compatible HTTP provider, preset catalog, API surface selection, and
-serializer behavior.
+This page covers the OpenAI-compatible provider family in `provider-openai`:
+the HTTP client, shared-provider adapter, typed preset catalog, API-surface
+selection, and serializer behavior.
 
 ## Main Pieces
 

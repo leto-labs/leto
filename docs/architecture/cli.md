@@ -1,28 +1,29 @@
-# brain-cli
+# agent-cli
 
-`brain-cli` is the main local application entrypoint. It bootstraps an embedded
-`BrainRuntimeNative`, exposes interactive chat and session management, and also
-owns the direct benchmark execution path through `brain exec`.
+`agent-cli` is the main local application entrypoint. It bootstraps an embedded
+`AgentCoreNative`, exposes interactive chat and session management through the
+`agent` binary, and owns the direct benchmark execution path through
+`agent exec`.
 
 ## Command Surface
 
 | Command | Role |
 | --- | --- |
-| `brain` | Interactive local chat |
-| `brain sessions ...` | Session discovery and resume |
-| `brain credentials ...` | Credential management and OAuth login |
-| `brain exec ...` | Non-interactive benchmark/harness execution with artifact output |
-| `brain acp` | Temporary compatibility alias to launch the ACP stdio surface |
+| `agent` | Interactive local chat |
+| `agent sessions ...` | Session discovery and resume |
+| `agent credentials ...` | Credential management and OAuth login |
+| `agent exec ...` | Non-interactive benchmark/harness execution with artifact output |
+| `agent acp` | ACP stdio compatibility alias backed by `agent-acp` |
 
 ## Runtime Bootstrap
 
 | Step | Behavior |
 | --- | --- |
 | 1 | Resolve config from defaults, global config, project config, and root `AGENTS.md` |
-| 2 | Open a `FileStore` rooted at `brain_home()` |
+| 2 | Open a `FileStore` rooted at `agent_home()` |
 | 3 | Discover providers from credentials, OAuth, local features, or mock fallback |
 | 4 | Register loops: `simple`, `robust`, `terminus2`, `terminus-kira` |
-| 5 | Register the native tool suite via `native_tools()` |
+| 5 | Build `AgentCoreNative` with the native tool executor via `native_tools()` |
 
 ## Two Modes
 
@@ -36,19 +37,19 @@ owns the direct benchmark execution path through `brain exec`.
 ```mermaid
 flowchart TD
     User[User or Harbor]
-    CLI[brain-cli]
-    Runtime[BrainRuntimeNative]
+    CLI[agent-cli]
+    Core[AgentCoreNative]
     Store[FileStore]
     Artifacts[run.json / events.jsonl / trajectory.json]
 
     User --> CLI
-    CLI --> Runtime
-    Runtime --> Store
+    CLI --> Core
+    Core --> Store
     CLI --> Artifacts
 ```
 
 ## Architectural Reading
 
 The CLI is no longer a thin demo wrapper. It is both the primary local user
-surface and the direct benchmark surface that lets Harbor exercise `brain`
-without ACP in the middle.
+surface and the direct benchmark surface that lets Harbor exercise the native
+agent stack without ACP in the middle.

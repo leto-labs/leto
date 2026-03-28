@@ -10,17 +10,17 @@ not as the universal in-memory runtime model.
 | --- | --- |
 | Runtime events | Live turn activity such as tokens, tool calls, approvals, retries, and `TurnDone` |
 | `Event::Atif(...)` | Completion-oriented ATIF events emitted on the runtime stream |
-| Persisted trajectory state | Session-scoped ATIF transcript data stored separately and written out by `brain exec` |
+| Persisted trajectory state | Session-scoped ATIF transcript data stored separately and written out by `agent exec` |
 
 ## Data Flow
 
 ```mermaid
 flowchart LR
     Loop[provider + tools + loop]
-    Runtime[brain-core runtime events]
-    Builder[brain-core ATIF builder]
+    Runtime[agent-core / agent-runtime events]
+    Builder[agent-core ATIF builder]
     EventAtif[Event::Atif]
-    Exec[brain exec]
+    Exec[agent exec]
     Harbor[Harbor]
 
     Loop --> Runtime
@@ -35,10 +35,10 @@ flowchart LR
 | Component | Responsibility |
 | --- | --- |
 | `crates/atif` | Rust schema and validation types for Harbor ATIF |
-| `brain-types::event` | Runtime-facing `AtifEvent` variants |
-| `brain-types::store` | Trajectory persistence contract |
-| `brain-core::atif_events` | Append-only trajectory construction and completion-event emission |
-| `brain-cli::exec_mode` | Writes benchmark-facing ATIF artifacts |
+| `agent-runtime` events | Runtime-facing completion and transcript events |
+| `agent-store` | Trajectory persistence contract |
+| `agent-core` | Append-only trajectory construction and completion-event emission |
+| `agent-cli::exec_mode` | Writes benchmark-facing ATIF artifacts |
 
 ## Why A Separate Trajectory Store Exists
 
@@ -50,6 +50,6 @@ flowchart LR
 
 ## Architectural Reading
 
-ATIF is the export boundary that lets the direct `brain` Harbor path stay
+ATIF is the export boundary that lets the direct `agent` Harbor path stay
 native end-to-end. It is a first-class integration concern, but it is still
 downstream of the main runtime, not a replacement for it.

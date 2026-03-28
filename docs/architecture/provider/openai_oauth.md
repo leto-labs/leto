@@ -1,6 +1,7 @@
 # OpenAI OAuth Provider
 
-This page covers the OAuth-backed OpenAI provider path in `brain-providers`.
+This page covers the OAuth-backed OpenAI provider path in the current
+`provider-openai` + shared credential-pool stack.
 
 ## Main Pieces
 

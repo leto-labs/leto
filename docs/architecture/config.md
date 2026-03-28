@@ -1,14 +1,15 @@
-# brain-config
+# Config Bootstrap
 
-`brain-config` resolves runtime configuration from filesystem state and
-converts it into the shared `ProjectConfig` model consumed by the runtime.
+Current config resolution is an `agent-core` bootstrap concern over the shared
+`agent-store::ProjectConfig` model. Legacy `brain-config` code remains in the
+repo, but it is no longer the primary architecture boundary.
 
 ## Config Layers
 
 | Priority | Source | Purpose |
 | --- | --- | --- |
 | Lowest | built-in defaults | Safe baseline behavior |
-| Middle | `~/.brain/config.toml` | User-wide defaults |
+| Middle | `~/.agent/config.toml` when present | User-wide defaults |
 | Highest | `.agents/config.toml` discovered from the project root | Project-local runtime policy |
 
 ## Prompt Layering
@@ -34,7 +35,7 @@ converts it into the shared `ProjectConfig` model consumed by the runtime.
 ```mermaid
 flowchart TD
     Defaults[Default ProjectConfig]
-    Global[~/.brain/config.toml]
+    Global[~/.agent/config.toml]
     Local[.agents/config.toml]
     Agents[.agents/AGENTS.md]
     Final[Resolved ProjectConfig]
