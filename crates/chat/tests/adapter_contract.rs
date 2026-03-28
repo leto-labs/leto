@@ -97,3 +97,19 @@ async fn adapter_subscribe_returns_normalized_chat_event() {
     assert_eq!(message.sender.id, "user-1");
     assert_eq!(message.text, "hello");
 }
+
+#[tokio::test]
+async fn adapter_info_and_health_check_expose_declared_capabilities() {
+    let adapter = DummyAdapter;
+    let info = adapter.info();
+
+    assert_eq!(info.id, "dummy");
+    assert_eq!(info.display_name, "Dummy");
+    assert!(info.capabilities.receive_messages);
+    assert!(info.capabilities.send_messages);
+    assert!(info.capabilities.health_checks);
+    assert!(!info.capabilities.message_edits);
+
+    let healthy = adapter.health_check().await.unwrap();
+    assert!(healthy);
+}
