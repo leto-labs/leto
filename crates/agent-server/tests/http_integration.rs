@@ -2544,6 +2544,199 @@ async fn compat_config_provider_and_prompt_routes_are_real() {
 }
 
 #[tokio::test]
+async fn compat_session_lifecycle_routes_are_real() {
+    let base = start_server().await;
+    let client = reqwest::Client::new();
+
+    let temp_root = env::temp_dir().join(format!(
+        "agent-server-compat-lifecycle-{}",
+        ulid::Ulid::new()
+    ));
+    fs::create_dir_all(&temp_root).unwrap();
+    let directory = temp_root.display().to_string();
+
+    let project = create_project_with_root(&client, &base, &temp_root).await;
+
+    let created: serde_json::Value = client
+        .post(format!("{base}/v1/compat/opencode/session"))
+        .query(&[("directory", directory.as_str())])
+        .json(&serde_json::json!({
+            "title": "Lifecycle Root",
+            "workspaceID": "wrk-lifecycle",
+            "permission": [
+                {
+                    "permission": "shell",
+                    "pattern": "*",
+                    "action": "allow"
+                }
+            ]
+        }))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let session_id = created["id"].as_str().unwrap().to_owned();
+    assert_eq!(
+        created["projectID"],
+        serde_json::json!(project.id.to_string())
+    );
+    assert_eq!(created["directory"], serde_json::json!(directory));
+    assert_eq!(created["title"], serde_json::json!("Lifecycle Root"));
+    assert_eq!(created["workspaceID"], serde_json::json!("wrk-lifecycle"));
+    assert_eq!(
+        created["permission"][0],
+        serde_json::json!({
+            "permission": "shell",
+            "pattern": "*",
+            "action": "allow"
+        })
+    );
+
+    let updated: serde_json::Value = client
+        .patch(format!("{base}/v1/compat/opencode/session/{session_id}"))
+        .json(&serde_json::json!({
+            "title": "Lifecycle Renamed",
+            "time": {
+                "archived": 1234.0
+            }
+        }))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(updated["id"], serde_json::json!(session_id));
+    assert_eq!(updated["title"], serde_json::json!("Lifecycle Renamed"));
+    assert_eq!(updated["time"]["archived"], serde_json::json!(1234.0));
+
+    let shared: serde_json::Value = client
+        .post(format!(
+            "{base}/v1/compat/opencode/session/{session_id}/share"
+        ))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(
+        shared["share"]["url"],
+        serde_json::json!(format!("https://example.invalid/s/{session_id}"))
+    );
+
+    let unshared: serde_json::Value = client
+        .delete(format!(
+            "{base}/v1/compat/opencode/session/{session_id}/share"
+        ))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(unshared.get("share").is_none());
+
+    let fetched: serde_json::Value = client
+        .get(format!("{base}/v1/compat/opencode/session/{session_id}"))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(fetched["title"], serde_json::json!("Lifecycle Renamed"));
+    assert_eq!(fetched["time"]["archived"], serde_json::json!(1234.0));
+
+    let forked: serde_json::Value = client
+        .post(format!(
+            "{base}/v1/compat/opencode/session/{session_id}/fork"
+        ))
+        .json(&serde_json::json!({}))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let forked_id = forked["id"].as_str().unwrap().to_owned();
+    assert_ne!(forked_id, session_id);
+    assert_eq!(
+        forked["projectID"],
+        serde_json::json!(project.id.to_string())
+    );
+    assert_eq!(forked["parentID"], serde_json::json!(session_id));
+    assert_eq!(forked["title"], serde_json::json!("Lifecycle Renamed"));
+
+    let children: serde_json::Value = client
+        .get(format!(
+            "{base}/v1/compat/opencode/session/{session_id}/children"
+        ))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(children.as_array().is_some_and(|items| {
+        items
+            .iter()
+            .any(|item| item["id"] == forked_id && item["parentID"] == session_id)
+    }));
+
+    let aborted: bool = client
+        .post(format!(
+            "{base}/v1/compat/opencode/session/{session_id}/abort"
+        ))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(aborted);
+
+    let deleted: bool = client
+        .delete(format!("{base}/v1/compat/opencode/session/{session_id}"))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(deleted);
+
+    let fetch_deleted = client
+        .get(format!("{base}/v1/compat/opencode/session/{session_id}"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(fetch_deleted.status(), reqwest::StatusCode::BAD_REQUEST);
+
+    fs::remove_dir_all(&temp_root).unwrap();
+}
+
+#[tokio::test]
 async fn compat_warmup_routes_return_usable_bootstrap_data() {
     let base = start_server().await;
     let client = reqwest::Client::new();
