@@ -116,6 +116,61 @@ impl Provider for RateLimitedProvider {
     }
 }
 
+struct QuotaExceededProvider;
+
+impl Provider for QuotaExceededProvider {
+    fn stream<'a>(
+        &'a self,
+        _request: &'a Request,
+    ) -> futures::future::BoxFuture<'a, Result<EventStream<'a>, provider::Error>> {
+        Box::pin(async {
+            Err(provider::Error::Inference(
+                "429 Too Many Requests: You exceeded your current quota, please check your plan and billing details.".into(),
+            ))
+        })
+    }
+
+    fn info(&self) -> ProviderInfo {
+        ProviderInfo {
+            name: "mock".into(),
+            default_model_id: Some("mock-echo".into()),
+            capabilities: ProviderCapabilities {
+                system_messages: true,
+                developer_messages: true,
+                input_text: true,
+                input_image_urls: false,
+                tool_calls: false,
+                tool_results: false,
+                reasoning_blocks: false,
+                refusal_blocks: false,
+                tool_call_argument_deltas: false,
+                parallel_tool_calls: false,
+                stream_granularity: StreamGranularity::Block,
+            },
+            models: vec![provider::ModelInfo {
+                id: Cow::Borrowed("mock-echo"),
+                name: Cow::Borrowed("Mock Echo"),
+                family: Some(Cow::Borrowed("mock")),
+                reasoning_efforts: Cow::Borrowed(&[]),
+                tool_call: false,
+                attachment: false,
+                structured_output: Some(false),
+                temperature: Some(true),
+                knowledge: None,
+                release_date: None,
+                last_updated: None,
+                open_weights: None,
+                input_modalities: Cow::Borrowed(&["text"]),
+                output_modalities: Cow::Borrowed(&["text"]),
+                cost: None,
+                limit: None,
+                status: None,
+                capabilities: None,
+            }],
+        }
+    }
+}
+
 struct CacheUsageProvider;
 
 impl Provider for CacheUsageProvider {
@@ -1367,6 +1422,33 @@ async fn canonical_chat_completions_route_surfaces_rate_limited_provider_errors(
     assert_eq!(error.error.code, "runtime_error");
     assert!(error.error.message.contains("429 Too Many Requests"));
     assert!(error.error.message.contains("rate limit exceeded"));
+}
+
+#[tokio::test]
+async fn canonical_chat_completions_route_surfaces_quota_exceeded_provider_errors() {
+    let base = start_server_with_provider(Arc::new(QuotaExceededProvider)).await;
+    let client = reqwest::Client::new();
+
+    let response = client
+        .post(format!("{base}/v1/chat/completions"))
+        .json(&serde_json::json!({
+            "model": "mock-echo",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "trigger provider quota exceeded"
+                }
+            ]
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), reqwest::StatusCode::BAD_GATEWAY);
+    let error: ErrorResponse = response.json().await.unwrap();
+    assert_eq!(error.error.code, "runtime_error");
+    assert!(error.error.message.contains("429 Too Many Requests"));
+    assert!(error.error.message.contains("current quota"));
 }
 
 #[tokio::test]
