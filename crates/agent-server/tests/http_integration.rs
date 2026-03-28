@@ -9,7 +9,7 @@ use agent_core_remote::{
 use agent_runtime::RuntimeEvent;
 use agent_server::{AgentInfoRecord, AgentServer, AgentServerStatus, build_router};
 use agent_store::{CredentialEntry, CredentialHealth, Project, Session, StoredMessage};
-use provider::{ContentBlock, FinishReason, MessageRole, MockProvider};
+use provider::{ContentBlock, FinishReason, Message, MessageRole, MockProvider};
 use provider_openai::ChatCompletionObject;
 
 fn make_server() -> Arc<AgentServer> {
@@ -445,6 +445,98 @@ async fn canonical_session_management_routes_cover_project_and_session_reads() {
         .unwrap();
     assert_eq!(fetched_session.id, first_session.id);
     assert_eq!(fetched_session.project_id, project.id);
+}
+
+#[tokio::test]
+async fn canonical_delete_session_route_removes_session_and_related_records() {
+    let base = start_server().await;
+    let client = reqwest::Client::new();
+
+    let project = create_project(&client, &base).await;
+    let session = create_session(&client, &base, &project).await;
+    let sibling_session = create_session(&client, &base, &project).await;
+    let trajectory = sample_trajectory(&session);
+    let message = StoredMessage::new(session.id, 0, Message::user_text("delete me"));
+
+    let stored_messages: Vec<StoredMessage> = client
+        .put(format!("{base}/v1/sessions/{}/messages", session.id))
+        .json(&vec![message.clone()])
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(stored_messages, vec![message]);
+
+    let stored_trajectory: atif::Trajectory = client
+        .put(format!("{base}/v1/sessions/{}/trajectory", session.id))
+        .json(&trajectory)
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(stored_trajectory, trajectory);
+
+    let response = client
+        .delete(format!("{base}/v1/sessions/{}", session.id))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), reqwest::StatusCode::NO_CONTENT);
+
+    let fetch_deleted = client
+        .get(format!("{base}/v1/sessions/{}", session.id))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(fetch_deleted.status(), reqwest::StatusCode::NOT_FOUND);
+    let error: ErrorResponse = fetch_deleted.json().await.unwrap();
+    assert_eq!(error.error.code, "store_not_found");
+    assert!(error.error.message.contains(&session.id.to_string()));
+
+    let project_sessions: Vec<Session> = client
+        .get(format!("{base}/v1/projects/{}/sessions", project.id))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(project_sessions.len(), 1);
+    assert_eq!(project_sessions[0].id, sibling_session.id);
+
+    let messages: Vec<StoredMessage> = client
+        .get(format!("{base}/v1/sessions/{}/messages", session.id))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(messages.is_empty());
+
+    let fetched_trajectory: Option<atif::Trajectory> = client
+        .get(format!("{base}/v1/sessions/{}/trajectory", session.id))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(fetched_trajectory, None);
 }
 
 #[tokio::test]
