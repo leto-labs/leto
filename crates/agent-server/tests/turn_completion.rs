@@ -1080,7 +1080,7 @@ async fn post_turns_skip_tripped_circuit_breaker_credential_for_new_session() {
 }
 
 #[tokio::test]
-async fn post_cancel_cancels_active_turn() {
+async fn post_cancel_cancels_active_turn_and_allows_immediate_follow_up() {
     let base = start_server_with_provider(Arc::new(MockProvider::new().with_delay(250))).await;
     let client = reqwest::Client::new();
     let project = create_project(&client, &base).await;
@@ -1091,6 +1091,21 @@ async fn post_cancel_cancels_active_turn() {
 
     let cancel_response = post_cancel_turn(&client, &base, &session).await;
     assert_eq!(cancel_response.status(), reqwest::StatusCode::OK);
+
+    let follow_up = post_turn(&client, &base, &session, "follow up after cancel").await;
+    assert_eq!(follow_up.status(), reqwest::StatusCode::OK);
+    let follow_up_events = parse_ndjson_events(&follow_up.text().await.unwrap());
+    assert!(matches!(
+        follow_up_events.last(),
+        Some(CoreEvent::Turn {
+            session_id,
+            event: RuntimeEvent::TurnFinished {
+                session_id: finished_session_id,
+                finish_reason: Some(FinishReason::Stop),
+                ..
+            },
+        }) if *session_id == session.id && *finished_session_id == session.id
+    ));
 
     let events = parse_ndjson_events(&turn_response.text().await.unwrap());
     assert!(events.iter().any(|event| {
@@ -1108,8 +1123,34 @@ async fn post_cancel_cancels_active_turn() {
             } if *session_id == session.id
         )
     }));
+}
 
-    let follow_up = post_turn(&client, &base, &session, "follow up after cancel").await;
+#[tokio::test]
+async fn post_cancel_is_a_no_op_for_completed_turns() {
+    let base = start_server().await;
+    let client = reqwest::Client::new();
+    let project = create_project(&client, &base).await;
+    let session = create_session(&client, &base, &project).await;
+
+    let completed = post_turn(&client, &base, &session, "complete before cancel").await;
+    assert_eq!(completed.status(), reqwest::StatusCode::OK);
+    let completed_events = parse_ndjson_events(&completed.text().await.unwrap());
+    assert!(matches!(
+        completed_events.last(),
+        Some(CoreEvent::Turn {
+            session_id,
+            event: RuntimeEvent::TurnFinished {
+                session_id: finished_session_id,
+                finish_reason: Some(FinishReason::Stop),
+                ..
+            },
+        }) if *session_id == session.id && *finished_session_id == session.id
+    ));
+
+    let cancel_response = post_cancel_turn(&client, &base, &session).await;
+    assert_eq!(cancel_response.status(), reqwest::StatusCode::OK);
+
+    let follow_up = post_turn(&client, &base, &session, "turn after idle cancel").await;
     assert_eq!(follow_up.status(), reqwest::StatusCode::OK);
     let follow_up_events = parse_ndjson_events(&follow_up.text().await.unwrap());
     assert!(matches!(
