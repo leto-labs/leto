@@ -1371,6 +1371,45 @@ mod tests {
     }
 
     #[test]
+    fn responses_request_maps_reasoning_profile_and_metadata() {
+        let mut request = Request {
+            messages: vec![Message::user_text("Profile this request.")],
+            options: provider::RequestOptions {
+                max_output_tokens: Some(512),
+                temperature: Some(0.2),
+                top_p: Some(0.9),
+                reasoning: Some(provider::ReasoningConfig {
+                    effort: Some("high".into()),
+                    summary: Some("detailed".into()),
+                    budget_tokens: Some(256),
+                }),
+                ..provider::RequestOptions::default()
+            },
+            ..Request::default()
+        };
+        request.options.metadata.insert(
+            "trace_id".into(),
+            serde_json::Value::String("trace-123".into()),
+        );
+
+        let mapped = OpenAiProvider::map_responses_request(&request, false).unwrap();
+        let reasoning = mapped.reasoning.expect("reasoning should be mapped");
+
+        assert_eq!(reasoning.effort.as_deref(), Some("high"));
+        assert_eq!(reasoning.summary.as_deref(), Some("detailed"));
+        assert_eq!(mapped.max_output_tokens, Some(512));
+        assert_eq!(mapped.temperature, Some(0.2));
+        assert_eq!(mapped.top_p, Some(0.9));
+        assert_eq!(
+            mapped
+                .metadata
+                .get("trace_id")
+                .and_then(serde_json::Value::as_str),
+            Some("trace-123")
+        );
+    }
+
+    #[test]
     fn provider_new_initializes_default_transport_and_model_state() {
         let provider = OpenAiProvider::new(
             Config::new("test")
