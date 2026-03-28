@@ -1096,6 +1096,39 @@ async fn canonical_image_generation_route_returns_base64_images() {
 }
 
 #[tokio::test]
+async fn canonical_moderations_route_returns_openai_style_payload() {
+    let base = start_server().await;
+    let client = reqwest::Client::new();
+
+    let response: serde_json::Value = client
+        .post(format!("{base}/v1/moderations"))
+        .json(&serde_json::json!({
+            "model": "mock-echo",
+            "input": "please moderate this text"
+        }))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(response["id"].as_str(), Some("modr-agent-server"));
+    assert_eq!(response["model"].as_str(), Some("mock-echo"));
+
+    let results = response["results"].as_array().unwrap();
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0]["flagged"].as_bool(), Some(false));
+    assert_eq!(results[0]["categories"]["violence"].as_bool(), Some(false));
+    assert_eq!(
+        results[0]["category_scores"]["violence"].as_f64(),
+        Some(0.0)
+    );
+}
+
+#[tokio::test]
 async fn canonical_and_compat_event_endpoints_are_sse() {
     let base = start_server().await;
     let client = reqwest::Client::new();

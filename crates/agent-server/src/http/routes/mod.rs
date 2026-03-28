@@ -2,6 +2,7 @@ pub(super) mod chat_completions;
 pub(super) mod credentials;
 pub(super) mod embeddings;
 pub(super) mod images;
+pub(super) mod moderations;
 pub(super) mod projects;
 pub(super) mod providers;
 pub(super) mod sessions;
