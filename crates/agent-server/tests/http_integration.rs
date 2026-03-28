@@ -16,8 +16,8 @@ use agent_store::{
 };
 use futures::StreamExt;
 use provider::{
-    ContentBlock, EventStream, FinishReason, Message, MessageRole, MockProvider, Provider,
-    ProviderCapabilities, ProviderInfo, Request, StreamGranularity,
+    Block, BlockKind, ContentBlock, Event, EventStream, FinishReason, Message, MessageRole,
+    MockProvider, Provider, ProviderCapabilities, ProviderInfo, Request, StreamGranularity, Usage,
 };
 use provider_openai::{
     AuditLogListParams, AuditLogPage, ChatCompletionObject, Client, Config, EmbeddingInput,
@@ -72,6 +72,96 @@ impl Provider for RateLimitedProvider {
             Err(provider::Error::Inference(
                 "429 Too Many Requests: rate limit exceeded".into(),
             ))
+        })
+    }
+
+    fn info(&self) -> ProviderInfo {
+        ProviderInfo {
+            name: "mock".into(),
+            default_model_id: Some("mock-echo".into()),
+            capabilities: ProviderCapabilities {
+                system_messages: true,
+                developer_messages: true,
+                input_text: true,
+                input_image_urls: false,
+                tool_calls: false,
+                tool_results: false,
+                reasoning_blocks: false,
+                refusal_blocks: false,
+                tool_call_argument_deltas: false,
+                parallel_tool_calls: false,
+                stream_granularity: StreamGranularity::Block,
+            },
+            models: vec![provider::ModelInfo {
+                id: Cow::Borrowed("mock-echo"),
+                name: Cow::Borrowed("Mock Echo"),
+                family: Some(Cow::Borrowed("mock")),
+                reasoning_efforts: Cow::Borrowed(&[]),
+                tool_call: false,
+                attachment: false,
+                structured_output: Some(false),
+                temperature: Some(true),
+                knowledge: None,
+                release_date: None,
+                last_updated: None,
+                open_weights: None,
+                input_modalities: Cow::Borrowed(&["text"]),
+                output_modalities: Cow::Borrowed(&["text"]),
+                cost: None,
+                limit: None,
+                status: None,
+                capabilities: None,
+            }],
+        }
+    }
+}
+
+struct CacheUsageProvider;
+
+impl Provider for CacheUsageProvider {
+    fn stream<'a>(
+        &'a self,
+        request: &'a Request,
+    ) -> futures::future::BoxFuture<'a, Result<EventStream<'a>, provider::Error>> {
+        Box::pin(async move {
+            let last_user = request.last_user_text_lossy().unwrap_or_default();
+            let events = vec![
+                Ok(Event::ResponseStart {
+                    response_id: Some("cache-response-1".into()),
+                    model: Some(request.model.clone().unwrap_or_else(|| "mock-echo".into())),
+                }),
+                Ok(Event::BlockStart {
+                    block: Block {
+                        id: "cache-text-1".into(),
+                        output_index: 0,
+                        kind: BlockKind::Text,
+                        item_id: Some("cache-item-1".into()),
+                    },
+                }),
+                Ok(Event::text_delta(
+                    "cache-text-1",
+                    format!("{last_user} from cache "),
+                )),
+                Ok(Event::BlockStop {
+                    id: "cache-text-1".into(),
+                }),
+                Ok(Event::Usage {
+                    usage: Usage {
+                        input_tokens: Some(11),
+                        output_tokens: Some(7),
+                        total_tokens: Some(18),
+                        cache_read_tokens: Some(5),
+                        cache_write_tokens: Some(3),
+                        reasoning_tokens: Some(2),
+                    },
+                }),
+                Ok(Event::Completed {
+                    response_id: Some("cache-response-1".into()),
+                    finish_reason: Some(FinishReason::Stop),
+                }),
+            ];
+
+            Ok(Box::pin(futures::stream::iter(events)) as EventStream<'a>)
         })
     }
 
@@ -1214,6 +1304,42 @@ async fn canonical_chat_completions_route_returns_non_streaming_completion() {
                 provider_openai::ChatCompletionMessageContent::Parts(_) => false,
             })
     );
+}
+
+#[tokio::test]
+async fn canonical_chat_completions_route_returns_cache_usage() {
+    let base = start_server_with_provider(Arc::new(CacheUsageProvider)).await;
+    let client = reqwest::Client::new();
+
+    let completion: ChatCompletionObject = client
+        .post(format!("{base}/v1/chat/completions"))
+        .json(&serde_json::json!({
+            "model": "mock-echo",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "hello cached completions"
+                }
+            ]
+        }))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    let usage = completion
+        .usage
+        .expect("chat completions should include usage");
+    assert_eq!(usage.prompt, 11);
+    assert_eq!(usage.completion, 7);
+    assert_eq!(usage.total, 18);
+    assert_eq!(usage.cache_read, Some(5));
+    assert_eq!(usage.cache_write, Some(3));
+    assert_eq!(usage.reasoning, Some(2));
 }
 
 #[tokio::test]
