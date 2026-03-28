@@ -2544,6 +2544,97 @@ async fn compat_config_provider_and_prompt_routes_are_real() {
 }
 
 #[tokio::test]
+async fn compat_config_reads_reflect_latest_patched_values() {
+    let base = start_server().await;
+    let client = reqwest::Client::new();
+
+    let compat_config_patch = serde_json::json!({
+        "model": "mock/config-reloaded",
+        "share": "auto",
+        "username": "compat-user",
+        "plugin": ["repo"],
+    });
+    let compat_config: serde_json::Value = client
+        .patch(format!("{base}/v1/compat/opencode/config"))
+        .json(&compat_config_patch)
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(compat_config, compat_config_patch);
+
+    let reloaded_compat_config: serde_json::Value = client
+        .get(format!("{base}/v1/compat/opencode/config"))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(reloaded_compat_config, compat_config_patch);
+
+    let initial_global_config: serde_json::Value = client
+        .get(format!("{base}/v1/compat/opencode/global/config"))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(initial_global_config.get("model").is_none());
+
+    let global_config_patch = serde_json::json!({
+        "model": "mock/global-reloaded",
+        "default_agent": "plan",
+        "username": "global-user",
+    });
+    let global_config: serde_json::Value = client
+        .patch(format!("{base}/v1/compat/opencode/global/config"))
+        .json(&global_config_patch)
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(global_config, global_config_patch);
+
+    let reloaded_global_config: serde_json::Value = client
+        .get(format!("{base}/v1/compat/opencode/global/config"))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(reloaded_global_config, global_config_patch);
+
+    let unchanged_compat_config: serde_json::Value = client
+        .get(format!("{base}/v1/compat/opencode/config"))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(unchanged_compat_config, compat_config_patch);
+}
+
+#[tokio::test]
 async fn compat_session_lifecycle_routes_are_real() {
     let base = start_server().await;
     let client = reqwest::Client::new();
