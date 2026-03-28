@@ -112,6 +112,7 @@ fn canonical_router() -> Router<AppState> {
             "/images/generations",
             routing::post(routes::images::create_image_generation),
         )
+        .route("/videos", routing::post(routes::videos::create_video))
         .route(
             "/moderations",
             routing::post(routes::moderations::create_moderation),

@@ -12,7 +12,9 @@ use agent_server::{AgentInfoRecord, AgentServer, AgentServerStatus, build_router
 use agent_store::{CredentialEntry, CredentialHealth, Project, Session, StoredMessage};
 use futures::StreamExt;
 use provider::{ContentBlock, FinishReason, Message, MessageRole, MockProvider};
-use provider_openai::{ChatCompletionObject, Client, Config, EmbeddingInput, EmbeddingRequest};
+use provider_openai::{
+    ChatCompletionObject, Client, Config, EmbeddingInput, EmbeddingRequest, VideoCreateRequest,
+};
 
 fn make_server() -> Arc<AgentServer> {
     let core: Arc<dyn AgentCore> = Arc::new(futures::executor::block_on(async {
@@ -1167,6 +1169,37 @@ async fn canonical_image_generation_route_returns_base64_images() {
             .is_some_and(|image| !image.trim().is_empty())
             && item["revised_prompt"].as_str() == Some("hello image world")
     }));
+}
+
+#[tokio::test]
+async fn canonical_video_route_returns_openai_style_payload() {
+    let base = start_server().await;
+    let client = Client::new(
+        Config::new("sk-test")
+            .with_base_url(format!("{base}/v1"))
+            .with_model("mock-echo"),
+    );
+
+    let response = client
+        .videos()
+        .create(&VideoCreateRequest {
+            prompt: "a calico cat playing piano".into(),
+            seconds: Some("8".into()),
+            size: Some("720x1280".into()),
+            ..VideoCreateRequest::default()
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(response.object, "video");
+    assert_eq!(response.id, "video_agent_server");
+    assert_eq!(response.model.as_deref(), Some("mock-echo"));
+    assert_eq!(response.status.as_deref(), Some("queued"));
+    assert_eq!(response.progress, Some(0));
+    assert_eq!(response.seconds.as_deref(), Some("8"));
+    assert_eq!(response.size.as_deref(), Some("720x1280"));
+    assert_eq!(response.quality.as_deref(), Some("standard"));
+    assert!(response.created_at.is_some_and(|created_at| created_at > 0));
 }
 
 #[tokio::test]

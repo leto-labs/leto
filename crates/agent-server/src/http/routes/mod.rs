@@ -8,3 +8,4 @@ pub(super) mod providers;
 pub(super) mod sessions;
 pub(super) mod system;
 pub(super) mod turns;
+pub(super) mod videos;

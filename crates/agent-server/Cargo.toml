@@ -10,7 +10,7 @@ agent-runtime = { workspace = true }
 agent-store = { workspace = true }
 aide = { workspace = true, features = ["axum", "axum-json", "axum-query", "macros"] }
 atif = { workspace = true }
-axum = { workspace = true }
+axum = { workspace = true, features = ["multipart"] }
 chrono = { workspace = true }
 dirs = { workspace = true }
 futures = { workspace = true }
