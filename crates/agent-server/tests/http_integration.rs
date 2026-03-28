@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::{fs, path::Path};
 
 use agent_core::{AgentCore, AgentCoreNative};
-use agent_core_remote::ProviderModelRecord;
+use agent_core_remote::{ProviderCatalogEntry, ProviderModelRecord};
 use agent_server::{AgentServer, build_router};
 use agent_store::{Project, Session};
 use provider::MockProvider;
@@ -229,6 +229,27 @@ async fn canonical_session_management_routes_cover_project_and_session_reads() {
         .unwrap();
     assert_eq!(fetched_session.id, first_session.id);
     assert_eq!(fetched_session.project_id, project.id);
+}
+
+#[tokio::test]
+async fn canonical_providers_route_returns_provider_inventory() {
+    let base = start_server().await;
+    let client = reqwest::Client::new();
+
+    let providers: Vec<ProviderCatalogEntry> = client
+        .get(format!("{base}/v1/providers"))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(providers.len(), 1);
+    assert_eq!(providers[0].name, "mock");
+    assert_eq!(providers[0].model_ids, vec!["mock-echo".to_owned()]);
 }
 
 #[tokio::test]
