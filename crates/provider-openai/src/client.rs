@@ -9,6 +9,7 @@ use reqwest::Url;
 use crate::Error;
 use crate::chat_completions::ChatCompletionsClient;
 use crate::config::Config;
+use crate::fine_tuning::FineTuningClient;
 use crate::responses::ResponsesClient;
 
 /// Top-level OpenAI wire client that exposes explicit modern API surfaces.
@@ -54,6 +55,14 @@ impl Client {
     /// <https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create>
     pub fn chat_completions(&self) -> ChatCompletionsClient<'_> {
         ChatCompletionsClient::new(self)
+    }
+
+    /// Returns the Fine-Tuning API surface.
+    ///
+    /// Official reference:
+    /// <https://platform.openai.com/docs/api-reference/fine-tuning>
+    pub fn fine_tuning(&self) -> FineTuningClient<'_> {
+        FineTuningClient::new(self)
     }
 
     pub(crate) fn http(&self) -> &reqwest::Client {
