@@ -163,6 +163,14 @@ pub struct CredentialRecord {
     pub credential: CredentialEntry,
 }
 
+/// Credential health record without credential material.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CredentialHealthRecord {
+    pub provider_name: String,
+    pub credential_id: String,
+    pub health: CredentialHealth,
+}
+
 /// Trajectory record with its associated session identifier.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TrajectoryRecord {

@@ -30,9 +30,9 @@ use ulid::Ulid;
 use crate::compat;
 use crate::server::AgentServer;
 use crate::types::{
-    CreateProjectRequest, CreateSessionRequest, CredentialRecord, ErrorResponse, HealthResponse,
-    ProjectRootRequest, ProviderCatalogEntry, ProviderModelRecord, SessionRuntimeView,
-    TrajectoryRecord, TurnRequest, UpdateCredentialHealthRequest,
+    CreateProjectRequest, CreateSessionRequest, CredentialHealthRecord, CredentialRecord,
+    ErrorResponse, HealthResponse, ProjectRootRequest, ProviderCatalogEntry, ProviderModelRecord,
+    SessionRuntimeView, TrajectoryRecord, TurnRequest, UpdateCredentialHealthRequest,
 };
 
 type AppState = Arc<AgentServer>;
@@ -122,6 +122,7 @@ fn canonical_router() -> Router<AppState> {
         .route("/sessions/{id}/turns", routing::post(start_turn))
         .route("/sessions/{id}/cancel", routing::post(cancel_turn))
         .route("/credentials", routing::get(list_credentials))
+        .route("/credentials/health", routing::get(list_credential_health))
         .route(
             "/credentials/{provider}",
             routing::get(list_provider_credentials),
@@ -727,6 +728,14 @@ async fn list_credentials(State(server): State<AppState>) -> Response {
     }
 }
 
+async fn list_credential_health(State(server): State<AppState>) -> Response {
+    let core = server.core();
+    match core.store().credentials().list().await {
+        Ok(records) => Json(credential_health_records(records)).into_response(),
+        Err(error) => store_error_response(error),
+    }
+}
+
 async fn list_provider_credentials(
     State(server): State<AppState>,
     Path(provider): Path<String>,
@@ -826,6 +835,21 @@ fn credential_records(
                 provider_name,
                 credential_id,
                 credential,
+            },
+        )
+        .collect()
+}
+
+fn credential_health_records(
+    records: Vec<(CredentialStoreKey, CredentialEntry)>,
+) -> Vec<CredentialHealthRecord> {
+    records
+        .into_iter()
+        .map(
+            |((provider_name, credential_id), credential)| CredentialHealthRecord {
+                provider_name,
+                credential_id,
+                health: credential.health,
             },
         )
         .collect()

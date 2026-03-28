@@ -2,9 +2,12 @@ use std::sync::Arc;
 use std::{fs, path::Path};
 
 use agent_core::{AgentCore, AgentCoreNative};
-use agent_core_remote::{ErrorResponse, ProviderCatalogEntry, ProviderModelRecord};
+use agent_core_remote::{
+    CredentialHealthRecord, ErrorResponse, ProviderCatalogEntry, ProviderModelRecord,
+    UpdateCredentialHealthRequest,
+};
 use agent_server::{AgentServer, build_router};
-use agent_store::{Project, Session};
+use agent_store::{CredentialEntry, CredentialHealth, Project, Session};
 use provider::MockProvider;
 use provider_openai::ChatCompletionObject;
 
@@ -371,6 +374,59 @@ async fn canonical_providers_route_returns_provider_inventory() {
     assert_eq!(providers.len(), 1);
     assert_eq!(providers[0].name, "mock");
     assert_eq!(providers[0].model_ids, vec!["mock-echo".to_owned()]);
+}
+
+#[tokio::test]
+async fn canonical_credential_health_route_returns_health_records() {
+    let base = start_server().await;
+    let client = reqwest::Client::new();
+
+    let credential = CredentialEntry::api_key("mock-key", "sk-test");
+    client
+        .post(format!("{base}/v1/credentials/mock/mock-key"))
+        .json(&credential)
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap();
+
+    let mut health = CredentialHealth::default();
+    health.record_error("bad gateway", Some("502".into()));
+    client
+        .patch(format!("{base}/v1/credentials/mock/mock-key/health"))
+        .json(&UpdateCredentialHealthRequest {
+            health: health.clone(),
+        })
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap();
+
+    let records: Vec<CredentialHealthRecord> = client
+        .get(format!("{base}/v1/credentials/health"))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0].provider_name, "mock");
+    assert_eq!(records[0].credential_id, "mock-key");
+    assert_eq!(records[0].health.consecutive_errors, 1);
+    assert_eq!(
+        records[0]
+            .health
+            .last_error
+            .as_ref()
+            .and_then(|error| error.code.as_deref()),
+        Some("502")
+    );
 }
 
 #[tokio::test]
