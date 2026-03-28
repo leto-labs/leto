@@ -30,6 +30,7 @@ pub mod responses;
 mod shared;
 pub mod vector_stores;
 pub mod videos;
+pub mod webhooks;
 
 pub use assistants::*;
 pub use chat_completions::*;
@@ -48,3 +49,4 @@ pub use responses::*;
 pub use shared::TokenUsage;
 pub use vector_stores::*;
 pub use videos::*;
+pub use webhooks::*;
