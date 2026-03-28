@@ -20,12 +20,14 @@ families.
 This change starts modularization in the canonical HTTP surface and records the
 next split boundaries for the remaining hotspots.
 
-Phase 1 implemented in this change:
+Canonical HTTP work implemented in this change:
 
-- extract canonical chat completion handling into `src/http/chat_completions.rs`
-- extract canonical turn endpoints into `src/http/turns.rs`
-- extract canonical credential endpoints into `src/http/credentials.rs`
+- extract canonical chat completion handling into a focused route module
+- extract canonical turn endpoints into a focused route module
+- extract canonical credential endpoints into a focused route module
 - extract shared canonical HTTP error translation into `src/http/errors.rs`
+- split the remaining canonical handlers into `src/http/routes/*.rs`
+  modules by endpoint family while keeping route registration in `src/http.rs`
 - add a crate-local modularization note documenting the remaining >800-line
   files and recommended module boundaries
 
@@ -41,4 +43,4 @@ Follow-on work proposed by this change:
 
 - No intended behavior change for the canonical HTTP API
 - Lower navigation cost in `agent-server`
-- Clearer ownership for future compat and testing refactors
+- Clearer ownership for canonical, compat, and testing refactors

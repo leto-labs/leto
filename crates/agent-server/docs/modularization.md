@@ -11,23 +11,27 @@ Measured before the first extraction in this change:
 | ---: | --- | --- | --- |
 | 3629 | `src/utils/openapi.rs` | Generic OpenAPI subsetting, schema walking, normalization, and expansion helpers | Split into `utils/openapi/{subset,walk,normalize,expand}.rs` so generator normalization is isolated from document slicing |
 | 1576 | `src/compat/opencode/routes/session.rs` | Session route registration plus route-local schema shaping helpers and all session handlers | Split into `routes/session/{listing,lifecycle,messages,prompts,parts,docs}.rs` with a thin `mod.rs` |
-| 1384 | `src/http.rs` | Canonical router, canonical handlers, chat completion adapter, turn streaming, credential CRUD, and error mapping | Completed first step in this commit by extracting `http/{chat_completions,turns,credentials,errors}.rs` |
+| 1384 | `src/http.rs` | Canonical router, canonical handlers, chat completion adapter, turn streaming, credential CRUD, and error mapping | Completed across two steps by extracting `http/errors.rs` and `http/routes/{system,projects,providers,sessions,chat_completions,turns,credentials}.rs` |
 | 1195 | `src/compat/opencode/types/session.rs` | Session requests, query/path DTOs, message docs, part docs, status docs, and schema helper enums | Split into `types/session/{requests,queries,paths,messages,parts,status}.rs` |
 | 1117 | `tests/http_integration.rs` | Canonical API tests, compat tests, SSE checks, doc checks, and harness helpers | Split into `tests/http/{canonical_core,canonical_turns,canonical_chat,compat_surface}.rs` plus shared helpers |
 | 997 | `src/compat/opencode/mod.rs` | Compat state lookups, DTO conversions, prompt orchestration, auth helpers, path helpers, and misc utilities | Split into `compat/opencode/{convert,prompts,auth,fs,ids}.rs` and keep `mod.rs` as the integration point |
 
-## Phase 1 completed here
+## Canonical HTTP completed here
 
 The canonical HTTP surface was the safest place to start because it already had
 clear concern boundaries and strong integration coverage. This change extracts:
 
-- `src/http/chat_completions.rs`
-- `src/http/turns.rs`
-- `src/http/credentials.rs`
 - `src/http/errors.rs`
+- `src/http/routes/system.rs`
+- `src/http/routes/projects.rs`
+- `src/http/routes/providers.rs`
+- `src/http/routes/sessions.rs`
+- `src/http/routes/chat_completions.rs`
+- `src/http/routes/turns.rs`
+- `src/http/routes/credentials.rs`
 
-That reduces `src/http.rs` from 1384 lines to 666 lines while keeping route
-registration in one place.
+That reduces `src/http.rs` from 1384 lines in the baseline inventory to 184
+lines while keeping route registration in one place.
 
 ## Recommended next steps
 

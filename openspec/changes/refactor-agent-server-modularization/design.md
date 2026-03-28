@@ -27,7 +27,9 @@ and the lowest behavior risk:
 - HTTP error translation is reusable shared infrastructure
 
 Keep route registration in `src/http.rs` so the canonical route inventory stays
-easy to scan in one place.
+easy to scan in one place, then move the remaining project, provider/model,
+system-event, and session/runtime handlers into route-family modules under
+`src/http/routes/`.
 
 ## Module boundaries
 
@@ -35,15 +37,26 @@ easy to scan in one place.
 
 - `src/http.rs`
   - router construction
-  - project/session/model/runtime handlers
+  - route inventory
   - ID parsing and small shared helpers
-- `src/http/chat_completions.rs`
+- `src/http/routes/system.rs`
+  - health, status, agent inventory, and event streaming
+- `src/http/routes/projects.rs`
+  - project CRUD
+  - project-root lookup and resolution
+  - project session creation/listing
+- `src/http/routes/providers.rs`
+  - provider catalog and model lookup
+- `src/http/routes/sessions.rs`
+  - session CRUD
+  - messages, trajectories, and runtime view
+- `src/http/routes/chat_completions.rs`
   - OpenAI-compatible chat completion request adaptation
   - temporary session lifecycle used by `/v1/chat/completions`
-- `src/http/turns.rs`
+- `src/http/routes/turns.rs`
   - NDJSON and SSE turn transport handlers
   - tool-call append adapter
-- `src/http/credentials.rs`
+- `src/http/routes/credentials.rs`
   - credential CRUD and health projections
 - `src/http/errors.rs`
   - `CoreError` and `StoreError` to HTTP response mapping

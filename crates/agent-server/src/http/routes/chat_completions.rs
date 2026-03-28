@@ -15,11 +15,11 @@ use provider_openai::{
 };
 use serde_json::json;
 
-use super::AppState;
-use super::errors::{core_error_response, store_error_response};
+use super::super::AppState;
+use super::super::errors::{core_error_response, store_error_response};
 use crate::types::ErrorResponse;
 
-pub(super) async fn create_chat_completion(
+pub(in crate::http) async fn create_chat_completion(
     State(server): State<AppState>,
     Json(body): Json<ChatCompletionRequest>,
 ) -> Response {
@@ -288,7 +288,7 @@ fn output_message_to_chat_completion(message: &Message) -> ChatCompletionMessage
         .filter_map(|block| match block {
             ContentBlock::ToolCall { id, name, input } => Some(ChatCompletionToolCall {
                 id: id.clone(),
-                call_type: "function".into(),
+                call_type: "function".to_owned(),
                 function: ChatCompletionFunctionCall {
                     name: name.clone(),
                     arguments: input.to_string(),
@@ -296,7 +296,7 @@ fn output_message_to_chat_completion(message: &Message) -> ChatCompletionMessage
             }),
             _ => None,
         })
-        .collect();
+        .collect::<Vec<_>>();
 
     ChatCompletionMessage {
         role: ChatCompletionRole::Assistant,
@@ -305,17 +305,6 @@ fn output_message_to_chat_completion(message: &Message) -> ChatCompletionMessage
         tool_calls,
         tool_call_id: None,
         extra: Default::default(),
-    }
-}
-
-fn chat_completion_usage(usage: Usage) -> TokenUsage {
-    TokenUsage {
-        prompt: usage.input_tokens.unwrap_or_default(),
-        completion: usage.output_tokens.unwrap_or_default(),
-        total: usage.total_tokens.unwrap_or_default(),
-        cache_read: usage.cache_read_tokens,
-        cache_write: usage.cache_write_tokens,
-        reasoning: usage.reasoning_tokens,
     }
 }
 
@@ -330,6 +319,17 @@ fn chat_finish_reason(reason: FinishReason) -> String {
         FinishReason::Incomplete => "incomplete".into(),
         FinishReason::Error => "error".into(),
         FinishReason::Unknown(reason) => reason,
+    }
+}
+
+fn chat_completion_usage(usage: Usage) -> TokenUsage {
+    TokenUsage {
+        prompt: usage.input_tokens.unwrap_or_default(),
+        completion: usage.output_tokens.unwrap_or_default(),
+        total: usage.total_tokens.unwrap_or_default(),
+        cache_read: usage.cache_read_tokens,
+        cache_write: usage.cache_write_tokens,
+        reasoning: usage.reasoning_tokens,
     }
 }
 

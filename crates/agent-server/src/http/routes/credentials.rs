@@ -3,11 +3,11 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Json, Response};
 
-use super::AppState;
-use super::errors::store_error_response;
+use super::super::AppState;
+use super::super::errors::store_error_response;
 use crate::types::{CredentialHealthRecord, CredentialRecord, UpdateCredentialHealthRequest};
 
-pub(super) async fn list_credentials(State(server): State<AppState>) -> Response {
+pub(in crate::http) async fn list_credentials(State(server): State<AppState>) -> Response {
     let core = server.core();
     match core.store().credentials().list().await {
         Ok(records) => Json(credential_records(records)).into_response(),
@@ -15,7 +15,7 @@ pub(super) async fn list_credentials(State(server): State<AppState>) -> Response
     }
 }
 
-pub(super) async fn list_credential_health(State(server): State<AppState>) -> Response {
+pub(in crate::http) async fn list_credential_health(State(server): State<AppState>) -> Response {
     let core = server.core();
     match core.store().credentials().list().await {
         Ok(records) => Json(credential_health_records(records)).into_response(),
@@ -23,7 +23,7 @@ pub(super) async fn list_credential_health(State(server): State<AppState>) -> Re
     }
 }
 
-pub(super) async fn list_provider_credentials(
+pub(in crate::http) async fn list_provider_credentials(
     State(server): State<AppState>,
     Path(provider): Path<String>,
 ) -> Response {
@@ -39,7 +39,7 @@ pub(super) async fn list_provider_credentials(
     }
 }
 
-pub(super) async fn get_credential(
+pub(in crate::http) async fn get_credential(
     State(server): State<AppState>,
     Path((provider, id)): Path<(String, String)>,
 ) -> Response {
@@ -50,7 +50,7 @@ pub(super) async fn get_credential(
     }
 }
 
-pub(super) async fn create_credential(
+pub(in crate::http) async fn create_credential(
     State(server): State<AppState>,
     Path((provider, id)): Path<(String, String)>,
     Json(credential): Json<CredentialEntry>,
@@ -67,7 +67,7 @@ pub(super) async fn create_credential(
     }
 }
 
-pub(super) async fn update_credential(
+pub(in crate::http) async fn update_credential(
     State(server): State<AppState>,
     Path((provider, id)): Path<(String, String)>,
     Json(credential): Json<CredentialEntry>,
@@ -84,7 +84,7 @@ pub(super) async fn update_credential(
     }
 }
 
-pub(super) async fn update_credential_health(
+pub(in crate::http) async fn update_credential_health(
     State(server): State<AppState>,
     Path((provider, id)): Path<(String, String)>,
     Json(body): Json<UpdateCredentialHealthRequest>,
@@ -101,7 +101,7 @@ pub(super) async fn update_credential_health(
     }
 }
 
-pub(super) async fn delete_credential(
+pub(in crate::http) async fn delete_credential(
     State(server): State<AppState>,
     Path((provider, id)): Path<(String, String)>,
 ) -> Response {

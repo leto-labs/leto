@@ -11,12 +11,11 @@ use axum::response::{IntoResponse, Response};
 use futures::StreamExt;
 use provider::{ContentBlock, Message, MessageRole};
 
-use super::AppState;
-use super::errors::{core_error_response, store_error_response};
-use super::parse_session_id;
+use super::super::errors::{core_error_response, store_error_response};
+use super::super::{AppState, parse_session_id};
 use crate::types::{BatchTurnRequest, ToolCallRequest, TurnRequest};
 
-pub(super) async fn start_turn(
+pub(in crate::http) async fn start_turn(
     State(server): State<AppState>,
     Path(id): Path<String>,
     Json(body): Json<TurnRequest>,
@@ -43,7 +42,7 @@ pub(super) async fn start_turn(
     }
 }
 
-pub(super) async fn start_turn_sse(
+pub(in crate::http) async fn start_turn_sse(
     State(server): State<AppState>,
     Path(id): Path<String>,
     Json(body): Json<TurnRequest>,
@@ -67,7 +66,7 @@ pub(super) async fn start_turn_sse(
     }
 }
 
-pub(super) async fn start_batch_turns(
+pub(in crate::http) async fn start_batch_turns(
     State(server): State<AppState>,
     Path(id): Path<String>,
     Json(body): Json<BatchTurnRequest>,
@@ -98,7 +97,7 @@ pub(super) async fn start_batch_turns(
         .unwrap()
 }
 
-pub(super) async fn append_tool_calls(
+pub(in crate::http) async fn append_tool_calls(
     State(server): State<AppState>,
     Path(id): Path<String>,
     Json(body): Json<ToolCallRequest>,
@@ -161,7 +160,7 @@ pub(super) async fn append_tool_calls(
     }
 }
 
-pub(super) async fn cancel_turn(
+pub(in crate::http) async fn cancel_turn(
     State(server): State<AppState>,
     Path(id): Path<String>,
 ) -> Response {

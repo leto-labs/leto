@@ -7,6 +7,8 @@
 - [x] Extract canonical HTTP turn handling into a dedicated module
 - [x] Extract canonical HTTP credential handling into a dedicated module
 - [x] Extract canonical HTTP error translation into a dedicated module
+- [x] Split remaining canonical HTTP handlers into `src/http/routes/*.rs`
+  modules by endpoint family while keeping route registration centralized
 - [ ] Split `compat/opencode/mod.rs` by conversion, prompt, auth, and path
   concerns
 - [ ] Split `compat/opencode/routes/session.rs` by route cluster and route-doc

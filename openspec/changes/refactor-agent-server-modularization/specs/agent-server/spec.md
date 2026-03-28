@@ -20,3 +20,12 @@ translation.
 - **THEN** transport-specific turn handlers and shared error-to-response
   translation SHALL live in focused canonical HTTP modules
 - **AND** route registration MAY remain centralized for route inventory clarity
+
+#### Scenario: Remaining canonical handlers are grouped by route family
+
+- **WHEN** the server implements the remaining canonical `/v1` project,
+  provider/model, event, and session/runtime endpoints
+- **THEN** those handlers SHALL live in focused `src/http/routes/*.rs`
+  route-family modules
+- **AND** `src/http.rs` SHALL remain focused on router assembly and shared
+  parsing or grouping helpers

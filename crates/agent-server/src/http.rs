@@ -1,43 +1,28 @@
-mod chat_completions;
-mod credentials;
 mod errors;
-mod turns;
+mod routes;
 
 use std::collections::BTreeMap;
-use std::convert::Infallible;
 use std::sync::Arc;
-use std::time::Duration;
 
-use agent_core::{AgentCore, CoreEvent};
-use agent_store::{
-    Project, ProjectId, ProjectUpdate, Session, SessionId, SessionUpdate, StoredMessage,
-};
-use axum::extract::{Path, State};
+use agent_core::AgentCore;
+use agent_store::{ProjectId, SessionId};
 use axum::http::StatusCode;
 use axum::http::header::{AUTHORIZATION, CONTENT_TYPE};
-use axum::response::sse::{Event as SseEvent, KeepAlive, Sse};
 use axum::response::{IntoResponse, Json, Response};
 use axum::{Router, routing};
-use futures::StreamExt;
-use serde_json::json;
 use tower_http::cors::{Any, CorsLayer};
 use ulid::Ulid;
 
-use self::errors::{core_error_response, store_error_response};
 use crate::compat;
 use crate::server::AgentServer;
-use crate::types::{
-    AgentInfoRecord, CreateProjectRequest, CreateSessionRequest, ErrorResponse, HealthResponse,
-    ProjectRootRequest, ProviderCatalogEntry, ProviderModelRecord, SessionRuntimeView,
-    TrajectoryRecord,
-};
+use crate::types::{ErrorResponse, ProviderCatalogEntry};
 
 type AppState = Arc<AgentServer>;
 
 /// Builds the canonical and compatibility HTTP router.
 pub fn build_router(server: Arc<AgentServer>) -> Router {
     Router::new()
-        .route("/health", routing::get(health))
+        .route("/health", routing::get(routes::system::health))
         .nest("/v1", canonical_router())
         .nest("/v1/compat/opencode", compat::opencode::router())
         .layer(
@@ -63,565 +48,132 @@ pub async fn serve(
 
 fn canonical_router() -> Router<AppState> {
     Router::new()
-        .route("/health", routing::get(health))
-        .route("/status", routing::get(status))
-        .route("/agents", routing::get(list_agents))
-        .route("/mcp/servers", routing::get(list_mcp_servers))
-        .route("/mcp/tools", routing::get(list_mcp_servers))
-        .route("/events", routing::get(events))
+        .route("/health", routing::get(routes::system::health))
+        .route("/status", routing::get(routes::system::status))
+        .route("/agents", routing::get(routes::system::list_agents))
+        .route(
+            "/mcp/servers",
+            routing::get(routes::system::list_mcp_servers),
+        )
+        .route("/mcp/tools", routing::get(routes::system::list_mcp_servers))
+        .route("/events", routing::get(routes::system::events))
         .route(
             "/projects",
-            routing::get(list_projects).post(create_project),
+            routing::get(routes::projects::list_projects).post(routes::projects::create_project),
         )
-        .route("/projects/raw", routing::post(create_project_record))
+        .route(
+            "/projects/raw",
+            routing::post(routes::projects::create_project_record),
+        )
         .route(
             "/projects/find-by-root",
-            routing::post(find_project_by_root),
+            routing::post(routes::projects::find_project_by_root),
         )
-        .route("/projects/resolve", routing::post(resolve_project))
+        .route(
+            "/projects/resolve",
+            routing::post(routes::projects::resolve_project),
+        )
         .route(
             "/projects/{id}",
-            routing::get(get_project)
-                .put(replace_project)
-                .patch(update_project)
-                .delete(delete_project),
+            routing::get(routes::projects::get_project)
+                .put(routes::projects::replace_project)
+                .patch(routes::projects::update_project)
+                .delete(routes::projects::delete_project),
         )
         .route(
             "/projects/{id}/sessions",
-            routing::get(list_project_sessions).post(create_session),
+            routing::get(routes::projects::list_project_sessions)
+                .post(routes::projects::create_session),
         )
-        .route("/providers", routing::get(list_providers))
-        .route("/models", routing::get(list_models))
-        .route("/models/{id}", routing::get(get_model))
+        .route(
+            "/providers",
+            routing::get(routes::providers::list_providers),
+        )
+        .route("/models", routing::get(routes::providers::list_models))
+        .route("/models/{id}", routing::get(routes::providers::get_model))
         .route(
             "/chat/completions",
-            routing::post(chat_completions::create_chat_completion),
+            routing::post(routes::chat_completions::create_chat_completion),
         )
         .route(
             "/sessions",
-            routing::get(list_sessions).post(create_session_record),
+            routing::get(routes::sessions::list_sessions)
+                .post(routes::sessions::create_session_record),
         )
         .route(
             "/sessions/{id}",
-            routing::get(get_session)
-                .put(replace_session)
-                .patch(update_session)
-                .delete(delete_session),
+            routing::get(routes::sessions::get_session)
+                .put(routes::sessions::replace_session)
+                .patch(routes::sessions::update_session)
+                .delete(routes::sessions::delete_session),
         )
         .route(
             "/sessions/{id}/messages",
-            routing::get(list_messages)
-                .put(replace_messages)
-                .delete(delete_messages),
+            routing::get(routes::sessions::list_messages)
+                .put(routes::sessions::replace_messages)
+                .delete(routes::sessions::delete_messages),
         )
         .route(
             "/sessions/{id}/trajectory",
-            routing::get(get_trajectory)
-                .put(upsert_trajectory)
-                .delete(delete_trajectory),
+            routing::get(routes::sessions::get_trajectory)
+                .put(routes::sessions::upsert_trajectory)
+                .delete(routes::sessions::delete_trajectory),
         )
-        .route("/trajectories", routing::get(list_trajectories))
-        .route("/sessions/{id}/runtime", routing::get(get_runtime_view))
-        .route("/sessions/{id}/events", routing::get(session_events))
-        .route("/sessions/{id}/turns", routing::post(turns::start_turn))
+        .route(
+            "/trajectories",
+            routing::get(routes::sessions::list_trajectories),
+        )
+        .route(
+            "/sessions/{id}/runtime",
+            routing::get(routes::sessions::get_runtime_view),
+        )
+        .route(
+            "/sessions/{id}/events",
+            routing::get(routes::system::session_events),
+        )
+        .route(
+            "/sessions/{id}/turns",
+            routing::post(routes::turns::start_turn),
+        )
         .route(
             "/sessions/{id}/stream-turns",
-            routing::post(turns::start_turn_sse),
+            routing::post(routes::turns::start_turn_sse),
         )
         .route(
             "/sessions/{id}/batch-turns",
-            routing::post(turns::start_batch_turns),
+            routing::post(routes::turns::start_batch_turns),
         )
         .route(
             "/sessions/{id}/tool-calls",
-            routing::post(turns::append_tool_calls),
+            routing::post(routes::turns::append_tool_calls),
         )
-        .route("/sessions/{id}/cancel", routing::post(turns::cancel_turn))
-        .route("/credentials", routing::get(credentials::list_credentials))
+        .route(
+            "/sessions/{id}/cancel",
+            routing::post(routes::turns::cancel_turn),
+        )
+        .route(
+            "/credentials",
+            routing::get(routes::credentials::list_credentials),
+        )
         .route(
             "/credentials/health",
-            routing::get(credentials::list_credential_health),
+            routing::get(routes::credentials::list_credential_health),
         )
         .route(
             "/credentials/{provider}",
-            routing::get(credentials::list_provider_credentials),
+            routing::get(routes::credentials::list_provider_credentials),
         )
         .route(
             "/credentials/{provider}/{id}",
-            routing::get(credentials::get_credential)
-                .post(credentials::create_credential)
-                .put(credentials::update_credential)
-                .delete(credentials::delete_credential),
+            routing::get(routes::credentials::get_credential)
+                .post(routes::credentials::create_credential)
+                .put(routes::credentials::update_credential)
+                .delete(routes::credentials::delete_credential),
         )
         .route(
             "/credentials/{provider}/{id}/health",
-            routing::patch(credentials::update_credential_health),
+            routing::patch(routes::credentials::update_credential_health),
         )
-}
-
-async fn health() -> impl IntoResponse {
-    Json(HealthResponse::current())
-}
-
-async fn status(State(server): State<AppState>) -> Response {
-    match server.status().await {
-        Ok(status) => Json(status).into_response(),
-        Err(error) => store_error_response(error),
-    }
-}
-
-async fn list_agents(State(server): State<AppState>) -> Response {
-    Json::<Vec<AgentInfoRecord>>(server.agent_info()).into_response()
-}
-
-async fn list_mcp_servers(State(server): State<AppState>) -> Response {
-    Json::<Vec<AgentInfoRecord>>(server.agent_info()).into_response()
-}
-
-async fn events(
-    State(server): State<AppState>,
-) -> Sse<impl futures::Stream<Item = Result<SseEvent, Infallible>>> {
-    let core = server.core();
-    let stream = core.subscribe().map(|event| {
-        let data = serde_json::to_string(&event).unwrap_or_else(|_| "{}".to_owned());
-        Ok::<_, Infallible>(SseEvent::default().data(data))
-    });
-    Sse::new(stream).keep_alive(KeepAlive::new().interval(Duration::from_secs(10)))
-}
-
-async fn session_events(State(server): State<AppState>, Path(id): Path<String>) -> Response {
-    let session_id = match parse_session_id(&id) {
-        Ok(value) => value,
-        Err(response) => return response,
-    };
-    let core = server.core();
-    let stream = core.subscribe().filter_map(move |event| {
-        let include = matches!(
-            &event,
-            CoreEvent::Turn {
-                session_id: event_session_id,
-                ..
-            }
-            | CoreEvent::TurnCancelled {
-                session_id: event_session_id,
-            } if *event_session_id == session_id
-        );
-        async move {
-            if !include {
-                return None;
-            }
-            let data = serde_json::to_string(&event).unwrap_or_else(|_| "{}".to_owned());
-            Some(Ok::<_, Infallible>(SseEvent::default().data(data)))
-        }
-    });
-    Sse::new(stream)
-        .keep_alive(KeepAlive::new().interval(Duration::from_secs(10)))
-        .into_response()
-}
-
-async fn list_projects(State(server): State<AppState>) -> Response {
-    let core = server.core();
-    match core.store().projects().list().await {
-        Ok(projects) => Json(projects).into_response(),
-        Err(error) => store_error_response(error),
-    }
-}
-
-async fn create_project(
-    State(server): State<AppState>,
-    Json(body): Json<CreateProjectRequest>,
-) -> Response {
-    let core = server.core();
-    let project = Project::new(body.name, body.root, body.config.unwrap_or_default());
-    match core.store().projects().create(project).await {
-        Ok(project) => (StatusCode::CREATED, Json(project)).into_response(),
-        Err(error) => store_error_response(error),
-    }
-}
-
-async fn create_project_record(
-    State(server): State<AppState>,
-    Json(project): Json<Project>,
-) -> Response {
-    let core = server.core();
-    match core.store().projects().create(project).await {
-        Ok(project) => (StatusCode::CREATED, Json(project)).into_response(),
-        Err(error) => store_error_response(error),
-    }
-}
-
-async fn find_project_by_root(
-    State(server): State<AppState>,
-    Json(body): Json<ProjectRootRequest>,
-) -> Response {
-    let core = server.core();
-    match core.store().projects().find_by_root(&body.root).await {
-        Ok(project) => Json(project).into_response(),
-        Err(error) => store_error_response(error),
-    }
-}
-
-async fn resolve_project(
-    State(server): State<AppState>,
-    Json(body): Json<ProjectRootRequest>,
-) -> Response {
-    let core = server.core();
-    match core.resolve_or_create_project(body.root).await {
-        Ok(project) => Json(project).into_response(),
-        Err(error) => core_error_response(error),
-    }
-}
-
-async fn get_project(State(server): State<AppState>, Path(id): Path<String>) -> Response {
-    let project_id = match parse_project_id(&id) {
-        Ok(value) => value,
-        Err(response) => return response,
-    };
-    let core = server.core();
-    match core.project(project_id).await {
-        Ok(project) => Json(project).into_response(),
-        Err(error) => core_error_response(error),
-    }
-}
-
-async fn replace_project(
-    State(server): State<AppState>,
-    Path(id): Path<String>,
-    Json(project): Json<Project>,
-) -> Response {
-    let project_id = match parse_project_id(&id) {
-        Ok(value) => value,
-        Err(response) => return response,
-    };
-    let core = server.core();
-    match core.store().projects().update(project_id, project).await {
-        Ok(project) => Json(project).into_response(),
-        Err(error) => store_error_response(error),
-    }
-}
-
-async fn update_project(
-    State(server): State<AppState>,
-    Path(id): Path<String>,
-    Json(update): Json<ProjectUpdate>,
-) -> Response {
-    let project_id = match parse_project_id(&id) {
-        Ok(value) => value,
-        Err(response) => return response,
-    };
-    let core = server.core();
-    let projects = core.store().projects();
-    let mut project = match projects.get(project_id).await {
-        Ok(project) => project,
-        Err(error) => return store_error_response(error),
-    };
-    if let Some(name) = update.name {
-        project.name = Some(name);
-    }
-    if let Some(config) = update.config {
-        project.config = config;
-    }
-    project.updated_at = chrono::Utc::now();
-    match projects.update(project_id, project).await {
-        Ok(project) => Json(project).into_response(),
-        Err(error) => store_error_response(error),
-    }
-}
-
-async fn delete_project(State(server): State<AppState>, Path(id): Path<String>) -> Response {
-    let project_id = match parse_project_id(&id) {
-        Ok(value) => value,
-        Err(response) => return response,
-    };
-    let core = server.core();
-    match core.store().projects().delete(project_id).await {
-        Ok(()) => StatusCode::NO_CONTENT.into_response(),
-        Err(error) => store_error_response(error),
-    }
-}
-
-async fn list_project_sessions(State(server): State<AppState>, Path(id): Path<String>) -> Response {
-    let project_id = match parse_project_id(&id) {
-        Ok(value) => value,
-        Err(response) => return response,
-    };
-    let core = server.core();
-    match core.sessions_for_project(project_id).await {
-        Ok(sessions) => Json(sessions).into_response(),
-        Err(error) => core_error_response(error),
-    }
-}
-
-async fn create_session(
-    State(server): State<AppState>,
-    Path(id): Path<String>,
-    Json(body): Json<CreateSessionRequest>,
-) -> Response {
-    let project_id = match parse_project_id(&id) {
-        Ok(value) => value,
-        Err(response) => return response,
-    };
-    let core = server.core();
-    let session = match core.create_session(project_id).await {
-        Ok(session) => session,
-        Err(error) => return core_error_response(error),
-    };
-    let session = match core
-        .update_session(
-            session.id,
-            SessionUpdate {
-                title: body.title,
-                provider: body.provider.map(Some),
-                model: body.model.map(Some),
-                loop_name: body.loop_name.map(Some),
-                request: None,
-            },
-        )
-        .await
-    {
-        Ok(session) => session,
-        Err(error) => return core_error_response(error),
-    };
-    (StatusCode::CREATED, Json(session)).into_response()
-}
-
-async fn list_providers(State(server): State<AppState>) -> Response {
-    let core = server.core();
-    Json(grouped_provider_models(&core)).into_response()
-}
-
-async fn list_models(State(server): State<AppState>) -> Response {
-    let core = server.core();
-    Json(
-        core.list_models()
-            .into_iter()
-            .map(ProviderModelRecord::from)
-            .collect::<Vec<_>>(),
-    )
-    .into_response()
-}
-
-async fn get_model(State(server): State<AppState>, Path(id): Path<String>) -> Response {
-    let core = server.core();
-    match core
-        .list_models()
-        .into_iter()
-        .find(|record| record.model.id == id)
-    {
-        Some(record) => Json(ProviderModelRecord::from(record)).into_response(),
-        None => (
-            StatusCode::NOT_FOUND,
-            Json(ErrorResponse::with_details(
-                "model_not_found",
-                format!("model not found: {id}"),
-                json!({ "id": id }),
-            )),
-        )
-            .into_response(),
-    }
-}
-
-async fn list_sessions(State(server): State<AppState>) -> Response {
-    let core = server.core();
-    match core.store().sessions().list().await {
-        Ok(sessions) => Json(sessions).into_response(),
-        Err(error) => store_error_response(error),
-    }
-}
-
-async fn create_session_record(
-    State(server): State<AppState>,
-    Json(session): Json<Session>,
-) -> Response {
-    let core = server.core();
-    match core.store().sessions().create(session).await {
-        Ok(session) => (StatusCode::CREATED, Json(session)).into_response(),
-        Err(error) => store_error_response(error),
-    }
-}
-
-async fn get_session(State(server): State<AppState>, Path(id): Path<String>) -> Response {
-    let session_id = match parse_session_id(&id) {
-        Ok(value) => value,
-        Err(response) => return response,
-    };
-    let core = server.core();
-    match core.session(session_id).await {
-        Ok(session) => Json(session).into_response(),
-        Err(error) => core_error_response(error),
-    }
-}
-
-async fn replace_session(
-    State(server): State<AppState>,
-    Path(id): Path<String>,
-    Json(session): Json<Session>,
-) -> Response {
-    let session_id = match parse_session_id(&id) {
-        Ok(value) => value,
-        Err(response) => return response,
-    };
-    let core = server.core();
-    match core.store().sessions().update(session_id, session).await {
-        Ok(session) => Json(session).into_response(),
-        Err(error) => store_error_response(error),
-    }
-}
-
-async fn update_session(
-    State(server): State<AppState>,
-    Path(id): Path<String>,
-    Json(update): Json<SessionUpdate>,
-) -> Response {
-    let session_id = match parse_session_id(&id) {
-        Ok(value) => value,
-        Err(response) => return response,
-    };
-    let core = server.core();
-    match core.update_session(session_id, update).await {
-        Ok(session) => Json(session).into_response(),
-        Err(error) => core_error_response(error),
-    }
-}
-
-async fn delete_session(State(server): State<AppState>, Path(id): Path<String>) -> Response {
-    let session_id = match parse_session_id(&id) {
-        Ok(value) => value,
-        Err(response) => return response,
-    };
-    let core = server.core();
-    match core.delete_session(session_id).await {
-        Ok(()) => StatusCode::NO_CONTENT.into_response(),
-        Err(error) => core_error_response(error),
-    }
-}
-
-async fn list_messages(State(server): State<AppState>, Path(id): Path<String>) -> Response {
-    let session_id = match parse_session_id(&id) {
-        Ok(value) => value,
-        Err(response) => return response,
-    };
-    let core = server.core();
-    match core.messages(session_id).await {
-        Ok(messages) => Json(messages).into_response(),
-        Err(error) => core_error_response(error),
-    }
-}
-
-async fn replace_messages(
-    State(server): State<AppState>,
-    Path(id): Path<String>,
-    Json(messages): Json<Vec<StoredMessage>>,
-) -> Response {
-    let session_id = match parse_session_id(&id) {
-        Ok(value) => value,
-        Err(response) => return response,
-    };
-    let core = server.core();
-    match core
-        .store()
-        .messages()
-        .replace_for_session(session_id, messages)
-        .await
-    {
-        Ok(messages) => Json(messages).into_response(),
-        Err(error) => store_error_response(error),
-    }
-}
-
-async fn delete_messages(State(server): State<AppState>, Path(id): Path<String>) -> Response {
-    let session_id = match parse_session_id(&id) {
-        Ok(value) => value,
-        Err(response) => return response,
-    };
-    let core = server.core();
-    match core.store().messages().delete_for_session(session_id).await {
-        Ok(()) => StatusCode::NO_CONTENT.into_response(),
-        Err(error) => store_error_response(error),
-    }
-}
-
-async fn get_trajectory(State(server): State<AppState>, Path(id): Path<String>) -> Response {
-    let session_id = match parse_session_id(&id) {
-        Ok(value) => value,
-        Err(response) => return response,
-    };
-    let core = server.core();
-    match core.trajectory(session_id).await {
-        Ok(trajectory) => Json(trajectory).into_response(),
-        Err(error) => core_error_response(error),
-    }
-}
-
-async fn upsert_trajectory(
-    State(server): State<AppState>,
-    Path(id): Path<String>,
-    Json(trajectory): Json<atif::Trajectory>,
-) -> Response {
-    let session_id = match parse_session_id(&id) {
-        Ok(value) => value,
-        Err(response) => return response,
-    };
-    let core = server.core();
-    match core.upsert_trajectory(session_id, trajectory).await {
-        Ok(trajectory) => Json(trajectory).into_response(),
-        Err(error) => core_error_response(error),
-    }
-}
-
-async fn delete_trajectory(State(server): State<AppState>, Path(id): Path<String>) -> Response {
-    let session_id = match parse_session_id(&id) {
-        Ok(value) => value,
-        Err(response) => return response,
-    };
-    let core = server.core();
-    match core.store().trajectories().delete(session_id).await {
-        Ok(()) => StatusCode::NO_CONTENT.into_response(),
-        Err(error) => store_error_response(error),
-    }
-}
-
-async fn list_trajectories(State(server): State<AppState>) -> Response {
-    let core = server.core();
-    match core.store().trajectories().list().await {
-        Ok(records) => Json(
-            records
-                .into_iter()
-                .map(|(session_id, trajectory)| TrajectoryRecord {
-                    session_id,
-                    trajectory,
-                })
-                .collect::<Vec<_>>(),
-        )
-        .into_response(),
-        Err(error) => store_error_response(error),
-    }
-}
-
-async fn get_runtime_view(State(server): State<AppState>, Path(id): Path<String>) -> Response {
-    let session_id = match parse_session_id(&id) {
-        Ok(value) => value,
-        Err(response) => return response,
-    };
-    let core = server.core();
-    let config = match core.effective_runtime_config(session_id).await {
-        Ok(config) => config,
-        Err(error) => return core_error_response(error),
-    };
-    let current_loop_name = match core.current_loop_name_for_session(session_id).await {
-        Ok(loop_name) => loop_name,
-        Err(error) => return core_error_response(error),
-    };
-    let current_model_id = match core.current_model_id_for_session(session_id).await {
-        Ok(model_id) => model_id,
-        Err(error) => return core_error_response(error),
-    };
-    Json(SessionRuntimeView {
-        config,
-        current_loop_name,
-        current_model_id,
-    })
-    .into_response()
 }
 
 pub(crate) fn parse_project_id(value: &str) -> Result<ProjectId, Response> {
@@ -644,7 +196,7 @@ pub(crate) fn invalid_request(code: &str) -> Response {
         .into_response()
 }
 
-fn grouped_provider_models(core: &Arc<dyn AgentCore>) -> Vec<ProviderCatalogEntry> {
+pub(crate) fn grouped_provider_models(core: &Arc<dyn AgentCore>) -> Vec<ProviderCatalogEntry> {
     let mut grouped = BTreeMap::<String, Vec<String>>::new();
     for model in core.list_models() {
         grouped
