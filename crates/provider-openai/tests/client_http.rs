@@ -4,6 +4,7 @@ use provider_openai::{
     ResponseInputRole, ResponseRequest, ResponseStreamTransport,
 };
 use serde_json::Value;
+use std::collections::BTreeMap;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
@@ -314,6 +315,79 @@ async fn create_response_sends_expected_headers_and_defaults() {
     assert_eq!(response.id.as_deref(), Some("resp_test"));
     assert_eq!(response.status.as_deref(), Some("completed"));
     assert_eq!(response.usage.as_ref().map(|usage| usage.total), Some(5));
+}
+
+#[tokio::test]
+async fn create_response_preserves_trace_metadata_on_the_wire() {
+    let response_body = serde_json::json!({
+        "id": "resp_trace",
+        "object": "response",
+        "status": "completed",
+        "output": [],
+        "usage": {
+            "input_tokens": 2,
+            "output_tokens": 1,
+            "total_tokens": 3
+        }
+    })
+    .to_string();
+
+    let (base_url, request_rx) =
+        spawn_http_server("200 OK", "application/json", response_body).await;
+    let client = Client::new(
+        Config::new("sk-test")
+            .with_base_url(base_url)
+            .with_model("gpt-trace"),
+    );
+
+    let response = client
+        .responses()
+        .create(&ResponseRequest {
+            input: vec![ResponseInputItem::message(
+                ResponseInputRole::User,
+                vec![ResponseInputContentPart::input_text("trace this request")],
+            )],
+            metadata: BTreeMap::from([
+                (
+                    "trace_id".into(),
+                    serde_json::Value::String("trace-req-123".into()),
+                ),
+                (
+                    "span".into(),
+                    serde_json::json!({
+                        "id": "span-9",
+                        "parent": "root-1"
+                    }),
+                ),
+            ]),
+            ..ResponseRequest::default()
+        })
+        .await
+        .unwrap();
+
+    let request = request_rx.await.unwrap();
+    assert_eq!(
+        request
+            .body
+            .pointer("/metadata/trace_id")
+            .and_then(Value::as_str),
+        Some("trace-req-123")
+    );
+    assert_eq!(
+        request
+            .body
+            .pointer("/metadata/span/id")
+            .and_then(Value::as_str),
+        Some("span-9")
+    );
+    assert_eq!(
+        request
+            .body
+            .pointer("/metadata/span/parent")
+            .and_then(Value::as_str),
+        Some("root-1")
+    );
+    assert_eq!(response.id.as_deref(), Some("resp_trace"));
 }
 
 #[tokio::test]
