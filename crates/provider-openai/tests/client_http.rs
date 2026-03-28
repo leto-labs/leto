@@ -741,6 +741,104 @@ async fn create_response_recovers_after_transient_http_failure() {
 }
 
 #[tokio::test]
+async fn create_response_uses_reloaded_client_config_with_shared_http_transport() {
+    let first_response_body = serde_json::json!({
+        "id": "resp_initial",
+        "object": "response",
+        "status": "completed",
+        "output": [],
+        "usage": {
+            "input_tokens": 1,
+            "output_tokens": 1,
+            "total_tokens": 2
+        }
+    })
+    .to_string();
+    let second_response_body = serde_json::json!({
+        "id": "resp_reloaded",
+        "object": "response",
+        "status": "completed",
+        "output": [],
+        "usage": {
+            "input_tokens": 1,
+            "output_tokens": 1,
+            "total_tokens": 2
+        }
+    })
+    .to_string();
+
+    let (first_base_url, first_request_rx) =
+        spawn_http_server("200 OK", "application/json", first_response_body).await;
+    let (second_base_url, second_request_rx) =
+        spawn_http_server("200 OK", "application/json", second_response_body).await;
+
+    let shared_http = reqwest::Client::builder()
+        .pool_max_idle_per_host(1)
+        .build()
+        .unwrap();
+
+    let initial_client = Client::with_http_client(
+        Config::new("sk-initial")
+            .with_base_url(first_base_url)
+            .with_model("gpt-initial")
+            .with_default_header("x-config-revision", "initial"),
+        shared_http.clone(),
+    );
+    let reloaded_client = Client::with_http_client(
+        Config::new("sk-reloaded")
+            .with_base_url(second_base_url)
+            .with_model("gpt-reloaded")
+            .with_default_header("x-config-revision", "reloaded"),
+        shared_http,
+    );
+
+    let initial_response = initial_client
+        .responses()
+        .create(&ResponseRequest {
+            input: vec![ResponseInputItem::message(
+                ResponseInputRole::User,
+                vec![ResponseInputContentPart::input_text("initial config")],
+            )],
+            ..ResponseRequest::default()
+        })
+        .await
+        .unwrap();
+    let reloaded_response = reloaded_client
+        .responses()
+        .create(&ResponseRequest {
+            input: vec![ResponseInputItem::message(
+                ResponseInputRole::User,
+                vec![ResponseInputContentPart::input_text("reloaded config")],
+            )],
+            ..ResponseRequest::default()
+        })
+        .await
+        .unwrap();
+
+    let first_request = first_request_rx.await.unwrap();
+    let second_request = second_request_rx.await.unwrap();
+    let first_head = first_request.head.to_lowercase();
+    let second_head = second_request.head.to_lowercase();
+
+    assert!(first_head.contains("authorization: bearer sk-initial"));
+    assert!(first_head.contains("x-config-revision: initial"));
+    assert_eq!(
+        first_request.body.get("model").and_then(Value::as_str),
+        Some("gpt-initial")
+    );
+
+    assert!(second_head.contains("authorization: bearer sk-reloaded"));
+    assert!(second_head.contains("x-config-revision: reloaded"));
+    assert_eq!(
+        second_request.body.get("model").and_then(Value::as_str),
+        Some("gpt-reloaded")
+    );
+
+    assert_eq!(initial_response.id.as_deref(), Some("resp_initial"));
+    assert_eq!(reloaded_response.id.as_deref(), Some("resp_reloaded"));
+}
+
+#[tokio::test]
 async fn stream_response_over_sse_parses_events_and_terminal_state() {
     let response_body = concat!(
         "data: {\"type\":\"response.output_text.delta\",\"sequence_number\":1,\"item_id\":\"msg_1\",\"output_index\":0,\"content_index\":0,\"delta\":\"hel\"}\n\n",
