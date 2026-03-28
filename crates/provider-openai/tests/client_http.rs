@@ -287,6 +287,58 @@ async fn create_response_surfaces_plain_text_throttle_errors() {
 }
 
 #[tokio::test]
+async fn stream_response_treats_terminal_event_then_socket_close_as_graceful_shutdown() {
+    let response_body = concat!(
+        "data: {\"type\":\"response.completed\",\"sequence_number\":1,\"response\":{\"id\":\"resp_shutdown\",\"status\":\"completed\",\"output\":[],\"usage\":{\"input_tokens\":2,\"output_tokens\":1,\"total_tokens\":3}}}\n\n"
+    )
+    .to_owned();
+
+    let (base_url, request_rx) =
+        spawn_http_server("200 OK", "text/event-stream", response_body).await;
+    let client = Client::new(
+        Config::new("sk-test")
+            .with_base_url(base_url)
+            .with_model("gpt-test"),
+    );
+
+    let mut stream = client
+        .responses()
+        .stream(
+            &ResponseRequest {
+                input: vec![ResponseInputItem::message(
+                    ResponseInputRole::User,
+                    vec![ResponseInputContentPart::input_text(
+                        "hello from shutdown test",
+                    )],
+                )],
+                ..ResponseRequest::default()
+            },
+            ResponseStreamTransport::Sse,
+        )
+        .await
+        .unwrap();
+
+    let mut events = Vec::new();
+    while let Some(event) = stream.next().await {
+        events.push(event.unwrap());
+    }
+
+    let request = request_rx.await.unwrap();
+    let request_head = request.head.to_lowercase();
+    assert!(request_head.contains("post /v1/responses http/1.1"));
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].sequence_number, Some(1));
+    match &events[0].event {
+        ResponseEvent::ResponseCompleted { response } => {
+            assert_eq!(response.id.as_deref(), Some("resp_shutdown"));
+            assert_eq!(response.status.as_deref(), Some("completed"));
+            assert_eq!(response.usage.as_ref().map(|usage| usage.total), Some(3));
+        }
+        other => panic!("expected response completed event, got {other:?}"),
+    }
+}
+
+#[tokio::test]
 async fn stream_response_over_sse_parses_events_and_terminal_state() {
     let response_body = concat!(
         "data: {\"type\":\"response.output_text.delta\",\"sequence_number\":1,\"item_id\":\"msg_1\",\"output_index\":0,\"content_index\":0,\"delta\":\"hel\"}\n\n",
