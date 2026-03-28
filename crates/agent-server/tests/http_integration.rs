@@ -11,7 +11,10 @@ use agent_core_remote::{
     TrajectoryRecord, UpdateCredentialHealthRequest,
 };
 use agent_runtime::RuntimeEvent;
-use agent_server::{AgentInfoRecord, AgentServer, AgentServerStatus, HealthResponse, build_router};
+use agent_server::{
+    AgentInfoRecord, AgentServer, AgentServerStatus, HealthResponse, build_router,
+    serve_with_shutdown,
+};
 use agent_store::{
     CredentialEntry, CredentialHealth, Project, ProviderCredential, Session, StoredMessage,
 };
@@ -25,6 +28,7 @@ use provider_openai::{
     EmbeddingRequest, VectorStoreCreateRequest, VideoCreateRequest,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::sync::oneshot;
 
 fn make_server() -> Arc<AgentServer> {
     make_server_with_provider(Arc::new(MockProvider::new()))
@@ -61,6 +65,44 @@ async fn start_server_with_provider(provider: Arc<dyn Provider>) -> String {
         axum::serve(listener, router).await.unwrap();
     });
     format!("http://{addr}")
+}
+
+async fn wait_for_server_ready(client: &reqwest::Client, base: &str) {
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if let Ok(response) = client.get(format!("{base}/v1/health")).send().await {
+                if response.status().is_success() {
+                    break;
+                }
+            }
+
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+}
+
+async fn start_server_with_shutdown(
+    provider: Arc<dyn Provider>,
+) -> (String, oneshot::Sender<()>, tokio::task::JoinHandle<()>) {
+    let server = make_server_with_provider(provider);
+    let addr = {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.local_addr().unwrap()
+    };
+    let base = format!("http://{addr}");
+    let addr_string = addr.to_string();
+    let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
+    let server_task = tokio::spawn(async move {
+        serve_with_shutdown(server, &addr_string, async move {
+            let _ = shutdown_rx.await;
+        })
+        .await
+        .unwrap();
+    });
+    wait_for_server_ready(&reqwest::Client::new(), &base).await;
+    (base, shutdown_tx, server_task)
 }
 
 struct BufferedTcpConnection {
@@ -616,6 +658,51 @@ async fn canonical_health_route_returns_current_health_payload() {
 
     assert!(health.healthy);
     assert_eq!(health.version, env!("CARGO_PKG_VERSION"));
+}
+
+#[tokio::test]
+async fn graceful_shutdown_waits_for_in_flight_turn_to_finish() {
+    let (base, shutdown_tx, server_task) =
+        start_server_with_shutdown(Arc::new(MockProvider::new().with_delay(500))).await;
+    let client = reqwest::Client::new();
+
+    let project = create_project(&client, &base).await;
+    let session = create_session(&client, &base, &project).await;
+
+    let turn_client = client.clone();
+    let turn_base = base.clone();
+    let turn_task = tokio::spawn(async move {
+        turn_client
+            .post(format!("{turn_base}/v1/sessions/{}/turns", session.id))
+            .json(&serde_json::json!({
+                "input": [
+                    {
+                        "role": "user",
+                        "content": [{"type": "text", "text": "finish before shutdown"}]
+                    }
+                ]
+            }))
+            .send()
+            .await
+            .unwrap()
+    });
+
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    shutdown_tx.send(()).unwrap();
+
+    let response = tokio::time::timeout(Duration::from_secs(5), turn_task)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(response.status().is_success());
+
+    tokio::time::timeout(Duration::from_secs(5), server_task)
+        .await
+        .unwrap()
+        .unwrap();
+
+    let shutdown_result = client.get(format!("{base}/v1/health")).send().await;
+    assert!(shutdown_result.is_err());
 }
 
 #[tokio::test]
