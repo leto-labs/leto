@@ -818,6 +818,34 @@ async fn metrics_routes_report_default_labels_and_empty_store_counts() {
 }
 
 #[tokio::test]
+async fn metrics_route_handles_benchmark_style_keep_alive_probes() {
+    let server = make_server();
+    let router = build_router(server);
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, router).await.unwrap();
+    });
+
+    let mut connection = BufferedTcpConnection::connect(addr).await;
+    let request = format!(
+        "GET /metrics HTTP/1.1\r\nhost: {addr}\r\naccept: text/plain\r\nconnection: keep-alive\r\n\r\n"
+    );
+
+    for _ in 0..3 {
+        connection.send(&request).await;
+        let response = connection.read_response().await;
+        let body = String::from_utf8(response.body).unwrap();
+
+        assert!(response.status_line.contains("200 OK"));
+        assert!(body.contains("agent_server_info{"));
+        assert!(body.contains("agent_server_provider_count 1"));
+        assert!(body.contains("agent_server_project_count 0"));
+        assert!(body.contains("agent_server_session_count 0"));
+    }
+}
+
+#[tokio::test]
 async fn runtime_status_returns_server_status() {
     let base = start_server().await;
     let client = reqwest::Client::new();
