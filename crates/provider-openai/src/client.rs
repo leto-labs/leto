@@ -7,6 +7,7 @@
 use reqwest::Url;
 
 use crate::Error;
+use crate::assistants::AssistantsClient;
 use crate::chat_completions::ChatCompletionsClient;
 use crate::config::Config;
 use crate::embeddings::EmbeddingsClient;
@@ -50,6 +51,14 @@ impl Client {
     /// <https://developers.openai.com/api/reference/resources/responses/methods/create>
     pub fn responses(&self) -> ResponsesClient<'_> {
         ResponsesClient::new(self)
+    }
+
+    /// Returns the Assistants API surface.
+    ///
+    /// Official reference:
+    /// <https://platform.openai.com/docs/api-reference/assistants>
+    pub fn assistants(&self) -> AssistantsClient<'_> {
+        AssistantsClient::new(self)
     }
 
     /// Returns the Chat Completions API surface.
