@@ -93,9 +93,10 @@ async fn start_server_with_shutdown(
     };
     let base = format!("http://{addr}");
     let addr_string = addr.to_string();
+    let listen_addr = addr_string.clone();
     let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
     let server_task = tokio::spawn(async move {
-        serve_with_shutdown(server, &addr_string, async move {
+        serve_with_shutdown(server, &listen_addr, async move {
             let _ = shutdown_rx.await;
         })
         .await
@@ -793,6 +794,27 @@ async fn metrics_routes_expose_prometheus_text_payload() {
         assert!(body.contains("agent_server_project_count 1"));
         assert!(body.contains("agent_server_session_count 1"));
     }
+}
+
+#[tokio::test]
+async fn metrics_routes_report_default_labels_and_empty_store_counts() {
+    let base = start_server().await;
+    let client = reqwest::Client::new();
+
+    let response = client
+        .get(format!("{base}/metrics"))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap();
+    let body = response.text().await.unwrap();
+
+    assert!(body.contains("agent_server_info{"));
+    assert!(body.contains(r#"default_provider="mock""#));
+    assert!(body.contains(r#"default_loop="simple""#));
+    assert!(body.contains("agent_server_project_count 0"));
+    assert!(body.contains("agent_server_session_count 0"));
 }
 
 #[tokio::test]
