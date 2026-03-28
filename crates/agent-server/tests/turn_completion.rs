@@ -1,20 +1,29 @@
 use std::borrow::Cow;
 use std::sync::Arc;
+use std::sync::LazyLock;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use agent_core::{AgentCore, AgentCoreNative, CoreEvent};
+use agent_core_remote::CredentialHealthRecord;
 use agent_runtime::RuntimeEvent;
 use agent_server::{AgentServer, build_router};
-use agent_store::{Project, ProjectConfig, Session, StoredMessage};
+use agent_store::{CredentialEntry, Project, ProjectConfig, Session, Store, StoredMessage};
 use futures::StreamExt;
 use provider::{
     Block, BlockKind, Event, EventStream, FinishReason, MessageRole, MockProvider, ModelInfo,
     Provider, ProviderCapabilities, ProviderInfo, Request, StreamGranularity, Usage,
 };
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpListener;
+use tokio::sync::oneshot;
 
 fn make_server() -> Arc<AgentServer> {
     make_server_with_provider(Arc::new(MockProvider::new()))
+}
+
+fn make_server_with_core(core: Arc<dyn AgentCore>) -> Arc<AgentServer> {
+    Arc::new(AgentServer::new(core))
 }
 
 fn make_server_with_provider(provider: Arc<dyn Provider>) -> Arc<AgentServer> {
@@ -38,6 +47,17 @@ fn make_server_with_providers(
 
 async fn start_server() -> String {
     let server = make_server();
+    let router = build_router(server);
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, router).await.unwrap();
+    });
+    format!("http://{addr}")
+}
+
+async fn start_server_with_core(core: Arc<dyn AgentCore>) -> String {
+    let server = make_server_with_core(core);
     let router = build_router(server);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -211,6 +231,60 @@ fn parse_sse_events(body: &str) -> Vec<CoreEvent> {
     }
 
     events
+}
+
+static OLLAMA_MOCK_SERVER_LOCK: LazyLock<tokio::sync::Mutex<()>> =
+    LazyLock::new(|| tokio::sync::Mutex::new(()));
+
+fn completed_openai_sse_body() -> String {
+    concat!(
+        "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_test\",\"status\":\"completed\",\"output\":[],\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n",
+        "data: [DONE]\n\n"
+    )
+    .to_owned()
+}
+
+fn created_only_openai_sse_body() -> String {
+    "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_test\",\"status\":\"in_progress\",\"output\":[]}}\n\n".to_owned()
+}
+
+async fn spawn_ollama_mock_server(bodies: Vec<String>) -> oneshot::Receiver<Vec<String>> {
+    let listener = TcpListener::bind("127.0.0.1:11434").await.unwrap();
+    let (tx, rx) = oneshot::channel();
+
+    tokio::spawn(async move {
+        let mut requests = Vec::with_capacity(bodies.len());
+        for body in bodies {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut buf = vec![0_u8; 16 * 1024];
+            let mut request = Vec::new();
+
+            loop {
+                let read = socket.read(&mut buf).await.unwrap();
+                if read == 0 {
+                    break;
+                }
+                request.extend_from_slice(&buf[..read]);
+                if request.windows(4).any(|window| window == b"\r\n\r\n") {
+                    break;
+                }
+            }
+
+            requests.push(String::from_utf8_lossy(&request).into_owned());
+
+            let response = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            socket.write_all(response.as_bytes()).await.unwrap();
+            socket.shutdown().await.unwrap();
+        }
+
+        let _ = tx.send(requests);
+    });
+
+    rx
 }
 
 struct TaggedProvider {
@@ -673,6 +747,141 @@ async fn post_turns_emits_retry_event_before_turn_finished() {
             .message
             .plain_text_lossy()
             .contains("hello after retry")
+    );
+}
+
+#[tokio::test]
+async fn post_turns_skip_tripped_circuit_breaker_credential_for_new_session() {
+    let _lock = OLLAMA_MOCK_SERVER_LOCK.lock().await;
+    let requests_rx = spawn_ollama_mock_server(vec![
+        created_only_openai_sse_body(),
+        completed_openai_sse_body(),
+    ])
+    .await;
+
+    let store: Arc<dyn Store> = Arc::new(agent_store::InMemoryStore::new());
+    store
+        .credentials()
+        .create(
+            ("ollama".into(), "cred-1".into()),
+            CredentialEntry::api_key("Primary", "sk-one"),
+        )
+        .await
+        .unwrap();
+    store
+        .credentials()
+        .create(
+            ("ollama".into(), "cred-2".into()),
+            CredentialEntry::api_key("Secondary", "sk-two"),
+        )
+        .await
+        .unwrap();
+
+    let core: Arc<dyn AgentCore> =
+        Arc::new(AgentCoreNative::build_default_local(store).await.unwrap());
+    let base = start_server_with_core(core).await;
+    let client = reqwest::Client::new();
+    let mut project_config = ProjectConfig::default();
+    project_config.runtime.max_retries = 0;
+    project_config.runtime.retry_backoff_ms = 0;
+    let project = create_project_with_config(&client, &base, project_config).await;
+
+    let first_session = create_session(&client, &base, &project).await;
+    let first_response =
+        post_turn(&client, &base, &first_session, "trip the first credential").await;
+
+    assert_eq!(first_response.status(), reqwest::StatusCode::OK);
+    let first_events = parse_ndjson_events(&first_response.text().await.unwrap());
+    assert!(first_events.iter().any(|event| {
+        matches!(
+            event,
+            CoreEvent::Turn {
+                session_id,
+                event: RuntimeEvent::Error { message, .. },
+            } if *session_id == first_session.id && message.contains("stream closed")
+        )
+    }));
+    assert!(first_events.iter().any(|event| {
+        matches!(
+            event,
+            CoreEvent::Turn {
+                session_id,
+                event: RuntimeEvent::TurnFinished {
+                    session_id: finished_session_id,
+                    finish_reason: Some(FinishReason::Error),
+                    ..
+                },
+            } if *session_id == first_session.id && *finished_session_id == first_session.id
+        )
+    }));
+
+    let health_records: Vec<CredentialHealthRecord> = client
+        .get(format!("{base}/v1/credentials/health"))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let first_health = health_records
+        .iter()
+        .find(|record| record.provider_name == "ollama" && record.credential_id == "cred-1")
+        .unwrap();
+    let second_health = health_records
+        .iter()
+        .find(|record| record.provider_name == "ollama" && record.credential_id == "cred-2")
+        .unwrap();
+    assert_eq!(first_health.health.consecutive_errors, 1);
+    assert!(first_health.health.last_error.is_some());
+    assert_eq!(second_health.health.consecutive_errors, 0);
+    assert!(second_health.health.last_error.is_none());
+
+    let second_session = create_session(&client, &base, &project).await;
+    let second_response = post_turn(
+        &client,
+        &base,
+        &second_session,
+        "use the healthy credential",
+    )
+    .await;
+
+    assert_eq!(second_response.status(), reqwest::StatusCode::OK);
+    let second_events = parse_ndjson_events(&second_response.text().await.unwrap());
+    assert!(second_events.iter().any(|event| {
+        matches!(
+            event,
+            CoreEvent::Turn {
+                session_id,
+                event: RuntimeEvent::TurnFinished {
+                    session_id: finished_session_id,
+                    ..
+                },
+            } if *session_id == second_session.id && *finished_session_id == second_session.id
+        )
+    }));
+    assert!(!second_events.iter().any(|event| {
+        matches!(
+            event,
+            CoreEvent::Turn {
+                session_id,
+                event: RuntimeEvent::Error { .. },
+            } if *session_id == second_session.id
+        )
+    }));
+
+    let requests = requests_rx.await.unwrap();
+    assert_eq!(requests.len(), 2);
+    assert!(
+        requests[0]
+            .to_lowercase()
+            .contains("authorization: bearer sk-one")
+    );
+    assert!(
+        requests[1]
+            .to_lowercase()
+            .contains("authorization: bearer sk-two")
     );
 }
 
