@@ -6,6 +6,7 @@ use agent_core_remote::{ErrorResponse, ProviderCatalogEntry, ProviderModelRecord
 use agent_server::{AgentServer, build_router};
 use agent_store::{Project, Session};
 use provider::MockProvider;
+use provider_openai::ChatCompletionObject;
 
 fn make_server() -> Arc<AgentServer> {
     let core: Arc<dyn AgentCore> = Arc::new(futures::executor::block_on(async {
@@ -460,6 +461,52 @@ async fn canonical_turn_endpoint_streams_ndjson() {
     );
     let body = response.text().await.unwrap();
     assert!(body.contains("turn_finished"));
+}
+
+#[tokio::test]
+async fn canonical_chat_completions_route_returns_non_streaming_completion() {
+    let base = start_server().await;
+    let client = reqwest::Client::new();
+
+    let completion: ChatCompletionObject = client
+        .post(format!("{base}/v1/chat/completions"))
+        .json(&serde_json::json!({
+            "model": "mock-echo",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "hello chat completions"
+                }
+            ]
+        }))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(completion.object.as_deref(), Some("chat.completion"));
+    assert_eq!(completion.model.as_deref(), Some("mock-echo"));
+    assert_eq!(completion.choices.len(), 1);
+    assert_eq!(
+        completion.choices[0].message.role,
+        provider_openai::ChatCompletionRole::Assistant
+    );
+    assert!(
+        completion.choices[0]
+            .message
+            .content
+            .as_ref()
+            .is_some_and(|content| match content {
+                provider_openai::ChatCompletionMessageContent::Text(text) => {
+                    text.contains("hello chat completions")
+                }
+                provider_openai::ChatCompletionMessageContent::Parts(_) => false,
+            })
+    );
 }
 
 #[tokio::test]
