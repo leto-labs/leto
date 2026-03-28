@@ -2243,6 +2243,134 @@ async fn canonical_tool_calls_route_appends_tool_call_history() {
 }
 
 #[tokio::test]
+async fn canonical_session_workflow_round_trips_turns_tool_calls_and_history() {
+    let base = start_server().await;
+    let client = reqwest::Client::new();
+    let project = create_project(&client, &base).await;
+    let session = create_session(&client, &base, &project).await;
+
+    let batch_response = client
+        .post(format!("{base}/v1/sessions/{}/batch-turns", session.id))
+        .json(&serde_json::json!({
+            "turns": [
+                {
+                    "input": [
+                        {
+                            "role": "user",
+                            "content": [{"type": "text", "text": "workflow step one"}]
+                        }
+                    ]
+                },
+                {
+                    "input": [
+                        {
+                            "role": "user",
+                            "content": [{"type": "text", "text": "workflow step two"}]
+                        }
+                    ]
+                }
+            ]
+        }))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap();
+
+    let batch_events = parse_ndjson_events(&batch_response.text().await.unwrap());
+    let finished = batch_events
+        .iter()
+        .filter(|event| {
+            matches!(
+                event,
+                CoreEvent::Turn {
+                    session_id,
+                    event: RuntimeEvent::TurnFinished {
+                        session_id: finished_session_id,
+                        finish_reason: Some(FinishReason::Stop),
+                        ..
+                    },
+                } if *session_id == session.id && *finished_session_id == session.id
+            )
+        })
+        .count();
+    assert_eq!(finished, 2);
+
+    let tool_messages: Vec<StoredMessage> = client
+        .post(format!("{base}/v1/sessions/{}/tool-calls", session.id))
+        .json(&serde_json::json!({
+            "calls": [
+                {
+                    "id": "workflow_call",
+                    "name": "echo",
+                    "input": {"text": "workflow tool input"},
+                    "output": {"text": "workflow tool output"},
+                    "is_error": false
+                }
+            ]
+        }))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(tool_messages.len(), 2);
+
+    let history: Vec<StoredMessage> = client
+        .get(format!("{base}/v1/sessions/{}/messages", session.id))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(history.len(), 6);
+    assert_eq!(history[0].message.role, MessageRole::User);
+    assert_eq!(history[0].message.plain_text_lossy(), "workflow step one");
+    assert_eq!(history[1].message.role, MessageRole::Assistant);
+    assert!(
+        history[1]
+            .message
+            .plain_text_lossy()
+            .contains("workflow step one")
+    );
+    assert_eq!(history[2].message.role, MessageRole::User);
+    assert_eq!(history[2].message.plain_text_lossy(), "workflow step two");
+    assert_eq!(history[3].message.role, MessageRole::Assistant);
+    assert!(
+        history[3]
+            .message
+            .plain_text_lossy()
+            .contains("workflow step two")
+    );
+    assert_eq!(history[4].message.role, MessageRole::Assistant);
+    assert!(matches!(
+        history[4].message.content.as_slice(),
+        [ContentBlock::ToolCall { id, name, input }]
+            if id == "workflow_call"
+                && name == "echo"
+                && input == &serde_json::json!({"text": "workflow tool input"})
+    ));
+    assert_eq!(history[5].message.role, MessageRole::User);
+    assert!(matches!(
+        history[5].message.content.as_slice(),
+        [ContentBlock::ToolResult {
+            call_id,
+            output,
+            is_error: Some(false),
+        }] if call_id == "workflow_call"
+            && output == &serde_json::json!({"text": "workflow tool output"})
+    ));
+}
+
+#[tokio::test]
 async fn canonical_chat_completions_route_returns_non_streaming_completion() {
     let base = start_server().await;
     let client = reqwest::Client::new();
