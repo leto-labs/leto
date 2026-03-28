@@ -1485,6 +1485,40 @@ mod tests {
     }
 
     #[test]
+    fn info_exposes_dashboard_friendly_model_metadata() {
+        let provider = OpenAiProvider::new(crate::OpenAiConfigPreset::OPENAI.into_config("test"));
+        let info = provider.info();
+
+        let model = info
+            .models
+            .iter()
+            .find(|model| model.id == "gpt-5.4")
+            .expect("gpt-5.4 should be listed");
+
+        let cost = model
+            .cost
+            .as_ref()
+            .expect("cost metadata should be present");
+        let limit = model
+            .limit
+            .as_ref()
+            .expect("limit metadata should be present");
+
+        assert_eq!(model.family.as_deref(), Some("gpt"));
+        assert!(model.input_modalities.contains(&"text"));
+        assert!(model.input_modalities.contains(&"image"));
+        assert!(model.input_modalities.contains(&"pdf"));
+        assert_eq!(model.output_modalities.as_ref(), &["text"]);
+        assert_eq!(cost.input, 2.5);
+        assert_eq!(cost.output, 15.0);
+        assert_eq!(cost.cache_read, Some(0.25));
+        assert_eq!(limit.context, 1_050_000);
+        assert_eq!(limit.output, 128_000);
+        assert_eq!(model.structured_output, Some(true));
+        assert_eq!(model.temperature, Some(false));
+    }
+
+    #[test]
     fn info_preserves_model_status_metadata() {
         let provider = OpenAiProvider::new(crate::OpenAiConfigPreset::XAI.into_config("test"));
         let info = provider.info();
