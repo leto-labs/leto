@@ -417,13 +417,43 @@ async fn instance_dispose(
 
 #[cfg(test)]
 mod tests {
+    use std::io::{self, Write};
+    use std::sync::{Arc, Mutex};
+
     use crate::{
         compat::opencode::test_utils::{
             normalize_generated_opencode_route_doc, normalize_opencode_route_doc,
             opencode_openapi_options, pinned_opencode_openapi,
         },
+        compat::opencode::types::{
+            common::CompatQuery,
+            global::{AppLogLevelDoc, AppLogRequestDoc},
+        },
         utils::openapi::{generate_from_router, subset_for_operations},
     };
+    use axum::Json;
+    use axum::extract::Query;
+    use tracing::subscriber::with_default;
+
+    #[derive(Clone, Default)]
+    struct SharedLogBuffer(Arc<Mutex<Vec<u8>>>);
+
+    impl SharedLogBuffer {
+        fn contents(&self) -> String {
+            String::from_utf8(self.0.lock().unwrap().clone()).unwrap()
+        }
+    }
+
+    impl Write for SharedLogBuffer {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
 
     #[test]
     fn global_health_route_openapi_matches_pinned_subset() {
@@ -535,6 +565,46 @@ mod tests {
                 &[("/log", "post")],
             ))
         );
+    }
+
+    #[test]
+    fn app_log_should_emit_compat_log_fields() {
+        let log_buffer = SharedLogBuffer::default();
+        let subscriber = tracing_subscriber::fmt()
+            .with_ansi(false)
+            .without_time()
+            .with_max_level(tracing::Level::INFO)
+            .with_writer({
+                let log_buffer = log_buffer.clone();
+                move || log_buffer.clone()
+            })
+            .finish();
+
+        let response = with_default(subscriber, || {
+            futures::executor::block_on(super::app_log(
+                Query(CompatQuery::default()),
+                Json(AppLogRequestDoc {
+                    service: "desktop".into(),
+                    level: AppLogLevelDoc::Warn,
+                    message: "user initiated refresh".into(),
+                    extra: Some(std::collections::BTreeMap::from([
+                        ("request_id".into(), serde_json::json!("req_123")),
+                        ("attempt".into(), serde_json::json!(2)),
+                    ])),
+                }),
+            ))
+        });
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+
+        let logs = log_buffer.contents();
+        assert!(logs.contains("compat log"), "logs were: {logs}");
+        assert!(logs.contains("agent_server::compat"), "logs were: {logs}");
+        assert!(logs.contains("service=desktop"), "logs were: {logs}");
+        assert!(logs.contains("level=Warn"), "logs were: {logs}");
+        assert!(logs.contains("user initiated refresh"), "logs were: {logs}");
+        assert!(logs.contains("request_id"), "logs were: {logs}");
+        assert!(logs.contains("req_123"), "logs were: {logs}");
+        assert!(logs.contains("attempt"), "logs were: {logs}");
     }
 
     #[test]

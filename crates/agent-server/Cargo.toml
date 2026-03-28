@@ -30,3 +30,4 @@ agent-store = { workspace = true }
 provider = { workspace = true }
 reqwest = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "io-util"] }
+tracing-subscriber = { workspace = true, features = ["fmt"] }
