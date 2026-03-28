@@ -572,6 +572,61 @@ async fn create_response_reuses_http_connection() {
 }
 
 #[tokio::test]
+async fn create_response_preserves_large_request_bodies() {
+    let response_body = serde_json::json!({
+        "id": "resp_large",
+        "object": "response",
+        "status": "completed",
+        "output": [],
+        "usage": {
+            "input_tokens": 16385,
+            "output_tokens": 1,
+            "total_tokens": 16386
+        }
+    })
+    .to_string();
+
+    let (base_url, request_rx) =
+        spawn_http_server("200 OK", "application/json", response_body).await;
+    let client = Client::new(
+        Config::new("sk-test")
+            .with_base_url(base_url)
+            .with_model("gpt-test"),
+    );
+    let oversized_text = "request-bloat-".repeat(2_048);
+
+    let response = client
+        .responses()
+        .create(&ResponseRequest {
+            input: vec![ResponseInputItem::message(
+                ResponseInputRole::User,
+                vec![ResponseInputContentPart::input_text(&oversized_text)],
+            )],
+            ..ResponseRequest::default()
+        })
+        .await
+        .unwrap();
+
+    let request = request_rx.await.unwrap();
+    let request_text = request
+        .body
+        .pointer("/input/0/content/0/text")
+        .and_then(Value::as_str)
+        .unwrap();
+
+    assert!(
+        request
+            .head
+            .to_lowercase()
+            .contains("post /v1/responses http/1.1")
+    );
+    assert!(oversized_text.len() > 16 * 1024);
+    assert_eq!(request_text.len(), oversized_text.len());
+    assert_eq!(request_text, oversized_text);
+    assert_eq!(response.id.as_deref(), Some("resp_large"));
+}
+
+#[tokio::test]
 async fn stream_response_over_sse_parses_events_and_terminal_state() {
     let response_body = concat!(
         "data: {\"type\":\"response.output_text.delta\",\"sequence_number\":1,\"item_id\":\"msg_1\",\"output_index\":0,\"content_index\":0,\"delta\":\"hel\"}\n\n",
