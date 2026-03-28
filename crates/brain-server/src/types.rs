@@ -49,13 +49,13 @@ pub struct ServerStatus {
 
 /// Request body for creating a project over HTTP.
 #[derive(Debug, Deserialize)]
-pub struct CreateProjectRequest {
+pub(crate) struct CreateProjectRequest {
     pub name: Option<String>,
     pub root: Option<std::path::PathBuf>,
 }
 
 /// Request body for starting a new turn from plain text content.
 #[derive(Debug, Deserialize)]
-pub struct SendMessageRequest {
+pub(crate) struct SendMessageRequest {
     pub content: String,
 }
