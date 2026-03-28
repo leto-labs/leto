@@ -125,3 +125,47 @@ fn prometheus_metrics(status: &AgentServerStatus) -> String {
 fn prometheus_label_value(value: &str) -> String {
     value.replace('\\', r"\\").replace('"', "\\\"")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::prometheus_metrics;
+    use crate::types::AgentServerStatus;
+
+    #[test]
+    fn prometheus_metrics_escapes_labels_and_reports_counts() {
+        let status = AgentServerStatus {
+            provider_names: vec!["mock".to_owned(), "backup".to_owned()],
+            loop_names: vec!["simple".to_owned(), "robust".to_owned()],
+            default_provider_name: r#"mock"primary\east"#.to_owned(),
+            default_loop_name: r#"simple"steady\west"#.to_owned(),
+            project_count: 3,
+            session_count: 5,
+        };
+
+        let metrics = prometheus_metrics(&status);
+
+        assert_eq!(
+            metrics,
+            format!(
+                concat!(
+                    "# HELP agent_server_info Static agent-server build information.\n",
+                    "# TYPE agent_server_info gauge\n",
+                    "agent_server_info{{version=\"{}\",default_provider=\"mock\\\"primary\\\\east\",default_loop=\"simple\\\"steady\\\\west\"}} 1\n",
+                    "# HELP agent_server_provider_count Number of configured providers.\n",
+                    "# TYPE agent_server_provider_count gauge\n",
+                    "agent_server_provider_count 2\n",
+                    "# HELP agent_server_loop_count Number of registered loops.\n",
+                    "# TYPE agent_server_loop_count gauge\n",
+                    "agent_server_loop_count 2\n",
+                    "# HELP agent_server_project_count Number of stored projects.\n",
+                    "# TYPE agent_server_project_count gauge\n",
+                    "agent_server_project_count 3\n",
+                    "# HELP agent_server_session_count Number of stored sessions.\n",
+                    "# TYPE agent_server_session_count gauge\n",
+                    "agent_server_session_count 5\n"
+                ),
+                env!("CARGO_PKG_VERSION")
+            )
+        );
+    }
+}
