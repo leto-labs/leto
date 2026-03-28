@@ -368,6 +368,7 @@ async fn status(State(server): State<AppState>) -> Response {
 
 // -- Helpers --
 
+#[allow(clippy::result_large_err)]
 fn parse_ulid(s: &str) -> Result<Ulid, Response> {
     s.parse::<Ulid>().map_err(|_| {
         (
@@ -378,6 +379,7 @@ fn parse_ulid(s: &str) -> Result<Ulid, Response> {
     })
 }
 
+#[allow(clippy::result_large_err)]
 fn parse_project_id(s: &str) -> Result<ProjectId, Response> {
     s.parse::<Ulid>().map_err(|_| {
         (
