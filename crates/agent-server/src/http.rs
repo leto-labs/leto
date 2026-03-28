@@ -121,6 +121,7 @@ fn canonical_router() -> Router<AppState> {
         .route("/trajectories", routing::get(list_trajectories))
         .route("/sessions/{id}/runtime", routing::get(get_runtime_view))
         .route("/sessions/{id}/turns", routing::post(start_turn))
+        .route("/sessions/{id}/stream-turns", routing::post(start_turn_sse))
         .route(
             "/sessions/{id}/batch-turns",
             routing::post(start_batch_turns),
@@ -709,6 +710,30 @@ async fn start_turn(
                 .header("content-type", "application/x-ndjson")
                 .body(Body::from_stream(ndjson))
                 .unwrap()
+        }
+        Err(error) => core_error_response(error),
+    }
+}
+
+async fn start_turn_sse(
+    State(server): State<AppState>,
+    Path(id): Path<String>,
+    Json(body): Json<TurnRequest>,
+) -> Response {
+    let session_id = match parse_session_id(&id) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    let core = server.core();
+    match core.turn(session_id, body.input).await {
+        Ok(stream) => {
+            let sse = stream.map(|event| {
+                let data = serde_json::to_string(&event).unwrap_or_else(|_| "{}".to_owned());
+                Ok::<_, Infallible>(SseEvent::default().data(data))
+            });
+            Sse::new(sse)
+                .keep_alive(KeepAlive::new().interval(Duration::from_secs(10)))
+                .into_response()
         }
         Err(error) => core_error_response(error),
     }

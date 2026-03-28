@@ -77,11 +77,61 @@ async fn post_turn(
         .unwrap()
 }
 
+async fn post_stream_turn(
+    client: &reqwest::Client,
+    base: &str,
+    session: &Session,
+    text: &str,
+) -> reqwest::Response {
+    client
+        .post(format!("{base}/v1/sessions/{}/stream-turns", session.id))
+        .json(&serde_json::json!({
+            "input": [
+                {
+                    "role": "user",
+                    "content": [{"type": "text", "text": text}]
+                }
+            ]
+        }))
+        .send()
+        .await
+        .unwrap()
+}
+
 fn parse_ndjson_events(body: &str) -> Vec<CoreEvent> {
     body.lines()
         .filter(|line| !line.trim().is_empty())
         .map(|line| serde_json::from_str(line).unwrap())
         .collect()
+}
+
+fn parse_sse_events(body: &str) -> Vec<CoreEvent> {
+    let mut events = Vec::new();
+    let mut data_lines = Vec::new();
+
+    for line in body.lines() {
+        if line.is_empty() {
+            if !data_lines.is_empty() {
+                events.push(serde_json::from_str(&data_lines.join("\n")).unwrap());
+                data_lines.clear();
+            }
+            continue;
+        }
+
+        if line.starts_with(':') {
+            continue;
+        }
+
+        if let Some(data) = line.strip_prefix("data:") {
+            data_lines.push(data.trim_start().to_owned());
+        }
+    }
+
+    if !data_lines.is_empty() {
+        events.push(serde_json::from_str(&data_lines.join("\n")).unwrap());
+    }
+
+    events
 }
 
 #[tokio::test]
@@ -203,5 +253,62 @@ async fn post_turns_allows_follow_up_turn_after_completion() {
             .message
             .plain_text_lossy()
             .contains("second turn")
+    );
+}
+
+#[tokio::test]
+async fn post_stream_turns_streams_sse_until_turn_finished() {
+    let base = start_server().await;
+    let client = reqwest::Client::new();
+    let project = create_project(&client, &base).await;
+    let session = create_session(&client, &base, &project).await;
+
+    let response = post_stream_turn(&client, &base, &session, "hello sse turn").await;
+
+    assert_eq!(response.status(), reqwest::StatusCode::OK);
+    assert!(
+        response
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .starts_with("text/event-stream")
+    );
+
+    let events = parse_sse_events(&response.text().await.unwrap());
+    assert!(!events.is_empty());
+    assert!(matches!(
+        events.last(),
+        Some(CoreEvent::Turn {
+            session_id,
+            event: RuntimeEvent::TurnFinished {
+                session_id: finished_session_id,
+                finish_reason: Some(FinishReason::Stop),
+                ..
+            },
+        }) if *session_id == session.id && *finished_session_id == session.id
+    ));
+
+    let messages: Vec<StoredMessage> = client
+        .get(format!("{base}/v1/sessions/{}/messages", session.id))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(messages.len(), 2);
+    assert_eq!(messages[0].message.role, MessageRole::User);
+    assert_eq!(messages[0].message.plain_text_lossy(), "hello sse turn");
+    assert_eq!(messages[1].message.role, MessageRole::Assistant);
+    assert!(
+        messages[1]
+            .message
+            .plain_text_lossy()
+            .contains("hello sse turn")
     );
 }
