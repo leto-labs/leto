@@ -9,14 +9,15 @@ The system SHALL provide a standalone `provider` crate that owns the shared
 provider trait, request model, streamed event model, capabilities, model
 catalog metadata, and mock implementation.
 
-The crate SHALL NOT depend on `brain-types` or any other `brain-*` crate.
+The crate SHALL NOT depend on `agent-*` application crates or legacy `brain-*`
+crates.
 
 #### Scenario: Shared crate exposes reusable provider and model metadata
 
 - **WHEN** a caller depends on `provider`
 - **THEN** it SHALL be able to construct shared requests, consume shared
   provider events, and inspect rich shared model metadata without importing
-  `brain-types`
+  application-layer runtime/store crates
 
 ### Requirement: Shared Provider Trait Is Stream-First
 
@@ -134,4 +135,3 @@ The shared credential module SHALL remain storeless and runtime-agnostic.
 - **THEN** the pool SHALL record the failure in health state
 - **AND** future resolution SHALL avoid the failed credential while healthier
   alternatives exist
-

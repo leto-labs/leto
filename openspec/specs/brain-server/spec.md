@@ -68,6 +68,5 @@ preferred application boundary for CLI or ACP clients.
 
 #### Scenario: Contributor evaluates current client architecture
 - **WHEN** a contributor reviews the current local client surfaces
-- **THEN** `brain-cli` and `brain-acp` SHALL be understood to use `BrainRuntime`
+- **THEN** `agent-cli` and `agent-acp` SHALL be understood to use `AgentCore`
 - **AND** `brain-server` SHALL be understood as deferred legacy infrastructure
-

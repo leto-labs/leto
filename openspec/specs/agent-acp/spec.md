@@ -1,34 +1,34 @@
-# brain-acp Specification
+# agent-acp Specification
 
 ## Purpose
-ACP stdio compatibility surface for `brain`. Defines the real and mock ACP
+ACP stdio compatibility surface for the current agent stack. Defines the real and mock ACP
 entrypoints, runtime-backed session handling, ACP-facing session
 configuration, and protocol-safe stdio behavior for external ACP clients.
 ## Requirements
-### Requirement: ACP Backend Depends On BrainRuntime
-The real ACP backend SHALL depend on the shared `BrainRuntime` boundary rather
-than on `Brain` plus `ProviderRouter`.
+### Requirement: ACP Backend Depends On AgentCore
+The real ACP backend SHALL depend on the shared `AgentCore` boundary rather
+than on legacy `Brain` plus `ProviderRouter`.
 
 The backend SHALL:
 
-- hold a runtime trait object in app state
-- use `runtime.resolve_or_create_project()` for cwd-to-project bootstrap
-- use `runtime.turn()` and `runtime.cancel_turn()` for active turn lifecycle
-- use `runtime` model helper methods for session-model inspection and updates
-- use `runtime.store()` for plain session/message/project CRUD
+- hold a core trait object in app state
+- use `core.resolve_or_create_project()` for cwd-to-project bootstrap
+- use `core.turn()` and turn-cancellation methods for active turn lifecycle
+- use core model helper methods for session-model inspection and updates
+- use `core.store()` for plain session/message/project CRUD
 
-#### Scenario: Real backend uses runtime for project and turn handling
+#### Scenario: Real backend uses core for project and turn handling
 - **WHEN** ACP creates or prompts a real session
-- **THEN** it SHALL resolve the project through `BrainRuntime`
-- **AND** execute and cancel turns through `BrainRuntime`
+- **THEN** it SHALL resolve the project through `AgentCore`
+- **AND** execute and cancel turns through `AgentCore`
 
-#### Scenario: Real backend uses runtime model helpers
+#### Scenario: Real backend uses core model helpers
 - **WHEN** ACP inspects or updates the current session model
-- **THEN** it SHALL use the runtime model helper methods rather than `ProviderRouter`
+- **THEN** it SHALL use the core model helper methods rather than a legacy `ProviderRouter`
 
 ### Requirement: Real Backend Exposes ACP Config Options
 
-The real `brain-acp` backend SHALL expose ACP `configOptions` for session
+The real `agent-acp` backend SHALL expose ACP `configOptions` for session
 settings.
 
 The real surface SHALL include:
@@ -50,7 +50,7 @@ The backend SHALL include those config options on both `session/new` and
 
 ### Requirement: Real Backend Supports Session Config Mutation
 
-The real `brain-acp` backend SHALL implement `session/set_config_option`.
+The real `agent-acp` backend SHALL implement `session/set_config_option`.
 
 The backend SHALL:
 
@@ -105,7 +105,7 @@ The backend SHALL treat at least these loop outcomes as non-internal:
 ### Requirement: Real ACP Session Model State
 
 When ACP unstable session model support is enabled, the real ACP backend SHALL
-report model state from the real `brain-core` session/runtime model rather than
+report model state from the real `agent-core` session/runtime model rather than
 from ACP-local adapter state.
 
 #### Scenario: New session reports effective model state
@@ -137,24 +137,24 @@ support `session/set_model` through persisted session inference overrides.
 
 ### Requirement: Dedicated ACP Binaries
 
-The system SHALL expose the ACP surface directly from the `brain-acp` crate
-through dedicated binaries rather than only through `brain-cli`.
+The system SHALL expose the ACP surface from the `agent-acp` crate and through
+the `agent acp` compatibility launch path.
 
 The ACP binary identities SHALL be:
 
-- `brain-acp`
-- `brain-acp-mock`
+- `agent-acp`
+- `agent-acp-mock`
 
-#### Scenario: Mock ACP is launched directly from brain-acp
+#### Scenario: Mock ACP is launched directly from agent-acp
 
 - **WHEN** a user or ACP client launches the explicit mock ACP binary
-- **THEN** the system SHALL start the ACP stdio server without going through the `brain` compatibility alias
+- **THEN** the system SHALL start the ACP stdio server without going through the `agent` compatibility alias
 
 #### Scenario: Real and mock ACP binaries remain distinct
 
 - **WHEN** ACP launch paths are configured for local validation
-- **THEN** `brain-acp` SHALL represent the real runtime-backed backend
-- **AND** `brain-acp-mock` SHALL remain the explicit mock backend
+- **THEN** `agent-acp` SHALL represent the real runtime-backed backend
+- **AND** `agent-acp-mock` SHALL remain the explicit mock backend
 
 ### Requirement: Explicit Mock Binary Identity
 
@@ -164,27 +164,28 @@ mock-scoped binary identity.
 #### Scenario: Mock ACP remains available for development
 
 - **WHEN** developers need ACP interoperability validation against mock behavior
-- **THEN** they SHALL be able to launch `brain-acp-mock`
+- **THEN** they SHALL be able to launch `agent-acp-mock`
 
 #### Scenario: Compatibility harness uses explicit mock path
 
 - **WHEN** the repo runs its external ACP compatibility harness
-- **THEN** the harness SHALL launch the explicit mock ACP binary rather than relying on `brain-cli`
+- **THEN** the harness SHALL launch the explicit mock ACP binary rather than relying on `agent-cli`
 
-### Requirement: Temporary brain ACP Compatibility Alias
+### Requirement: Temporary Agent ACP Compatibility Alias
 
-The system SHALL keep `brain acp` only as a temporary compatibility path
-while direct `brain-acp` binaries become the canonical ACP entrypoints.
+The system SHALL keep `agent acp` as the compatibility path while direct
+`agent-acp` binaries or equivalent entrypoints remain the canonical ACP
+surface.
 
-#### Scenario: Existing brain ACP command continues to work
+#### Scenario: Existing agent ACP command continues to work
 
-- **WHEN** a user launches `brain acp`
+- **WHEN** a user launches `agent acp`
 - **THEN** the ACP stdio server SHALL still start successfully
 
-#### Scenario: Direct brain-acp binaries are canonical
+#### Scenario: Direct agent-acp binaries are canonical
 
 - **WHEN** ACP launch paths are documented or configured for external clients
-- **THEN** direct `brain-acp` binaries SHALL be treated as the canonical ACP surface
+- **THEN** direct `agent-acp` binaries SHALL be treated as the canonical ACP surface
 
 ### Requirement: Dual Nori ACP Registration
 
@@ -193,17 +194,17 @@ same time.
 
 #### Scenario: Nori registers both ACP agents
 
-- **WHEN** Nori is configured for local `brain` ACP validation
-- **THEN** it SHALL be able to register one entry for `brain-acp` and one entry for `brain-acp-mock`
+- **WHEN** Nori is configured for local `agent` ACP validation
+- **THEN** it SHALL be able to register one entry for `agent-acp` and one entry for `agent-acp-mock`
 
 #### Scenario: Nori entries can target distinct real and mock binaries
 
 - **WHEN** Nori registers both local ACP entries
-- **THEN** one entry SHALL be able to target `brain-acp`
-- **AND** the other SHALL be able to target `brain-acp-mock`
+- **THEN** one entry SHALL be able to target `agent-acp`
+- **AND** the other SHALL be able to target `agent-acp-mock`
 
 ### Requirement: Real Backend Can Bridge File Reads And Writes Through ACP Clients
-The real `brain-acp` backend SHALL be able to route file reads and writes
+The real `agent-acp` backend SHALL be able to route file reads and writes
 through ACP client-owned filesystem capabilities when running under an ACP
 client that provides them.
 
@@ -216,14 +217,13 @@ a portable Linux release build rather than a host-glibc debug build when such
 an artifact is available.
 
 #### Scenario: Harbor-backed ACP file operations land in the task workspace
-- **WHEN** the real `brain-acp` backend is launched through Harbor's ACP client
+- **WHEN** the real `agent-acp` backend is launched through Harbor's ACP client
 - **AND** the model uses the `file_write` or `file_read` tool with a relative path
 - **THEN** the file operation SHALL be sent through the ACP client bridge
 - **AND** the resolved path SHALL be rooted in the ACP session cwd exposed by the client
 
 #### Scenario: Harbor prefers a portable release artifact
-- **WHEN** Harbor launches the real `brain-acp` backend without an explicit
+- **WHEN** Harbor launches the real `agent-acp` backend without an explicit
   `backend_artifact_path`
 - **THEN** it SHALL prefer a portable Linux release artifact path before
   host-glibc release or debug artifact paths
-

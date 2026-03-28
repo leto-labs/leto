@@ -1,7 +1,8 @@
-# brain-providers-llamacpp Specification
+# provider-llamacpp Specification
 
 ## Purpose
-In-process GGUF inference using llama.cpp as a `Provider` implementation in `brain-providers`.
+In-process GGUF inference using llama.cpp as a `Provider` implementation in
+`provider-llamacpp`.
 
 ## Requirements
 
@@ -60,8 +61,9 @@ The system SHALL implement `Provider` for `LlamaCppProvider`. The provider SHALL
 - **THEN** the model SHALL be loaded immediately and reused by later chat calls
 
 ### Requirement: Feature Gate
-The `LlamaCppProvider`, `LlamaCppConfig`, and `LlamaCppModelPreset` SHALL be gated behind the `llamacpp` feature of `brain-providers`.
+The `LlamaCppProvider`, `LlamaCppConfig`, and `LlamaCppModelPreset` SHALL be
+gated behind the `llamacpp` feature of `provider-llamacpp`.
 
 #### Scenario: Feature disabled
-- **WHEN** `brain-providers` is compiled without `llamacpp`
+- **WHEN** `provider-llamacpp` is compiled without `llamacpp`
 - **THEN** the provider and preset types SHALL not be available

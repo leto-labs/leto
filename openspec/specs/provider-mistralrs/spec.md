@@ -1,4 +1,4 @@
-# brain-providers-mistralrs Specification
+# provider-mistralrs Specification
 
 ## Purpose
 In-process LLM inference via mistral.rs. Provides `MistralRsProvider` (implementing the `Provider` trait) for running GGUF models locally without an external server, with automatic HuggingFace model downloading and preset configurations for common small models.
@@ -15,7 +15,12 @@ The system SHALL define a `MistralRsConfig` struct with `model_id` (HuggingFace 
 - **THEN** the provider SHALL load GGUF files from that directory without downloading
 
 ### Requirement: MistralRsProvider
-The system SHALL implement the `Provider` trait for `MistralRsProvider` in the `brain-providers` crate. It SHALL use mistral.rs `GgufModelBuilder` to load GGUF models and `stream_chat_request` to stream inference results. Construction via `new()` accepts multiple named model configs and a default model name. All models are lazy-loaded on first use. A `preload()` method allows callers to eagerly load specific models before the first `chat()` call.
+The system SHALL implement the `Provider` trait for `MistralRsProvider` in the
+`provider-mistralrs` crate. It SHALL use mistral.rs `GgufModelBuilder` to load
+GGUF models and `stream_chat_request` to stream inference results.
+Construction via `new()` accepts multiple named model configs and a default
+model name. All models are lazy-loaded on first use. A `preload()` method
+allows callers to eagerly load specific models before the first `chat()` call.
 
 #### Scenario: Text response
 - **WHEN** `chat()` is called with user messages
@@ -61,7 +66,6 @@ The system SHALL define a `MistralRsModelPreset` struct with `name`, `model_id`,
 The `MistralRsProvider` SHALL be gated behind the `mistralrs` feature flag (off by default). Building without the `mistralrs` feature SHALL not compile mistral.rs or any of its dependencies.
 
 #### Scenario: Feature disabled
-- **WHEN** `brain-providers` is compiled without the `mistralrs` feature
+- **WHEN** `provider-mistralrs` is compiled without the `mistralrs` feature
 - **THEN** `MistralRsProvider`, `MistralRsConfig`, and `MistralRsModelPreset` SHALL not be available
-
 

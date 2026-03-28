@@ -1,4 +1,4 @@
-# brain-benchmarks Specification
+# agent-benchmarks Specification
 
 ## Purpose
 Operational benchmark workflow for evaluating agent harnesses against
@@ -23,9 +23,9 @@ The repo SHALL define six Harbor reference agent surfaces:
 - built-in `codex`
 - built-in `mini-swe-agent`
 - built-in `terminus-2`
-- repo-local direct `brain`
+- repo-local direct `agent`
 - repo-local `codex-acp`
-- repo-local `brain-acp`
+- repo-local `agent-acp`
 
 The repo SHALL document the current support level of each surface.
 
@@ -74,12 +74,12 @@ environment controls through env vars aligned to Harbor's CLI:
 The default runner behavior SHALL remain Docker-backed with forced builds and
 delete-on-completion unless those env vars override it.
 
-#### Scenario: Contributor runs the direct brain benchmark surface
+#### Scenario: Contributor runs the direct agent benchmark surface
 
-- **WHEN** a contributor invokes `./scripts/harbor-run.sh brain hello-world@1.0`
-- **THEN** Harbor SHALL load the repo-local direct `brain` agent through
+- **WHEN** a contributor invokes `./scripts/harbor-run.sh agent hello-world@1.0`
+- **THEN** Harbor SHALL load the repo-local direct `agent` agent through
   `--agent-import-path`
-- **AND** that agent SHALL launch the local `brain` binary directly inside the
+- **AND** that agent SHALL launch the local `agent` binary directly inside the
   Harbor task container
 
 #### Scenario: Contributor switches the common runner to Daytona
@@ -130,33 +130,32 @@ shared ACP base, with a Codex-specific backend implementation.
   surface built on the shared Harbor ACP client and base
 - **AND** they SHALL see it documented as a bounded real-task validation path
 
-### Requirement: Repo-Local ACP Brain Uses The Shared ACP Base
-The supported Harbor ACP Brain path SHALL use the shared Harbor ACP client and
-shared ACP base, with a Brain-specific backend implementation.
+### Requirement: Repo-Local ACP Agent Uses The Shared ACP Base
+The supported Harbor ACP agent path SHALL use the shared Harbor ACP client and
+shared ACP base, with an agent-specific backend implementation.
 
-#### Scenario: Contributor reads the Brain ACP Harbor workflow
+#### Scenario: Contributor reads the agent ACP Harbor workflow
 - **WHEN** a contributor reads the Harbor benchmark docs or benchmark spec
-- **THEN** they SHALL see `brain-acp` described as a repo-local ACP benchmark
+- **THEN** they SHALL see `agent-acp` described as a repo-local ACP benchmark
   surface built on the shared Harbor ACP client and base
 - **AND** they SHALL see it documented as validated on `hello-world@1.0` and
   bounded real-task probes rather than the first stable comparison baseline
 
-### Requirement: Repo-Local Direct Brain Runs Through Harbor Import Path
+### Requirement: Repo-Local Direct Agent Runs Through Harbor Import Path
 
-The repo SHALL support a repo-local direct Harbor `brain` agent loaded through
+The repo SHALL support a repo-local direct Harbor `agent` agent loaded through
 `--agent-import-path`.
 
 This surface SHALL:
 
-- run the local `brain` binary directly
+- run the local `agent` binary directly
 - avoid ACP entirely
 - use explicit API-key auth passed through the Harbor runner surface
 
-#### Scenario: Direct brain Harbor run avoids host brain state
+#### Scenario: Direct agent Harbor run avoids host agent state
 
-- **WHEN** Harbor runs the repo-local direct `brain` surface
-- **THEN** the run SHALL NOT require host `~/.brain/config.toml`
-- **AND** it SHALL NOT require host `~/.brain/credentials`
+- **WHEN** Harbor runs the repo-local direct `agent` surface
+- **THEN** the run SHALL NOT require host `~/.agent/config.toml`
+- **AND** it SHALL NOT require host `~/.agent/credentials`
 - **AND** the selected API key SHALL be provided explicitly through the Harbor
   runner path
-

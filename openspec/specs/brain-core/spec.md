@@ -77,12 +77,12 @@ These allow callers to manage sessions without accessing the store directly.
 
 ### Requirement: Re-export Facade Preserved
 `brain-core` SHALL continue to re-export the runtime-facing crates used by the
-local CLI path. The old `cli-echo` and `cli-local` binaries have been removed
-from the workspace because their behavior is subsumed by `brain-cli`.
+legacy local CLI path. The old `cli-echo` and `cli-local` binaries have been
+removed from the workspace because their behavior is subsumed by `agent-cli`.
 
 #### Scenario: Workspace members updated
 - **WHEN** the focused runtime workspace is built
-- **THEN** `brain-cli` SHALL be the user-facing local binary crate
+- **THEN** `agent-cli` SHALL be the user-facing local binary crate
 - **AND** `examples/cli-echo` and `examples/cli-local` SHALL NOT be present
 
 ### Requirement: ProviderRouter
@@ -318,4 +318,3 @@ The native ATIF export path SHALL preserve additive loop-specific metadata
 - **WHEN** a Terminus-2 turn performs summarization or completion confirmation
 - **THEN** the exported ATIF trajectory SHALL preserve those additive steps in a
   Harbor-compatible structure
-
