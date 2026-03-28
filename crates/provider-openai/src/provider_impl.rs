@@ -1370,6 +1370,26 @@ mod tests {
     }
 
     #[test]
+    fn info_preserves_model_status_metadata() {
+        let provider = OpenAiProvider::new(crate::OpenAiConfigPreset::XAI.into_config("test"));
+        let info = provider.info();
+
+        let beta_model = info
+            .models
+            .iter()
+            .find(|model| model.id == "grok-4.20-beta-latest-reasoning")
+            .expect("expected xai beta model to be listed");
+        let stable_model = info
+            .models
+            .iter()
+            .find(|model| model.id == "grok-4-1-fast")
+            .expect("expected xai stable model to be listed");
+
+        assert_eq!(beta_model.status.as_deref(), Some("beta"));
+        assert!(stable_model.status.is_none());
+    }
+
+    #[test]
     fn maps_chat_finish_reason_length_to_max_tokens() {
         assert_eq!(
             map_openai_finish_reason("length".into()),
