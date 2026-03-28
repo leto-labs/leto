@@ -11,7 +11,7 @@
   modules by endpoint family while keeping route registration centralized
 - [ ] Split `compat/opencode/mod.rs` by conversion, prompt, auth, and path
   concerns
-- [ ] Split `compat/opencode/routes/session.rs` by route cluster and route-doc
+- [x] Split `compat/opencode/routes/session.rs` by route cluster and route-doc
   utilities
 - [ ] Split `compat/opencode/types/session.rs` by schema family
 - [ ] Split `tests/http_integration.rs` by API family
