@@ -1356,6 +1356,41 @@ async fn canonical_project_routes_support_connection_reuse_after_json_post() {
 }
 
 #[tokio::test]
+async fn canonical_project_routes_recover_connection_reuse_after_bad_json_post() {
+    let server = make_server();
+    let router = build_router(server);
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, router).await.unwrap();
+    });
+
+    let mut connection = BufferedTcpConnection::connect(addr).await;
+    let malformed_request = build_json_request("POST", "/v1/projects", addr, r#"{"name":"broken""#);
+
+    connection.send(&malformed_request).await;
+    let malformed_response = connection.read_response().await;
+    assert!(malformed_response.status_line.contains("400 Bad Request"));
+
+    let valid_request = build_json_request(
+        "POST",
+        "/v1/projects",
+        addr,
+        r#"{"name":"agent-server-recovery-project"}"#,
+    );
+
+    connection.send(&valid_request).await;
+    let valid_response = connection.read_response().await;
+    assert!(valid_response.status_line.contains("201 Created"));
+
+    let project: Project = serde_json::from_slice(&valid_response.body).unwrap();
+    assert_eq!(
+        project.name.as_deref(),
+        Some("agent-server-recovery-project")
+    );
+}
+
+#[tokio::test]
 async fn canonical_project_routes_preserve_large_request_bodies() {
     let server = make_server();
     let router = build_router(server);
