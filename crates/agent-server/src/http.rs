@@ -2,6 +2,7 @@ mod errors;
 mod routes;
 
 use std::collections::BTreeMap;
+use std::future::{Future, pending};
 use std::sync::Arc;
 
 use agent_core::AgentCore;
@@ -49,10 +50,39 @@ pub async fn serve(
     server: Arc<AgentServer>,
     addr: &str,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    serve_with_shutdown(server, addr, pending()).await
+}
+
+/// Serves the router on the provided address until the shutdown signal resolves.
+///
+/// Once shutdown begins, the server stops accepting new connections and allows
+/// in-flight requests to complete before returning.
+pub async fn serve_with_shutdown<F>(
+    server: Arc<AgentServer>,
+    addr: &str,
+    shutdown_signal: F,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
+where
+    F: Future<Output = ()> + Send + 'static,
+{
     let router = build_router(server);
     let listener = tokio::net::TcpListener::bind(addr).await?;
     tracing::info!("agent-server listening on {addr}");
-    axum::serve(listener, router).await?;
+    serve_listener_with_shutdown(listener, router, shutdown_signal).await?;
+    Ok(())
+}
+
+async fn serve_listener_with_shutdown<F>(
+    listener: tokio::net::TcpListener,
+    router: Router,
+    shutdown_signal: F,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
+where
+    F: Future<Output = ()> + Send + 'static,
+{
+    axum::serve(listener, router)
+        .with_graceful_shutdown(shutdown_signal)
+        .await?;
     Ok(())
 }
 
@@ -244,4 +274,117 @@ pub(crate) fn grouped_provider_models(core: &Arc<dyn AgentCore>) -> Vec<Provider
             ProviderCatalogEntry { name, model_ids }
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use agent_core::{AgentCore, AgentCoreNative};
+    use agent_store::{Project, Session};
+    use provider::{MockProvider, Provider};
+    use tokio::sync::oneshot;
+
+    use super::*;
+
+    fn make_server_with_provider(provider: Arc<dyn Provider>) -> Arc<AgentServer> {
+        let core: Arc<dyn AgentCore> = Arc::new(futures::executor::block_on(async {
+            AgentCoreNative::builder(Arc::new(agent_store::InMemoryStore::new()))
+                .with_provider("mock", provider)
+                .build()
+                .await
+                .unwrap()
+        }));
+        Arc::new(AgentServer::new(core))
+    }
+
+    async fn create_project(client: &reqwest::Client, base: &str) -> Project {
+        client
+            .post(format!("{base}/v1/projects"))
+            .json(&serde_json::json!({
+                "name": "agent-server-shutdown-test",
+            }))
+            .send()
+            .await
+            .unwrap()
+            .error_for_status()
+            .unwrap()
+            .json()
+            .await
+            .unwrap()
+    }
+
+    async fn create_session(client: &reqwest::Client, base: &str, project: &Project) -> Session {
+        client
+            .post(format!("{base}/v1/projects/{}/sessions", project.id))
+            .json(&serde_json::json!({}))
+            .send()
+            .await
+            .unwrap()
+            .error_for_status()
+            .unwrap()
+            .json()
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn graceful_shutdown_waits_for_in_flight_turns() {
+        let server = make_server_with_provider(Arc::new(MockProvider::new().with_delay(500)));
+        let router = build_router(server);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let base = format!("http://{addr}");
+        let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
+        let server_task = tokio::spawn(async move {
+            serve_listener_with_shutdown(listener, router, async move {
+                let _ = shutdown_rx.await;
+            })
+            .await
+            .unwrap();
+        });
+
+        let client = reqwest::Client::new();
+        let project = create_project(&client, &base).await;
+        let session = create_session(&client, &base, &project).await;
+
+        let turn_client = client.clone();
+        let turn_base = base.clone();
+        let turn_task = tokio::spawn(async move {
+            turn_client
+                .post(format!("{turn_base}/v1/sessions/{}/turns", session.id))
+                .json(&serde_json::json!({
+                    "input": [
+                        {
+                            "role": "user",
+                            "content": [{"type": "text", "text": "finish before shutdown"}]
+                        }
+                    ]
+                }))
+                .send()
+                .await
+                .unwrap()
+        });
+
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        shutdown_tx.send(()).unwrap();
+
+        let response = tokio::time::timeout(Duration::from_secs(5), turn_task)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(response.status().is_success());
+
+        tokio::time::timeout(Duration::from_secs(5), server_task)
+            .await
+            .unwrap()
+            .unwrap();
+
+        let shutdown_result = reqwest::Client::new()
+            .get(format!("{base}/v1/health"))
+            .send()
+            .await;
+        assert!(shutdown_result.is_err());
+    }
 }

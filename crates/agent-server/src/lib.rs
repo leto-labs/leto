@@ -7,7 +7,7 @@ mod types;
 #[cfg(test)]
 mod utils;
 
-pub use http::{build_router, serve};
+pub use http::{build_router, serve, serve_with_shutdown};
 pub use server::AgentServer;
 pub use types::{
     AgentInfoRecord, AgentServerStatus, CreateProjectRequest, CreateSessionRequest, ErrorBody,
