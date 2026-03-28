@@ -377,6 +377,41 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn ambiguous_models_are_not_routable_or_listed() {
+        let default = Arc::new(NamedMockProvider::new("default", "shared-model"));
+        let extra = Arc::new(NamedMockProvider::new("extra", "shared-model"));
+        let router = ProviderRouter::new("default", default).add_provider("extra", extra);
+
+        let resolved = router.resolve_model("shared-model");
+        assert!(matches!(
+            resolved,
+            Err(BrainError::Internal(message)) if message.contains("unknown or ambiguous model")
+        ));
+
+        let resolved_provider = router
+            .resolve_provider_name(&InferenceConfig {
+                provider: None,
+                model: Some("shared-model".into()),
+                reasoning: None,
+                max_tokens: None,
+                temperature: None,
+            })
+            .unwrap_err();
+        assert!(
+            resolved_provider
+                .to_string()
+                .contains("unknown or ambiguous model")
+        );
+
+        assert!(
+            router
+                .available_models()
+                .into_iter()
+                .all(|model| model.model.id != "shared-model")
+        );
+    }
+
+    #[tokio::test]
     async fn explicit_provider_must_exist() {
         let default = Arc::new(MockProvider::new());
         let router = ProviderRouter::new("mock", default);
