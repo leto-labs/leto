@@ -1315,6 +1315,27 @@ mod tests {
     }
 
     #[test]
+    fn info_reports_model_catalog_and_default_model() {
+        let provider = OpenAiProvider::new(crate::OpenAiConfigPreset::OPENAI.into_config("test"));
+        let info = provider.info();
+
+        assert_eq!(info.name, "openai");
+        assert_eq!(info.default_model_id.as_deref(), Some("gpt-4o-mini"));
+        assert_eq!(
+            info.default_model().map(|model| model.id.as_ref()),
+            Some("gpt-4o-mini")
+        );
+
+        let gpt_54 = info
+            .models
+            .iter()
+            .find(|model| model.id == "gpt-5.4")
+            .expect("gpt-5.4 should be listed");
+        assert_eq!(gpt_54.name.as_ref(), "GPT-5.4");
+        assert!(gpt_54.supports_reasoning());
+    }
+
+    #[test]
     fn maps_chat_finish_reason_length_to_max_tokens() {
         assert_eq!(
             map_openai_finish_reason("length".into()),
