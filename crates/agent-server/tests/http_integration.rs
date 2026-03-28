@@ -5,7 +5,7 @@ use std::{fs, path::Path};
 use agent_core::{AgentCore, AgentCoreNative, CoreEvent};
 use agent_core_remote::{
     CredentialHealthRecord, ErrorResponse, ProviderCatalogEntry, ProviderModelRecord,
-    UpdateCredentialHealthRequest,
+    TrajectoryRecord, UpdateCredentialHealthRequest,
 };
 use agent_runtime::RuntimeEvent;
 use agent_server::{AgentInfoRecord, AgentServer, AgentServerStatus, build_router};
@@ -643,6 +643,68 @@ async fn canonical_trajectory_route_round_trips() {
         .await
         .unwrap();
     assert_eq!(fetched, Some(trajectory));
+}
+
+#[tokio::test]
+async fn canonical_trajectories_route_lists_stored_trajectories() {
+    let base = start_server().await;
+    let client = reqwest::Client::new();
+
+    let project = create_project(&client, &base).await;
+    let first_session = create_session(&client, &base, &project).await;
+    let second_session = create_session(&client, &base, &project).await;
+    let first_trajectory = sample_trajectory(&first_session);
+    let second_trajectory = sample_trajectory(&second_session);
+
+    client
+        .put(format!(
+            "{base}/v1/sessions/{}/trajectory",
+            first_session.id
+        ))
+        .json(&first_trajectory)
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap();
+
+    client
+        .put(format!(
+            "{base}/v1/sessions/{}/trajectory",
+            second_session.id
+        ))
+        .json(&second_trajectory)
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap();
+
+    let mut trajectories: Vec<TrajectoryRecord> = client
+        .get(format!("{base}/v1/trajectories"))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    trajectories.sort_by_key(|record| record.session_id);
+
+    let mut expected = vec![
+        TrajectoryRecord {
+            session_id: first_session.id,
+            trajectory: first_trajectory,
+        },
+        TrajectoryRecord {
+            session_id: second_session.id,
+            trajectory: second_trajectory,
+        },
+    ];
+    expected.sort_by_key(|record| record.session_id);
+
+    assert_eq!(trajectories, expected);
 }
 
 #[tokio::test]
