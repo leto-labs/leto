@@ -28,6 +28,7 @@ fn output_text_delta_maps_to_agent_message_chunk() {
         updates.as_slice(),
         [acp::SessionUpdate::AgentMessageChunk(acp::ContentChunk {
             content: acp::ContentBlock::Text(text),
+            ..
         })] if text.text == "hello"
     ));
 }
@@ -60,8 +61,8 @@ fn tool_events_map_to_pending_and_completed_updates() {
     assert!(matches!(
         pending_updates.as_slice(),
         [acp::SessionUpdate::ToolCall(tool_call)]
-            if tool_call.id.0 == "call-1"
-                && matches!(tool_call.status, Some(acp::ToolCallStatus::InProgress))
+            if tool_call.tool_call_id.0.as_ref() == "call-1"
+                && matches!(tool_call.status, acp::ToolCallStatus::InProgress)
     ));
 
     let MappedEvent::Updates(completed_updates) = completed else {
@@ -70,7 +71,8 @@ fn tool_events_map_to_pending_and_completed_updates() {
     assert!(matches!(
         completed_updates.as_slice(),
         [acp::SessionUpdate::ToolCallUpdate(update)]
-            if update.tool_call_id.0 == "call-1"
+            if update.tool_call_id.0.as_ref() == "call-1"
+                && matches!(update.fields.status, Some(acp::ToolCallStatus::Completed))
     ));
 }
 
@@ -108,18 +110,21 @@ fn replay_updates_converts_stored_message_blocks_to_chunks() {
         updates.get(1),
         Some(acp::SessionUpdate::UserMessageChunk(acp::ContentChunk {
             content: acp::ContentBlock::Text(text),
+            ..
         })) if text.text == "hello"
     ));
     assert!(matches!(
         updates.get(2),
         Some(acp::SessionUpdate::UserMessageChunk(acp::ContentChunk {
             content: acp::ContentBlock::Text(text),
+            ..
         })) if text.text == "[image:https://example.com/cat.png]"
     ));
     assert!(matches!(
         updates.get(3),
         Some(acp::SessionUpdate::AgentMessageChunk(acp::ContentChunk {
             content: acp::ContentBlock::Text(text),
+            ..
         })) if text.text == "thinking"
     ));
 }
