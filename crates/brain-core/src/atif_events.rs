@@ -293,7 +293,7 @@ fn build_steps(
                     model_name: model_name.clone(),
                     reasoning_effort: None,
                     message: assistant_step_message(message).into(),
-                    reasoning_content: message.reasoning_content.clone().map(Into::into),
+                    reasoning_content: message.reasoning_content.clone(),
                     tool_calls,
                     observation: (!observation_results.is_empty()).then_some(AtifObservation {
                         results: observation_results,

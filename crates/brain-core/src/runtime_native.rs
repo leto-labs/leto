@@ -229,7 +229,7 @@ impl BrainRuntime for BrainRuntimeNative {
                 .config
                 .agent
                 .loop_name
-                .or_else(|| Some(default_loop_name)))
+                .or(Some(default_loop_name)))
         })
     }
 
