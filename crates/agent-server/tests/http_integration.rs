@@ -1,3 +1,4 @@
+use std::env;
 use std::sync::Arc;
 use std::time::Duration;
 use std::{fs, path::Path};
@@ -1428,6 +1429,61 @@ async fn compat_config_provider_and_prompt_routes_are_real() {
         .await
         .unwrap();
     assert_eq!(prompt_async.status(), reqwest::StatusCode::NO_CONTENT);
+}
+
+#[tokio::test]
+async fn compat_file_routes_list_directory_and_read_file_content() {
+    let base = start_server().await;
+    let client = reqwest::Client::new();
+
+    let temp_root =
+        env::temp_dir().join(format!("agent-server-file-endpoint-{}", ulid::Ulid::new()));
+    let nested_dir = temp_root.join("nested");
+    let file_path = temp_root.join("notes.txt");
+    fs::create_dir_all(&nested_dir).unwrap();
+    fs::write(&file_path, "hello from compat file route\n").unwrap();
+
+    let file_list: serde_json::Value = client
+        .get(format!("{base}/v1/compat/opencode/file"))
+        .query(&[("path", temp_root.display().to_string())])
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    let entries = file_list.as_array().unwrap();
+    assert!(entries.iter().any(|entry| {
+        entry["name"] == "notes.txt"
+            && entry["absolute"] == serde_json::json!(file_path.display().to_string())
+            && entry["type"] == "file"
+    }));
+    assert!(entries.iter().any(|entry| {
+        entry["name"] == "nested"
+            && entry["absolute"] == serde_json::json!(nested_dir.display().to_string())
+            && entry["type"] == "directory"
+    }));
+
+    let file_content: serde_json::Value = client
+        .get(format!("{base}/v1/compat/opencode/file/content"))
+        .query(&[("path", file_path.display().to_string())])
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(file_content["type"], "text");
+    assert_eq!(file_content["content"], "hello from compat file route\n");
+    assert_eq!(file_content["mimeType"], "text/plain");
+
+    fs::remove_dir_all(&temp_root).unwrap();
 }
 
 #[tokio::test]
