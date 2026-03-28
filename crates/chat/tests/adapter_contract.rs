@@ -69,6 +69,21 @@ async fn default_edit_returns_explicit_unsupported_error() {
 }
 
 #[tokio::test]
+async fn default_delete_returns_explicit_unsupported_error() {
+    let adapter = DummyAdapter;
+    let message = MessageRef::new(ConversationRef::new("dummy", "conv-1"), "msg-1");
+
+    let error = adapter.delete(message).await.unwrap_err();
+    assert_eq!(
+        error,
+        Error::UnsupportedCapability {
+            adapter: "dummy".into(),
+            capability: "message_deletes",
+        }
+    );
+}
+
+#[tokio::test]
 async fn adapter_subscribe_returns_normalized_chat_event() {
     let adapter = DummyAdapter;
     let mut stream = adapter.subscribe().unwrap();
