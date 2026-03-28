@@ -32,6 +32,7 @@ impl IntoResponse for InvalidRequestError {
 pub fn build_router(server: Arc<AgentServer>) -> Router {
     Router::new()
         .route("/health", routing::get(routes::system::health))
+        .route("/metrics", routing::get(routes::system::metrics))
         .nest("/v1", canonical_router())
         .nest("/v1/compat/opencode", compat::opencode::router())
         .layer(
@@ -58,6 +59,7 @@ pub async fn serve(
 fn canonical_router() -> Router<AppState> {
     Router::new()
         .route("/health", routing::get(routes::system::health))
+        .route("/metrics", routing::get(routes::system::metrics))
         .route("/status", routing::get(routes::system::status))
         .route("/agents", routing::get(routes::system::list_agents))
         .route(

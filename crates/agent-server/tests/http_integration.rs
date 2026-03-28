@@ -182,6 +182,41 @@ async fn canonical_health_route_is_available() {
 }
 
 #[tokio::test]
+async fn metrics_routes_expose_prometheus_text_payload() {
+    let base = start_server().await;
+    let client = reqwest::Client::new();
+
+    let project = create_project(&client, &base).await;
+    let _session = create_session(&client, &base, &project).await;
+
+    for path in ["/metrics", "/v1/metrics"] {
+        let response = client
+            .get(format!("{base}{path}"))
+            .send()
+            .await
+            .unwrap()
+            .error_for_status()
+            .unwrap();
+
+        let content_type = response
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_owned();
+        let body = response.text().await.unwrap();
+
+        assert!(content_type.starts_with("text/plain"));
+        assert!(body.contains("# HELP agent_server_info"));
+        assert!(body.contains("agent_server_info{"));
+        assert!(body.contains("agent_server_provider_count 1"));
+        assert!(body.contains("agent_server_project_count 1"));
+        assert!(body.contains("agent_server_session_count 1"));
+    }
+}
+
+#[tokio::test]
 async fn runtime_status_returns_server_status() {
     let base = start_server().await;
     let client = reqwest::Client::new();
