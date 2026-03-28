@@ -85,6 +85,7 @@ fn canonical_router() -> Router<AppState> {
         )
         .route("/providers", routing::get(list_providers))
         .route("/models", routing::get(list_models))
+        .route("/models/{id}", routing::get(get_model))
         .route(
             "/sessions",
             routing::get(list_sessions).post(create_session_record),
@@ -332,6 +333,26 @@ async fn list_models(State(server): State<AppState>) -> Response {
             .collect::<Vec<_>>(),
     )
     .into_response()
+}
+
+async fn get_model(State(server): State<AppState>, Path(id): Path<String>) -> Response {
+    let core = server.core();
+    match core
+        .list_models()
+        .into_iter()
+        .find(|record| record.model.id == id)
+    {
+        Some(record) => Json(ProviderModelRecord::from(record)).into_response(),
+        None => (
+            StatusCode::NOT_FOUND,
+            Json(ErrorResponse::with_details(
+                "model_not_found",
+                format!("model not found: {id}"),
+                json!({ "id": id }),
+            )),
+        )
+            .into_response(),
+    }
 }
 
 async fn list_sessions(State(server): State<AppState>) -> Response {

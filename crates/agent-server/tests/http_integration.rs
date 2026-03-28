@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::{fs, path::Path};
 
 use agent_core::{AgentCore, AgentCoreNative};
-use agent_core_remote::{ProviderCatalogEntry, ProviderModelRecord};
+use agent_core_remote::{ErrorResponse, ProviderCatalogEntry, ProviderModelRecord};
 use agent_server::{AgentServer, build_router};
 use agent_store::{Project, Session};
 use provider::MockProvider;
@@ -271,6 +271,42 @@ async fn canonical_models_route_returns_provider_inventory() {
     assert_eq!(models.len(), 1);
     assert_eq!(models[0].provider_name, "mock");
     assert_eq!(models[0].model.id, "mock-echo");
+}
+
+#[tokio::test]
+async fn canonical_model_route_returns_model_by_id() {
+    let base = start_server().await;
+    let client = reqwest::Client::new();
+
+    let model: ProviderModelRecord = client
+        .get(format!("{base}/v1/models/mock-echo"))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(model.provider_name, "mock");
+    assert_eq!(model.model.id, "mock-echo");
+}
+
+#[tokio::test]
+async fn canonical_model_route_returns_not_found_for_unknown_id() {
+    let base = start_server().await;
+    let client = reqwest::Client::new();
+
+    let response = client
+        .get(format!("{base}/v1/models/does-not-exist"))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), reqwest::StatusCode::NOT_FOUND);
+    let error: ErrorResponse = response.json().await.unwrap();
+    assert_eq!(error.error.code, "model_not_found");
 }
 
 #[tokio::test]
