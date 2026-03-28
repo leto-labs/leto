@@ -15,6 +15,7 @@ members = [
     "crates/agent-core",
     "crates/agent-core-remote",
     "crates/agent-server",
+    "crates/agent-acp",
     "crates/provider-anthropic",
     "crates/provider-llamacpp",
     "crates/provider-mistralrs",
@@ -114,6 +115,7 @@ agent-store = { path = "crates/agent-store" }
 agent-core = { path = "crates/agent-core" }
 agent-core-remote = { path = "crates/agent-core-remote" }
 agent-server = { path = "crates/agent-server" }
+agent-acp = { path = "crates/agent-acp" }
 provider-anthropic = { path = "crates/provider-anthropic" }
 provider-llamacpp = { path = "crates/provider-llamacpp" }
 provider-mistralrs = { path = "crates/provider-mistralrs" }
