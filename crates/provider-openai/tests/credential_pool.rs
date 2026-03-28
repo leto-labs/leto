@@ -192,3 +192,58 @@ async fn openai_provider_rotates_after_pool_mark_error() {
     let first = entries.iter().find(|entry| entry.id == "cred-1").unwrap();
     assert!(first.health.consecutive_errors > 0);
 }
+
+#[tokio::test]
+async fn openai_provider_skips_tripped_credential_for_new_sessions() {
+    let pool = Arc::new(CredentialPool::new(Arc::new(StickyRoundRobin::new())));
+    pool.insert("openai", CredentialEntry::bearer("cred-1", "sk-one"))
+        .await;
+    pool.insert("openai", CredentialEntry::bearer("cred-2", "sk-two"))
+        .await;
+
+    let (first_base_url, first_request_rx) = spawn_mock_sse_server(created_only_sse_body()).await;
+    let mut first_request = Request::user_text("hello");
+    first_request.options.metadata.insert(
+        "session_id".into(),
+        serde_json::Value::String("session-a".into()),
+    );
+
+    let first_provider = OpenAiProvider::from_pool(
+        Config::new("placeholder").with_base_url(first_base_url),
+        pool.clone(),
+    );
+    let err = drain_to_terminal(&first_provider, &first_request)
+        .await
+        .unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("stream closed before terminal response event")
+    );
+
+    let first_wire_request = first_request_rx.await.unwrap().to_lowercase();
+    assert!(first_wire_request.contains("authorization: bearer sk-one"));
+
+    let (second_base_url, second_request_rx) = spawn_mock_sse_server(completed_sse_body()).await;
+    let mut second_request = Request::user_text("hello again");
+    second_request.options.metadata.insert(
+        "session_id".into(),
+        serde_json::Value::String("session-b".into()),
+    );
+
+    let second_provider = OpenAiProvider::from_pool(
+        Config::new("placeholder").with_base_url(second_base_url),
+        pool.clone(),
+    );
+    drain_to_terminal(&second_provider, &second_request)
+        .await
+        .unwrap();
+
+    let second_wire_request = second_request_rx.await.unwrap().to_lowercase();
+    assert!(second_wire_request.contains("authorization: bearer sk-two"));
+
+    let entries = pool.entries("openai").await;
+    let first = entries.iter().find(|entry| entry.id == "cred-1").unwrap();
+    let second = entries.iter().find(|entry| entry.id == "cred-2").unwrap();
+    assert!(!first.health.is_healthy());
+    assert!(second.health.is_healthy());
+}
