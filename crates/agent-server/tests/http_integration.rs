@@ -180,6 +180,45 @@ async fn canonical_agents_route_returns_agent_list() {
 }
 
 #[tokio::test]
+async fn canonical_mcp_tools_route_returns_agent_list() {
+    let base = start_server().await;
+    let client = reqwest::Client::new();
+
+    let tools: Vec<AgentInfoRecord> = client
+        .get(format!("{base}/v1/mcp/tools"))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    let names = tools
+        .iter()
+        .map(|tool| tool.name.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        names,
+        vec![
+            "plan",
+            "build",
+            "general",
+            "explore",
+            "title",
+            "summary",
+            "compaction",
+        ]
+    );
+    assert!(
+        tools
+            .iter()
+            .all(|tool| tool.description.as_deref() == Some(tool.name.as_str()))
+    );
+}
+
+#[tokio::test]
 async fn root_health_route_is_available() {
     let base = start_server().await;
     let client = reqwest::Client::new();

@@ -70,6 +70,7 @@ fn canonical_router() -> Router<AppState> {
         .route("/health", routing::get(health))
         .route("/status", routing::get(status))
         .route("/agents", routing::get(list_agents))
+        .route("/mcp/tools", routing::get(list_mcp_tools))
         .route("/events", routing::get(events))
         .route(
             "/projects",
@@ -164,6 +165,10 @@ async fn status(State(server): State<AppState>) -> Response {
 }
 
 async fn list_agents(State(server): State<AppState>) -> Response {
+    Json::<Vec<AgentInfoRecord>>(server.agent_info()).into_response()
+}
+
+async fn list_mcp_tools(State(server): State<AppState>) -> Response {
     Json::<Vec<AgentInfoRecord>>(server.agent_info()).into_response()
 }
 
