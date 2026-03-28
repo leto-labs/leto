@@ -435,6 +435,50 @@ mod tests {
     use super::*;
 
     #[test]
+    fn maps_system_and_developer_blocks_into_top_level_system_prompt() {
+        let request = Request {
+            messages: vec![
+                Message::new(
+                    MessageRole::System,
+                    vec![
+                        provider::ContentBlock::text("system instruction"),
+                        provider::ContentBlock::Reasoning {
+                            text: "internal guidance".into(),
+                        },
+                    ],
+                ),
+                Message::new(
+                    MessageRole::Developer,
+                    vec![provider::ContentBlock::Refusal {
+                        text: "developer refusal guidance".into(),
+                    }],
+                ),
+                Message::user_text("hello"),
+            ],
+            ..Request::default()
+        };
+
+        let mapped = AnthropicProvider::map_request(&request).unwrap();
+
+        assert_eq!(
+            mapped.system,
+            Some(crate::messages::SystemPrompt::Blocks(vec![
+                crate::messages::TextBlockParam::text("system instruction"),
+                crate::messages::TextBlockParam::text("internal guidance"),
+                crate::messages::TextBlockParam::text("developer refusal guidance"),
+            ]))
+        );
+        assert_eq!(mapped.messages.len(), 1);
+        assert_eq!(mapped.messages[0].role, AnthropicRole::User);
+        assert_eq!(
+            mapped.messages[0].content,
+            MessageContentParam::Blocks(vec![ContentBlockParam::Text {
+                text: "hello".into(),
+            }])
+        );
+    }
+
+    #[test]
     fn maps_tool_result_message_to_anthropic_tool_result_block() {
         let message = Message::new(
             MessageRole::User,
