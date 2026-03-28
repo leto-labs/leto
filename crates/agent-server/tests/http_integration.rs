@@ -23,6 +23,7 @@ use provider_openai::{
     AuditLogListParams, AuditLogPage, ChatCompletionObject, Client, Config, EmbeddingInput,
     EmbeddingRequest, VectorStoreCreateRequest, VideoCreateRequest,
 };
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 fn make_server() -> Arc<AgentServer> {
     make_server_with_provider(Arc::new(MockProvider::new()))
@@ -59,6 +60,81 @@ async fn start_server_with_provider(provider: Arc<dyn Provider>) -> String {
         axum::serve(listener, router).await.unwrap();
     });
     format!("http://{addr}")
+}
+
+struct BufferedTcpConnection {
+    stream: tokio::net::TcpStream,
+    pending: Vec<u8>,
+}
+
+impl BufferedTcpConnection {
+    async fn connect(addr: std::net::SocketAddr) -> Self {
+        Self {
+            stream: tokio::net::TcpStream::connect(addr).await.unwrap(),
+            pending: Vec::new(),
+        }
+    }
+
+    async fn send(&mut self, request: &str) {
+        self.stream.write_all(request.as_bytes()).await.unwrap();
+    }
+
+    async fn read_response(&mut self) -> CapturedHttpResponse {
+        let header_end = loop {
+            if let Some(index) = find_bytes(&self.pending, b"\r\n\r\n") {
+                break index;
+            }
+
+            let mut chunk = [0_u8; 1024];
+            let bytes_read = self.stream.read(&mut chunk).await.unwrap();
+            assert!(
+                bytes_read > 0,
+                "connection closed before response headers were read"
+            );
+            self.pending.extend_from_slice(&chunk[..bytes_read]);
+        };
+
+        let headers = std::str::from_utf8(&self.pending[..header_end]).unwrap();
+        let mut lines = headers.split("\r\n");
+        let status_line = lines.next().unwrap().to_owned();
+        let parsed_headers = lines
+            .filter_map(|line| line.split_once(':'))
+            .map(|(name, value)| (name.to_owned(), value.trim().to_owned()))
+            .collect::<Vec<_>>();
+        let content_length = parsed_headers
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case("content-length"))
+            .map(|(_, value)| value.parse::<usize>().unwrap())
+            .unwrap_or_default();
+
+        let body_start = header_end + 4;
+        let body_end = body_start + content_length;
+        while self.pending.len() < body_end {
+            let mut chunk = [0_u8; 1024];
+            let bytes_read = self.stream.read(&mut chunk).await.unwrap();
+            assert!(
+                bytes_read > 0,
+                "connection closed before response body was read"
+            );
+            self.pending.extend_from_slice(&chunk[..bytes_read]);
+        }
+
+        let body = self.pending[body_start..body_end].to_vec();
+        self.pending.drain(..body_end);
+
+        CapturedHttpResponse { status_line, body }
+    }
+}
+
+struct CapturedHttpResponse {
+    status_line: String,
+    body: Vec<u8>,
+}
+
+fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    haystack
+        .windows(needle.len())
+        .position(|window| window == needle)
 }
 
 struct RateLimitedProvider;
@@ -1080,6 +1156,37 @@ async fn canonical_providers_route_returns_provider_inventory() {
     assert_eq!(providers.len(), 1);
     assert_eq!(providers[0].name, "mock");
     assert_eq!(providers[0].model_ids, vec!["mock-echo".to_owned()]);
+}
+
+#[tokio::test]
+async fn canonical_health_route_supports_keep_alive_connection_reuse() {
+    let server = make_server();
+    let router = build_router(server);
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, router).await.unwrap();
+    });
+
+    let mut connection = BufferedTcpConnection::connect(addr).await;
+    let request = format!(
+        "GET /v1/health HTTP/1.1\r\nhost: {addr}\r\naccept: application/json\r\nconnection: keep-alive\r\n\r\n"
+    );
+
+    connection.send(&request).await;
+    let first_response = connection.read_response().await;
+    connection.send(&request).await;
+    let second_response = connection.read_response().await;
+
+    assert!(first_response.status_line.contains("200 OK"));
+    assert!(second_response.status_line.contains("200 OK"));
+
+    let first_health: HealthResponse = serde_json::from_slice(&first_response.body).unwrap();
+    let second_health: HealthResponse = serde_json::from_slice(&second_response.body).unwrap();
+    assert!(first_health.healthy);
+    assert!(second_health.healthy);
+    assert_eq!(first_health.version, env!("CARGO_PKG_VERSION"));
+    assert_eq!(second_health.version, env!("CARGO_PKG_VERSION"));
 }
 
 #[tokio::test]
