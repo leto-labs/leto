@@ -911,6 +911,80 @@ async fn canonical_batch_turns_endpoint_runs_turns_sequentially() {
 }
 
 #[tokio::test]
+async fn canonical_batch_turns_endpoint_emits_turn_lifecycle_events_in_order() {
+    let base = start_server().await;
+    let client = reqwest::Client::new();
+    let project = create_project(&client, &base).await;
+    let session = create_session(&client, &base, &project).await;
+
+    let response = client
+        .post(format!("{base}/v1/sessions/{}/batch-turns", session.id))
+        .json(&serde_json::json!({
+            "turns": [
+                {
+                    "input": [
+                        {
+                            "role": "user",
+                            "content": [{"type": "text", "text": "first ordered batch turn"}]
+                        }
+                    ]
+                },
+                {
+                    "input": [
+                        {
+                            "role": "user",
+                            "content": [{"type": "text", "text": "second ordered batch turn"}]
+                        }
+                    ]
+                }
+            ]
+        }))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap();
+
+    let lifecycle = parse_ndjson_events(&response.text().await.unwrap())
+        .into_iter()
+        .filter_map(|event| match event {
+            CoreEvent::Turn {
+                session_id,
+                event:
+                    RuntimeEvent::TurnStarted {
+                        session_id: started_session_id,
+                        turn_index,
+                    },
+            } if session_id == session.id && started_session_id == session.id => {
+                Some(("started", turn_index))
+            }
+            CoreEvent::Turn {
+                session_id,
+                event:
+                    RuntimeEvent::TurnFinished {
+                        session_id: finished_session_id,
+                        turn_index,
+                        ..
+                    },
+            } if session_id == session.id && finished_session_id == session.id => {
+                Some(("finished", turn_index))
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        lifecycle,
+        vec![
+            ("started", 1_u64),
+            ("finished", 1_u64),
+            ("started", 1_u64),
+            ("finished", 1_u64),
+        ]
+    );
+}
+
+#[tokio::test]
 async fn canonical_tool_calls_route_appends_tool_call_history() {
     let base = start_server().await;
     let client = reqwest::Client::new();
