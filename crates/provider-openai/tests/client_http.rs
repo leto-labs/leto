@@ -185,6 +185,60 @@ async fn spawn_connection_reuse_http_server() -> (String, oneshot::Receiver<Vec<
     (format!("http://{addr}/v1"), rx)
 }
 
+async fn spawn_resilient_http_server() -> (String, oneshot::Receiver<Vec<CapturedRequest>>) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let (tx, rx) = oneshot::channel();
+
+    tokio::spawn(async move {
+        let mut requests = Vec::with_capacity(2);
+
+        for (status_line, response_body) in [
+            (
+                "500 Internal Server Error",
+                serde_json::json!({
+                    "error": {
+                        "message": "transient upstream failure",
+                        "type": "server_error"
+                    }
+                })
+                .to_string(),
+            ),
+            (
+                "200 OK",
+                serde_json::json!({
+                    "id": "resp_recovered",
+                    "object": "response",
+                    "status": "completed",
+                    "output": [],
+                    "usage": {
+                        "input_tokens": 1,
+                        "output_tokens": 1,
+                        "total_tokens": 2
+                    }
+                })
+                .to_string(),
+            ),
+        ] {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let request = read_http_request(&mut socket).await;
+            requests.push(request);
+
+            let response = format!(
+                "HTTP/1.1 {status_line}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                response_body.len(),
+                response_body
+            );
+            socket.write_all(response.as_bytes()).await.unwrap();
+            socket.shutdown().await.unwrap();
+        }
+
+        let _ = tx.send(requests);
+    });
+
+    (format!("http://{addr}/v1"), rx)
+}
+
 #[tokio::test]
 async fn create_response_sends_expected_headers_and_defaults() {
     let response_body = serde_json::json!({
@@ -624,6 +678,66 @@ async fn create_response_preserves_large_request_bodies() {
     assert_eq!(request_text.len(), oversized_text.len());
     assert_eq!(request_text, oversized_text);
     assert_eq!(response.id.as_deref(), Some("resp_large"));
+}
+
+#[tokio::test]
+async fn create_response_recovers_after_transient_http_failure() {
+    let (base_url, requests_rx) = spawn_resilient_http_server().await;
+    let client = Client::new(
+        Config::new("sk-test")
+            .with_base_url(base_url)
+            .with_model("gpt-test"),
+    );
+
+    let first_error = client
+        .responses()
+        .create(&ResponseRequest {
+            input: vec![ResponseInputItem::message(
+                ResponseInputRole::User,
+                vec![ResponseInputContentPart::input_text("first attempt")],
+            )],
+            ..ResponseRequest::default()
+        })
+        .await
+        .unwrap_err();
+
+    let second_response = client
+        .responses()
+        .create(&ResponseRequest {
+            input: vec![ResponseInputItem::message(
+                ResponseInputRole::User,
+                vec![ResponseInputContentPart::input_text("second attempt")],
+            )],
+            ..ResponseRequest::default()
+        })
+        .await
+        .unwrap();
+
+    match first_error {
+        Error::Inference(message) => {
+            assert_eq!(
+                message,
+                "500 Internal Server Error: transient upstream failure"
+            );
+        }
+        other => panic!("expected inference error, got {other:?}"),
+    }
+
+    let requests = requests_rx.await.unwrap();
+    assert_eq!(requests.len(), 2);
+    assert_eq!(second_response.id.as_deref(), Some("resp_recovered"));
+
+    let request_texts = requests
+        .iter()
+        .map(|request| {
+            request
+                .body
+                .pointer("/input/0/content/0/text")
+                .and_then(Value::as_str)
+                .unwrap()
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(request_texts, vec!["first attempt", "second attempt"]);
 }
 
 #[tokio::test]
