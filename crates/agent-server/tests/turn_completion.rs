@@ -1,21 +1,24 @@
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use agent_core::{AgentCore, AgentCoreNative, CoreEvent};
 use agent_runtime::RuntimeEvent;
 use agent_server::{AgentServer, build_router};
-use agent_store::{Project, Session, StoredMessage};
+use agent_store::{Project, ProjectConfig, Session, StoredMessage};
 use futures::StreamExt;
-use provider::{FinishReason, MessageRole, MockProvider};
+use provider::{
+    EventStream, FinishReason, MessageRole, MockProvider, Provider, ProviderInfo, Request,
+};
 
 fn make_server() -> Arc<AgentServer> {
-    make_server_with_provider(MockProvider::new())
+    make_server_with_provider(Arc::new(MockProvider::new()))
 }
 
-fn make_server_with_provider(provider: MockProvider) -> Arc<AgentServer> {
+fn make_server_with_provider(provider: Arc<dyn Provider>) -> Arc<AgentServer> {
     let core: Arc<dyn AgentCore> = Arc::new(futures::executor::block_on(async {
         AgentCoreNative::builder(Arc::new(agent_store::InMemoryStore::new()))
-            .with_provider("mock", Arc::new(provider))
+            .with_provider("mock", provider)
             .build()
             .await
             .unwrap()
@@ -34,7 +37,7 @@ async fn start_server() -> String {
     format!("http://{addr}")
 }
 
-async fn start_server_with_provider(provider: MockProvider) -> String {
+async fn start_server_with_provider(provider: Arc<dyn Provider>) -> String {
     let server = make_server_with_provider(provider);
     let router = build_router(server);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -46,9 +49,20 @@ async fn start_server_with_provider(provider: MockProvider) -> String {
 }
 
 async fn create_project(client: &reqwest::Client, base: &str) -> Project {
+    create_project_with_config(client, base, ProjectConfig::default()).await
+}
+
+async fn create_project_with_config(
+    client: &reqwest::Client,
+    base: &str,
+    config: ProjectConfig,
+) -> Project {
     client
         .post(format!("{base}/v1/projects"))
-        .json(&serde_json::json!({"name": "agent-server-turn-test"}))
+        .json(&serde_json::json!({
+            "name": "agent-server-turn-test",
+            "config": config,
+        }))
         .send()
         .await
         .unwrap()
@@ -173,6 +187,41 @@ fn parse_sse_events(body: &str) -> Vec<CoreEvent> {
     }
 
     events
+}
+
+struct RetryOnceProvider {
+    attempts: AtomicUsize,
+    fallback: MockProvider,
+}
+
+impl RetryOnceProvider {
+    fn new() -> Self {
+        Self {
+            attempts: AtomicUsize::new(0),
+            fallback: MockProvider::new(),
+        }
+    }
+}
+
+impl Provider for RetryOnceProvider {
+    fn stream<'a>(
+        &'a self,
+        request: &'a Request,
+    ) -> futures::future::BoxFuture<'a, Result<EventStream<'a>, provider::Error>> {
+        Box::pin(async move {
+            if self.attempts.fetch_add(1, Ordering::SeqCst) == 0 {
+                return Err(provider::Error::Inference(
+                    "429 Too Many Requests: request throttled, retry after 30 seconds".into(),
+                ));
+            }
+
+            self.fallback.stream(request).await
+        })
+    }
+
+    fn info(&self) -> ProviderInfo {
+        self.fallback.info()
+    }
 }
 
 async fn read_sse_events_until<F>(response: reqwest::Response, predicate: F) -> Vec<CoreEvent>
@@ -396,8 +445,70 @@ async fn post_stream_turns_streams_sse_until_turn_finished() {
 }
 
 #[tokio::test]
+async fn post_turns_emits_retry_event_before_turn_finished() {
+    let base = start_server_with_provider(Arc::new(RetryOnceProvider::new())).await;
+    let client = reqwest::Client::new();
+    let mut project_config = ProjectConfig::default();
+    project_config.runtime.max_retries = 1;
+    project_config.runtime.retry_backoff_ms = 0;
+    let project = create_project_with_config(&client, &base, project_config).await;
+    let session = create_session(&client, &base, &project).await;
+
+    let response = post_turn(&client, &base, &session, "hello after retry").await;
+
+    assert_eq!(response.status(), reqwest::StatusCode::OK);
+
+    let events = parse_ndjson_events(&response.text().await.unwrap());
+    assert!(events.iter().any(|event| {
+        matches!(
+            event,
+            CoreEvent::Turn {
+                session_id,
+                event: RuntimeEvent::Retry { attempt, max, error },
+            } if *session_id == session.id
+                && *attempt == 1
+                && *max == 2
+                && error.contains("retry after 30 seconds")
+        )
+    }));
+    assert!(matches!(
+        events.last(),
+        Some(CoreEvent::Turn {
+            session_id,
+            event: RuntimeEvent::TurnFinished {
+                session_id: finished_session_id,
+                finish_reason: Some(FinishReason::Stop),
+                ..
+            },
+        }) if *session_id == session.id && *finished_session_id == session.id
+    ));
+
+    let messages: Vec<StoredMessage> = client
+        .get(format!("{base}/v1/sessions/{}/messages", session.id))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(messages.len(), 2);
+    assert_eq!(messages[0].message.role, MessageRole::User);
+    assert_eq!(messages[0].message.plain_text_lossy(), "hello after retry");
+    assert_eq!(messages[1].message.role, MessageRole::Assistant);
+    assert!(
+        messages[1]
+            .message
+            .plain_text_lossy()
+            .contains("hello after retry")
+    );
+}
+
+#[tokio::test]
 async fn post_cancel_cancels_active_turn() {
-    let base = start_server_with_provider(MockProvider::new().with_delay(250)).await;
+    let base = start_server_with_provider(Arc::new(MockProvider::new().with_delay(250))).await;
     let client = reqwest::Client::new();
     let project = create_project(&client, &base).await;
     let session = create_session(&client, &base, &project).await;
