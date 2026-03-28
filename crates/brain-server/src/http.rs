@@ -60,6 +60,7 @@ pub fn build_router(server: Arc<BrainServer>) -> Router {
         .route("/sessions/{id}/cancel", routing::post(cancel_turn))
         // Providers & credentials
         .route("/providers", routing::get(list_providers))
+        .route("/v1/models", routing::get(list_models))
         .route("/credentials", routing::get(list_credentials))
         .route(
             "/credentials/{name}",
@@ -279,6 +280,13 @@ async fn cancel_turn(State(server): State<AppState>, Path(id): Path<String>) -> 
 // -- Providers & credentials --
 
 async fn list_providers(State(server): State<AppState>) -> Response {
+    match server.list_providers().await {
+        Ok(providers) => Json(providers).into_response(),
+        Err(e) => error_response(e),
+    }
+}
+
+async fn list_models(State(server): State<AppState>) -> Response {
     match server.list_providers().await {
         Ok(providers) => Json(providers).into_response(),
         Err(e) => error_response(e),

@@ -21,7 +21,7 @@ impl ServerEvent {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct ServerStatus {
     pub providers: Vec<ProviderInfo>,
     pub tools: Vec<String>,
