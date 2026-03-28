@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
@@ -8,7 +9,8 @@ use agent_server::{AgentServer, build_router};
 use agent_store::{Project, ProjectConfig, Session, StoredMessage};
 use futures::StreamExt;
 use provider::{
-    EventStream, FinishReason, MessageRole, MockProvider, Provider, ProviderInfo, Request,
+    Block, BlockKind, Event, EventStream, FinishReason, MessageRole, MockProvider, ModelInfo,
+    Provider, ProviderCapabilities, ProviderInfo, Request, StreamGranularity, Usage,
 };
 
 fn make_server() -> Arc<AgentServer> {
@@ -16,12 +18,20 @@ fn make_server() -> Arc<AgentServer> {
 }
 
 fn make_server_with_provider(provider: Arc<dyn Provider>) -> Arc<AgentServer> {
+    make_server_with_providers(vec![("mock", provider)], "mock")
+}
+
+fn make_server_with_providers(
+    providers: Vec<(&str, Arc<dyn Provider>)>,
+    default_provider: &str,
+) -> Arc<AgentServer> {
     let core: Arc<dyn AgentCore> = Arc::new(futures::executor::block_on(async {
-        AgentCoreNative::builder(Arc::new(agent_store::InMemoryStore::new()))
-            .with_provider("mock", provider)
-            .build()
-            .await
-            .unwrap()
+        let mut builder = AgentCoreNative::builder(Arc::new(agent_store::InMemoryStore::new()))
+            .default_provider(default_provider);
+        for (name, provider) in providers {
+            builder = builder.with_provider(name, provider);
+        }
+        builder.build().await.unwrap()
     }));
     Arc::new(AgentServer::new(core))
 }
@@ -39,6 +49,20 @@ async fn start_server() -> String {
 
 async fn start_server_with_provider(provider: Arc<dyn Provider>) -> String {
     let server = make_server_with_provider(provider);
+    let router = build_router(server);
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, router).await.unwrap();
+    });
+    format!("http://{addr}")
+}
+
+async fn start_server_with_providers(
+    providers: Vec<(&str, Arc<dyn Provider>)>,
+    default_provider: &str,
+) -> String {
+    let server = make_server_with_providers(providers, default_provider);
     let router = build_router(server);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -187,6 +211,99 @@ fn parse_sse_events(body: &str) -> Vec<CoreEvent> {
     }
 
     events
+}
+
+struct TaggedProvider {
+    tag: &'static str,
+}
+
+impl TaggedProvider {
+    fn new(tag: &'static str) -> Self {
+        Self { tag }
+    }
+}
+
+impl Provider for TaggedProvider {
+    fn stream<'a>(
+        &'a self,
+        request: &'a Request,
+    ) -> futures::future::BoxFuture<'a, Result<EventStream<'a>, provider::Error>> {
+        Box::pin(async move {
+            let block_id = format!("{}-text-1", self.tag);
+            let item_id = format!("{}-item-1", self.tag);
+            let response_id = format!("{}-response-1", self.tag);
+            let default_model_id = format!("{}-echo", self.tag);
+            let text = format!(
+                "{}: {}",
+                self.tag,
+                request.last_user_text_lossy().unwrap_or_default()
+            );
+
+            Ok(Box::pin(futures::stream::iter(vec![
+                Ok(Event::ResponseStart {
+                    response_id: Some(response_id.clone()),
+                    model: Some(request.model.clone().unwrap_or(default_model_id)),
+                }),
+                Ok(Event::BlockStart {
+                    block: Block {
+                        id: block_id.clone(),
+                        output_index: 0,
+                        kind: BlockKind::Text,
+                        item_id: Some(item_id),
+                    },
+                }),
+                Ok(Event::text_delta(block_id.clone(), text)),
+                Ok(Event::BlockStop { id: block_id }),
+                Ok(Event::Usage {
+                    usage: Usage::with_totals(Some(1), Some(1)),
+                }),
+                Ok(Event::Completed {
+                    response_id: Some(response_id),
+                    finish_reason: Some(FinishReason::Stop),
+                }),
+            ])) as EventStream<'a>)
+        })
+    }
+
+    fn info(&self) -> ProviderInfo {
+        ProviderInfo {
+            name: self.tag.into(),
+            default_model_id: Some(format!("{}-echo", self.tag)),
+            capabilities: ProviderCapabilities {
+                system_messages: true,
+                developer_messages: true,
+                input_text: true,
+                input_image_urls: false,
+                tool_calls: false,
+                tool_results: false,
+                reasoning_blocks: false,
+                refusal_blocks: false,
+                tool_call_argument_deltas: false,
+                parallel_tool_calls: false,
+                stream_granularity: StreamGranularity::Block,
+            },
+            models: vec![ModelInfo {
+                id: Cow::Owned(format!("{}-echo", self.tag)),
+                name: Cow::Owned(format!("{} echo", self.tag)),
+                family: Some(Cow::Borrowed("mock")),
+                reasoning_efforts: Cow::Borrowed(&[]),
+                tool_call: false,
+                attachment: false,
+                structured_output: Some(false),
+                temperature: Some(true),
+                knowledge: None,
+                release_date: None,
+                last_updated: None,
+                open_weights: None,
+                input_modalities: Cow::Borrowed(&["text"]),
+                output_modalities: Cow::Borrowed(&["text"]),
+                cost: None,
+                limit: None,
+                status: None,
+                capabilities: None,
+            }],
+        }
+    }
 }
 
 struct RetryOnceProvider {
@@ -384,6 +501,59 @@ async fn post_turns_allows_follow_up_turn_after_completion() {
             .message
             .plain_text_lossy()
             .contains("second turn")
+    );
+}
+
+#[tokio::test]
+async fn post_turns_fall_back_to_project_default_provider_when_session_provider_is_absent() {
+    let base = start_server_with_providers(
+        vec![
+            ("primary", Arc::new(TaggedProvider::new("primary"))),
+            ("fallback", Arc::new(TaggedProvider::new("fallback"))),
+        ],
+        "primary",
+    )
+    .await;
+    let client = reqwest::Client::new();
+    let mut project_config = ProjectConfig::default();
+    project_config.default_provider = Some("fallback".into());
+    let project = create_project_with_config(&client, &base, project_config).await;
+    let session = create_session(&client, &base, &project).await;
+
+    let response = post_turn(&client, &base, &session, "hello fallback").await;
+
+    assert_eq!(response.status(), reqwest::StatusCode::OK);
+
+    let events = parse_ndjson_events(&response.text().await.unwrap());
+    assert!(matches!(
+        events.last(),
+        Some(CoreEvent::Turn {
+            session_id,
+            event: RuntimeEvent::TurnFinished {
+                session_id: finished_session_id,
+                finish_reason: Some(FinishReason::Stop),
+                ..
+            },
+        }) if *session_id == session.id && *finished_session_id == session.id
+    ));
+
+    let messages: Vec<StoredMessage> = client
+        .get(format!("{base}/v1/sessions/{}/messages", session.id))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(messages.len(), 2);
+    assert_eq!(messages[0].message.role, MessageRole::User);
+    assert_eq!(messages[1].message.role, MessageRole::Assistant);
+    assert_eq!(
+        messages[1].message.plain_text_lossy(),
+        "fallback: hello fallback"
     );
 }
 
