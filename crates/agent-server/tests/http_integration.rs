@@ -7,7 +7,7 @@ use agent_core_remote::{
     UpdateCredentialHealthRequest,
 };
 use agent_runtime::RuntimeEvent;
-use agent_server::{AgentServer, AgentServerStatus, build_router};
+use agent_server::{AgentInfoRecord, AgentServer, AgentServerStatus, build_router};
 use agent_store::{CredentialEntry, CredentialHealth, Project, Session, StoredMessage};
 use provider::{ContentBlock, FinishReason, MessageRole, MockProvider};
 use provider_openai::ChatCompletionObject;
@@ -138,6 +138,45 @@ async fn runtime_status_returns_server_status() {
     assert!(status.loop_names.contains(&status.default_loop_name));
     assert_eq!(status.project_count, 1);
     assert_eq!(status.session_count, 1);
+}
+
+#[tokio::test]
+async fn canonical_agents_route_returns_agent_list() {
+    let base = start_server().await;
+    let client = reqwest::Client::new();
+
+    let agents: Vec<AgentInfoRecord> = client
+        .get(format!("{base}/v1/agents"))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    let names = agents
+        .iter()
+        .map(|agent| agent.name.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        names,
+        vec![
+            "plan",
+            "build",
+            "general",
+            "explore",
+            "title",
+            "summary",
+            "compaction",
+        ]
+    );
+    assert!(
+        agents
+            .iter()
+            .all(|agent| agent.description.as_deref() == Some(agent.name.as_str()))
+    );
 }
 
 #[tokio::test]

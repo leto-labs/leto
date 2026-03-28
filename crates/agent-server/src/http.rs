@@ -128,7 +128,10 @@ fn canonical_router() -> Router<AppState> {
             "/sessions/{id}/batch-turns",
             routing::post(start_batch_turns),
         )
-        .route("/sessions/{id}/tool-calls", routing::post(append_tool_calls))
+        .route(
+            "/sessions/{id}/tool-calls",
+            routing::post(append_tool_calls),
+        )
         .route("/sessions/{id}/cancel", routing::post(cancel_turn))
         .route("/credentials", routing::get(list_credentials))
         .route("/credentials/health", routing::get(list_credential_health))

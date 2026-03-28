@@ -4,7 +4,17 @@ use agent_core::AgentCore;
 use agent_store::StoreError;
 
 use crate::compat::opencode::state::CompatState;
-use crate::types::AgentServerStatus;
+use crate::types::{AgentInfoRecord, AgentServerStatus};
+
+const BUILTIN_AGENT_NAMES: &[&str] = &[
+    "plan",
+    "build",
+    "general",
+    "explore",
+    "title",
+    "summary",
+    "compaction",
+];
 
 /// Hosted server state for the canonical and compatibility HTTP surfaces.
 #[derive(Clone)]
@@ -42,5 +52,15 @@ impl AgentServer {
             project_count: core.store().projects().list().await?.len(),
             session_count: core.store().sessions().list().await?.len(),
         })
+    }
+
+    pub(crate) fn agent_info(&self) -> Vec<AgentInfoRecord> {
+        BUILTIN_AGENT_NAMES
+            .iter()
+            .map(|name| AgentInfoRecord {
+                name: (*name).to_owned(),
+                description: Some((*name).to_owned()),
+            })
+            .collect()
     }
 }

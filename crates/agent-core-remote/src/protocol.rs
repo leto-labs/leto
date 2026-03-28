@@ -34,6 +34,16 @@ pub struct AgentServerStatus {
     pub session_count: usize,
 }
 
+/// Lightweight agent inventory entry exposed by the canonical API.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentInfoRecord {
+    /// Stable agent identifier.
+    pub name: String,
+    /// Human-readable summary when available.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+}
+
 /// Request body for creating a project.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct CreateProjectRequest {

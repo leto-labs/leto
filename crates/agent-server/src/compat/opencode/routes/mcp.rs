@@ -286,35 +286,28 @@ async fn command_list(
     Json(commands).into_response()
 }
 
-async fn agent_list(Query(_query): Query<CompatQuery>) -> Response {
+async fn agent_list(State(server): State<AppState>, Query(_query): Query<CompatQuery>) -> Response {
     Json(
-        vec![
-            "plan",
-            "build",
-            "general",
-            "explore",
-            "title",
-            "summary",
-            "compaction",
-        ]
-        .into_iter()
-        .map(|name| AgentDoc {
-            name: name.to_owned(),
-            description: Some(name.to_owned()),
-            mode: AgentModeDoc::All,
-            native: None,
-            hidden: None,
-            top_p: None,
-            temperature: None,
-            color: None,
-            permission: PermissionRuleset(Vec::new()),
-            model: None,
-            variant: None,
-            prompt: None,
-            options: BTreeMap::new(),
-            steps: None,
-        })
-        .collect::<Vec<_>>(),
+        server
+            .agent_info()
+            .into_iter()
+            .map(|agent| AgentDoc {
+                name: agent.name,
+                description: agent.description,
+                mode: AgentModeDoc::All,
+                native: None,
+                hidden: None,
+                top_p: None,
+                temperature: None,
+                color: None,
+                permission: PermissionRuleset(Vec::new()),
+                model: None,
+                variant: None,
+                prompt: None,
+                options: BTreeMap::new(),
+                steps: None,
+            })
+            .collect::<Vec<_>>(),
     )
     .into_response()
 }
