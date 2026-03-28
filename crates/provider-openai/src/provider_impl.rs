@@ -1315,6 +1315,20 @@ mod tests {
     }
 
     #[test]
+    fn info_falls_back_to_first_supported_surface_when_mode_is_unsupported() {
+        let provider = OpenAiProvider::new(
+            crate::OpenAiConfigPreset::GEMINI
+                .into_config("test")
+                .with_api_surface_mode(crate::OpenAiApiMode::Responses),
+        );
+
+        let info = provider.info();
+
+        assert!(!info.capabilities.reasoning_blocks);
+        assert!(info.capabilities.tool_call_argument_deltas);
+    }
+
+    #[test]
     fn info_reports_model_catalog_and_default_model() {
         let provider = OpenAiProvider::new(crate::OpenAiConfigPreset::OPENAI.into_config("test"));
         let info = provider.info();
