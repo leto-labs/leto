@@ -274,6 +274,14 @@ fn completed_openai_sse_body_with_usage_details() -> String {
     .to_owned()
 }
 
+fn completed_openai_sse_body_with_token_tracking_aliases() -> String {
+    concat!(
+        "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_usage_aliases\",\"status\":\"completed\",\"output\":[],\"usage\":{\"prompt_tokens\":13,\"completion_tokens\":8,\"total_tokens\":21,\"prompt_tokens_details\":{\"cached_tokens\":5,\"cache_creation_tokens\":3},\"completion_tokens_details\":{\"reasoning_tokens\":6}}}}\n\n",
+        "data: [DONE]\n\n"
+    )
+    .to_owned()
+}
+
 fn created_only_openai_sse_body() -> String {
     "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_test\",\"status\":\"in_progress\",\"output\":[]}}\n\n".to_owned()
 }
@@ -1081,6 +1089,54 @@ async fn post_stream_turns_include_detailed_usage_stats_from_provider_completed_
             .to_lowercase()
             .contains("authorization: bearer sk-stream")
     );
+}
+
+#[tokio::test]
+async fn post_stream_turns_track_usage_from_prompt_and_completion_aliases() {
+    let _lock = OLLAMA_MOCK_SERVER_LOCK.lock().await;
+    let requests_rx =
+        spawn_ollama_mock_server(vec![completed_openai_sse_body_with_token_tracking_aliases()])
+            .await;
+
+    let store: Arc<dyn Store> = Arc::new(agent_store::InMemoryStore::new());
+    store
+        .credentials()
+        .create(
+            ("ollama".into(), "cred-1".into()),
+            CredentialEntry::api_key("Primary", "sk-stream"),
+        )
+        .await
+        .unwrap();
+
+    let core: Arc<dyn AgentCore> =
+        Arc::new(AgentCoreNative::build_default_local(store).await.unwrap());
+    let base = start_server_with_core(core).await;
+    let client = reqwest::Client::new();
+    let project = create_project(&client, &base).await;
+    let session = create_session(&client, &base, &project).await;
+
+    let response = post_stream_turn(&client, &base, &session, "track alias usage").await;
+
+    assert_eq!(response.status(), reqwest::StatusCode::OK);
+    let events = parse_sse_events(&response.text().await.unwrap());
+    assert!(events.iter().any(|event| {
+        matches!(
+            event,
+            CoreEvent::Turn {
+                session_id,
+                event: RuntimeEvent::Usage { usage },
+            } if *session_id == session.id
+                && usage.input_tokens == Some(13)
+                && usage.output_tokens == Some(8)
+                && usage.total_tokens == Some(21)
+                && usage.cache_read_tokens == Some(5)
+                && usage.cache_write_tokens == Some(3)
+                && usage.reasoning_tokens == Some(6)
+        )
+    }));
+
+    let requests = requests_rx.await.unwrap();
+    assert_eq!(requests.len(), 1);
 }
 
 #[tokio::test]
