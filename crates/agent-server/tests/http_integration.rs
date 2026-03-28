@@ -2,6 +2,7 @@ use std::sync::Arc;
 use std::{fs, path::Path};
 
 use agent_core::{AgentCore, AgentCoreNative};
+use agent_core_remote::ProviderModelRecord;
 use agent_server::{AgentServer, build_router};
 use agent_store::{Project, Session};
 use provider::MockProvider;
@@ -107,6 +108,27 @@ async fn canonical_project_and_session_routes_round_trip() {
         .await
         .unwrap();
     assert_eq!(fetched.id, session.id);
+}
+
+#[tokio::test]
+async fn canonical_models_route_returns_provider_inventory() {
+    let base = start_server().await;
+    let client = reqwest::Client::new();
+
+    let models: Vec<ProviderModelRecord> = client
+        .get(format!("{base}/v1/models"))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(models.len(), 1);
+    assert_eq!(models[0].provider_name, "mock");
+    assert_eq!(models[0].model.id, "mock-echo");
 }
 
 #[tokio::test]
