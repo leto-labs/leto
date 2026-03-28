@@ -56,6 +56,27 @@ async fn create_session(client: &reqwest::Client, base: &str, project: &Project)
         .unwrap()
 }
 
+async fn post_turn(
+    client: &reqwest::Client,
+    base: &str,
+    session: &Session,
+    text: &str,
+) -> reqwest::Response {
+    client
+        .post(format!("{base}/v1/sessions/{}/turns", session.id))
+        .json(&serde_json::json!({
+            "input": [
+                {
+                    "role": "user",
+                    "content": [{"type": "text", "text": text}]
+                }
+            ]
+        }))
+        .send()
+        .await
+        .unwrap()
+}
+
 fn parse_ndjson_events(body: &str) -> Vec<CoreEvent> {
     body.lines()
         .filter(|line| !line.trim().is_empty())
@@ -70,19 +91,7 @@ async fn post_turns_completes_turn_and_persists_assistant_message() {
     let project = create_project(&client, &base).await;
     let session = create_session(&client, &base, &project).await;
 
-    let response = client
-        .post(format!("{base}/v1/sessions/{}/turns", session.id))
-        .json(&serde_json::json!({
-            "input": [
-                {
-                    "role": "user",
-                    "content": [{"type": "text", "text": "hello canonical server"}]
-                }
-            ]
-        }))
-        .send()
-        .await
-        .unwrap();
+    let response = post_turn(&client, &base, &session, "hello canonical server").await;
 
     assert_eq!(response.status(), reqwest::StatusCode::OK);
     assert_eq!(
@@ -131,5 +140,68 @@ async fn post_turns_completes_turn_and_persists_assistant_message() {
             .message
             .plain_text_lossy()
             .contains("hello canonical server")
+    );
+}
+
+#[tokio::test]
+async fn post_turns_allows_follow_up_turn_after_completion() {
+    let base = start_server().await;
+    let client = reqwest::Client::new();
+    let project = create_project(&client, &base).await;
+    let session = create_session(&client, &base, &project).await;
+
+    let first = post_turn(&client, &base, &session, "first turn").await;
+    assert_eq!(first.status(), reqwest::StatusCode::OK);
+    let first_events = parse_ndjson_events(&first.text().await.unwrap());
+    assert!(matches!(
+        first_events.last(),
+        Some(CoreEvent::Turn {
+            session_id,
+            event: RuntimeEvent::TurnFinished {
+                session_id: finished_session_id,
+                finish_reason: Some(FinishReason::Stop),
+                ..
+            },
+        }) if *session_id == session.id && *finished_session_id == session.id
+    ));
+
+    let second = post_turn(&client, &base, &session, "second turn").await;
+    assert_eq!(second.status(), reqwest::StatusCode::OK);
+    let second_events = parse_ndjson_events(&second.text().await.unwrap());
+    assert!(matches!(
+        second_events.last(),
+        Some(CoreEvent::Turn {
+            session_id,
+            event: RuntimeEvent::TurnFinished {
+                session_id: finished_session_id,
+                finish_reason: Some(FinishReason::Stop),
+                ..
+            },
+        }) if *session_id == session.id && *finished_session_id == session.id
+    ));
+
+    let messages: Vec<StoredMessage> = client
+        .get(format!("{base}/v1/sessions/{}/messages", session.id))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(messages.len(), 4);
+    assert_eq!(messages[0].message.role, MessageRole::User);
+    assert_eq!(messages[0].message.plain_text_lossy(), "first turn");
+    assert_eq!(messages[1].message.role, MessageRole::Assistant);
+    assert_eq!(messages[2].message.role, MessageRole::User);
+    assert_eq!(messages[2].message.plain_text_lossy(), "second turn");
+    assert_eq!(messages[3].message.role, MessageRole::Assistant);
+    assert!(
+        messages[3]
+            .message
+            .plain_text_lossy()
+            .contains("second turn")
     );
 }
