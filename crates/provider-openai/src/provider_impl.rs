@@ -1315,6 +1315,26 @@ mod tests {
     }
 
     #[test]
+    fn provider_new_initializes_default_transport_and_model_state() {
+        let provider = OpenAiProvider::new(
+            Config::new("test")
+                .with_base_url("http://localhost:11434/v1")
+                .with_model("gpt-init"),
+        );
+
+        assert_eq!(provider.transport, ResponseStreamTransport::Sse);
+        assert!(provider.credential_pool.is_none());
+        assert_eq!(
+            provider.info().default_model_id.as_deref(),
+            Some("gpt-init")
+        );
+        assert_eq!(
+            provider.client.config().base_url,
+            "http://localhost:11434/v1"
+        );
+    }
+
+    #[test]
     fn info_falls_back_to_first_supported_surface_when_mode_is_unsupported() {
         let provider = OpenAiProvider::new(
             crate::OpenAiConfigPreset::GEMINI
