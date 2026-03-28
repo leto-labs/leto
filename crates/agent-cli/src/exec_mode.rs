@@ -3,13 +3,13 @@ use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use agent_core::{AgentCore, AgentCoreNative, CoreEvent, CoreError, ProviderModelInfo};
+use agent_core::{AgentCore, AgentCoreNative, CoreError, CoreEvent, ProviderModelInfo};
 use agent_runtime::{BlockDelta, Message, RuntimeEvent, Usage};
 use agent_store::{
     InMemoryStore, Project, ProjectConfig, SessionId, SessionUpdate, Store, resolve_project_config,
 };
 use anyhow::{Context, Result, bail};
-use atif::{Agent, FinalMetrics, Trajectory};
+use atif::Trajectory;
 use futures::StreamExt;
 use provider::{MockProvider, Provider};
 use provider_openai::{OpenAiApiMode, OpenAiConfigPreset, OpenAiProvider};
@@ -45,6 +45,78 @@ struct ExecUsageSummary {
     cache_write_tokens: Option<u32>,
     reasoning_tokens: Option<u32>,
     total_tokens: u32,
+}
+
+#[derive(Debug, Clone)]
+struct ExecAtifStarted {
+    schema_version: atif::SchemaVersion,
+    session_id: String,
+    agent: atif::Agent,
+}
+
+#[derive(Debug, Clone, Default)]
+struct ExecAtifState {
+    started: Option<ExecAtifStarted>,
+    steps: Vec<atif::Step>,
+    completed: Option<Trajectory>,
+}
+
+impl ExecAtifState {
+    fn observe(&mut self, event: &RuntimeEvent) {
+        match event {
+            RuntimeEvent::AtifTrajectoryStarted {
+                schema_version,
+                session_id,
+                agent,
+            } => {
+                self.started = Some(ExecAtifStarted {
+                    schema_version: *schema_version,
+                    session_id: session_id.clone(),
+                    agent: agent.clone(),
+                });
+            }
+            RuntimeEvent::AtifStepCompleted { step } => {
+                self.steps.push(step.clone());
+            }
+            RuntimeEvent::AtifTrajectoryCompleted { trajectory } => {
+                self.completed = Some(trajectory.clone());
+            }
+            _ => {}
+        }
+    }
+
+    fn build_trajectory(self) -> Result<Trajectory> {
+        let started = self
+            .started
+            .context("exec run did not emit ATIF trajectory start metadata")?;
+        let completed = self
+            .completed
+            .context("exec run did not emit a completed ATIF trajectory")?;
+
+        if completed.schema_version != started.schema_version {
+            bail!("completed ATIF trajectory schema version did not match the started event");
+        }
+        if completed.session_id != started.session_id {
+            bail!("completed ATIF trajectory session id did not match the started event");
+        }
+        if completed.agent != started.agent {
+            bail!("completed ATIF trajectory agent metadata did not match the started event");
+        }
+        if completed.steps != self.steps {
+            bail!("completed ATIF trajectory steps did not match the streamed ATIF step events");
+        }
+
+        Ok(Trajectory {
+            schema_version: started.schema_version,
+            session_id: started.session_id,
+            agent: started.agent,
+            steps: self.steps,
+            notes: completed.notes,
+            final_metrics: completed.final_metrics,
+            continued_trajectory_ref: completed.continued_trajectory_ref,
+            extra: completed.extra,
+        })
+    }
 }
 
 /// Runs one non-interactive exec session and writes benchmark artifacts.
@@ -110,13 +182,18 @@ pub async fn run_exec(command: ExecCommand) -> Result<()> {
     let mut iterations = None;
     let mut error_message = None::<String>;
     let mut saw_turn_done = false;
-    let mut assistant_output = String::new();
+    let mut atif_state = ExecAtifState::default();
 
     while let Some(event) = stream.next().await {
         serde_json::to_writer(&mut events_writer, &event).context("failed to serialize event")?;
         events_writer
             .write_all(b"\n")
             .context("failed to write event newline")?;
+
+        match &event {
+            CoreEvent::Turn { event, .. } => atif_state.observe(event),
+            _ => {}
+        }
 
         match event {
             CoreEvent::Turn {
@@ -126,7 +203,6 @@ pub async fn run_exec(command: ExecCommand) -> Result<()> {
                 if let BlockDelta::Text { text } = delta {
                     print!("{text}");
                     std::io::stdout().flush().ok();
-                    assistant_output.push_str(&text);
                 }
             }
             CoreEvent::Turn {
@@ -157,16 +233,14 @@ pub async fn run_exec(command: ExecCommand) -> Result<()> {
                 error_message = Some(message);
             }
             CoreEvent::Turn {
-                event:
-                    RuntimeEvent::TurnFinished {
-                        turn_index,
-                        ..
-                    },
+                event: RuntimeEvent::TurnFinished { turn_index, .. },
                 ..
             } => {
                 println!();
                 saw_turn_done = true;
-                iterations = u32::try_from(turn_index).ok().and_then(|value| value.checked_add(1));
+                iterations = u32::try_from(turn_index)
+                    .ok()
+                    .and_then(|value| value.checked_add(1));
             }
             CoreEvent::TurnCancelled { .. } => {
                 error_message.get_or_insert_with(|| "exec turn was cancelled".to_owned());
@@ -181,16 +255,13 @@ pub async fn run_exec(command: ExecCommand) -> Result<()> {
         .await
         .as_ref()
         .and_then(|model_info| compute_cost_usd(model_info, &usage));
-    let trajectory = build_exec_trajectory(
-        session.id,
-        &command.instruction,
-        &assistant_output,
-        &normalized_model,
-        &cwd,
-        Path::new("events.jsonl"),
-        &usage,
-        cost_usd,
-    );
+    let mut trajectory = atif_state.build_trajectory()?;
+    trajectory = augment_exec_trajectory(trajectory, &cwd, Path::new("events.jsonl"));
+    if let Some(final_metrics) = trajectory.final_metrics.as_mut()
+        && final_metrics.total_cost_usd.is_none()
+    {
+        final_metrics.total_cost_usd = cost_usd;
+    }
     trajectory
         .validate()
         .map_err(|error| anyhow::anyhow!("invalid ATIF trajectory: {error}"))?;
@@ -280,6 +351,7 @@ fn resolve_exec_config(root: &Path, provider: &str, model: &str, loop_name: &str
     config.default_model = Some(model.to_owned());
     config.default_loop = Some(loop_name.to_owned());
     config.runtime.model = Some(model.to_owned());
+    config.runtime.atif.emit_events = true;
     config
 }
 
@@ -306,9 +378,9 @@ fn summarize_usage(usage: Usage) -> ExecUsageSummary {
         cache_read_tokens: usage.cache_read_tokens,
         cache_write_tokens: usage.cache_write_tokens,
         reasoning_tokens: usage.reasoning_tokens,
-        total_tokens: usage.total_tokens.unwrap_or_else(|| {
-            usage.input_tokens.unwrap_or(0) + usage.output_tokens.unwrap_or(0)
-        }),
+        total_tokens: usage
+            .total_tokens
+            .unwrap_or_else(|| usage.input_tokens.unwrap_or(0) + usage.output_tokens.unwrap_or(0)),
     }
 }
 
@@ -317,88 +389,16 @@ async fn resolve_model_info(
     session_id: SessionId,
     provider_name: &str,
 ) -> Option<ProviderModelInfo> {
-    let model_id = core.current_model_id_for_session(session_id).await.ok().flatten()?;
+    let model_id = core
+        .current_model_id_for_session(session_id)
+        .await
+        .ok()
+        .flatten()?;
     core.list_models().into_iter().find(|info| {
         info.provider_name == provider_name
-            && (info.model.id == model_id || normalize_model_id(provider_name, &info.model.id) == model_id)
+            && (info.model.id == model_id
+                || normalize_model_id(provider_name, &info.model.id) == model_id)
     })
-}
-
-fn build_exec_trajectory(
-    session_id: SessionId,
-    instruction: &str,
-    assistant_output: &str,
-    model: &str,
-    project_root: &Path,
-    events_path: &Path,
-    usage: &ExecUsageSummary,
-    cost_usd: Option<f64>,
-) -> Trajectory {
-    let mut extra = serde_json::Map::new();
-    extra.insert(
-        "project_root".into(),
-        Value::String(project_root.display().to_string()),
-    );
-    extra.insert(
-        "events_path".into(),
-        Value::String(events_path.display().to_string()),
-    );
-
-    let mut steps = vec![atif::Step {
-        step_id: 1,
-        timestamp: None,
-        source: atif::StepSource::User,
-        model_name: None,
-        reasoning_effort: None,
-        message: instruction.to_owned().into(),
-        reasoning_content: None,
-        tool_calls: None,
-        observation: None,
-        metrics: None,
-        is_copied_context: None,
-        extra: None,
-    }];
-
-    if !assistant_output.is_empty() {
-        steps.push(atif::Step {
-            step_id: 2,
-            timestamp: None,
-            source: atif::StepSource::Agent,
-            model_name: Some(model.to_owned()),
-            reasoning_effort: None,
-            message: assistant_output.to_owned().into(),
-            reasoning_content: None,
-            tool_calls: None,
-            observation: None,
-            metrics: None,
-            is_copied_context: None,
-            extra: None,
-        });
-    }
-
-    Trajectory {
-        schema_version: atif::SchemaVersion::default(),
-        session_id: session_id.to_string(),
-        agent: Agent {
-            name: "agent".into(),
-            version: env!("CARGO_PKG_VERSION").into(),
-            model_name: Some(model.to_owned()),
-            tool_definitions: None,
-            extra: None,
-        },
-        final_metrics: Some(FinalMetrics {
-            total_prompt_tokens: usage.input_tokens,
-            total_completion_tokens: usage.output_tokens,
-            total_cached_tokens: usage.cache_read_tokens,
-            total_cost_usd: cost_usd,
-            total_steps: u32::try_from(steps.len()).ok(),
-            extra: None,
-        }),
-        steps,
-        notes: None,
-        continued_trajectory_ref: None,
-        extra: Some(extra),
-    }
 }
 
 fn normalize_model_id(provider: &str, model: &str) -> String {
@@ -439,6 +439,24 @@ fn write_json(path: &Path, value: &impl Serialize) -> Result<()> {
         .flush()
         .with_context(|| format!("failed to flush {}", path.display()))?;
     Ok(())
+}
+
+fn augment_exec_trajectory(
+    mut trajectory: Trajectory,
+    project_root: &Path,
+    events_path: &Path,
+) -> Trajectory {
+    let mut extra = trajectory.extra.take().unwrap_or_default();
+    extra.insert(
+        "project_root".into(),
+        Value::String(project_root.display().to_string()),
+    );
+    extra.insert(
+        "events_path".into(),
+        Value::String(events_path.display().to_string()),
+    );
+    trajectory.extra = Some(extra);
+    trajectory
 }
 
 fn compute_cost_usd(model_info: &ProviderModelInfo, usage: &ExecUsageSummary) -> Option<f64> {
@@ -523,6 +541,8 @@ impl Drop for WorkingDirectoryGuard {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
+    use ulid::Ulid;
 
     #[test]
     fn normalize_loop_name_preserves_legacy_kira_alias() {
@@ -544,5 +564,194 @@ mod tests {
             parse_api_surface_mode("chat-completions").unwrap(),
             OpenAiApiMode::ChatCompletions
         ));
+    }
+
+    #[test]
+    fn exec_atif_state_builds_trajectory_from_runtime_events() {
+        let session_id = Ulid::new().to_string();
+        let mut state = ExecAtifState::default();
+        let step = atif::Step {
+            step_id: 1,
+            timestamp: None,
+            source: atif::StepSource::User,
+            model_name: None,
+            reasoning_effort: None,
+            message: "hello".into(),
+            reasoning_content: None,
+            tool_calls: None,
+            observation: None,
+            metrics: None,
+            is_copied_context: None,
+            extra: None,
+        };
+
+        state.observe(&RuntimeEvent::AtifTrajectoryStarted {
+            schema_version: atif::SchemaVersion::V1_6,
+            session_id: session_id.clone(),
+            agent: atif::Agent {
+                name: "agent".into(),
+                version: env!("CARGO_PKG_VERSION").into(),
+                model_name: Some("mock-model".into()),
+                tool_definitions: None,
+                extra: None,
+            },
+        });
+        state.observe(&RuntimeEvent::AtifStepCompleted { step: step.clone() });
+        state.observe(&RuntimeEvent::AtifTrajectoryCompleted {
+            trajectory: Trajectory {
+                schema_version: atif::SchemaVersion::V1_6,
+                session_id: session_id.clone(),
+                agent: atif::Agent {
+                    name: "agent".into(),
+                    version: env!("CARGO_PKG_VERSION").into(),
+                    model_name: Some("mock-model".into()),
+                    tool_definitions: None,
+                    extra: None,
+                },
+                final_metrics: Some(atif::FinalMetrics {
+                    total_prompt_tokens: Some(1),
+                    total_completion_tokens: Some(2),
+                    total_cached_tokens: None,
+                    total_cost_usd: None,
+                    total_steps: Some(1),
+                    extra: Some(serde_json::Map::new()),
+                }),
+                steps: vec![step],
+                notes: None,
+                continued_trajectory_ref: None,
+                extra: None,
+            },
+        });
+
+        let trajectory = state.build_trajectory().expect("expected trajectory");
+        trajectory.validate().expect("trajectory should validate");
+        assert_eq!(trajectory.session_id, session_id);
+        assert_eq!(trajectory.steps.len(), 1);
+        assert_eq!(trajectory.agent.model_name.as_deref(), Some("mock-model"));
+    }
+
+    #[test]
+    fn exec_atif_state_rejects_step_mismatch_against_completed_payload() {
+        let session_id = Ulid::new().to_string();
+        let completed = Trajectory {
+            schema_version: atif::SchemaVersion::V1_6,
+            session_id: session_id.clone(),
+            agent: atif::Agent {
+                name: "agent".into(),
+                version: env!("CARGO_PKG_VERSION").into(),
+                model_name: Some("mock-model".into()),
+                tool_definitions: None,
+                extra: Some(
+                    json!({
+                        "provider": "mock"
+                    })
+                    .as_object()
+                    .expect("expected object")
+                    .clone(),
+                ),
+            },
+            final_metrics: None,
+            steps: vec![atif::Step {
+                step_id: 1,
+                timestamp: None,
+                source: atif::StepSource::User,
+                model_name: None,
+                reasoning_effort: None,
+                message: "hello".into(),
+                reasoning_content: None,
+                tool_calls: None,
+                observation: None,
+                metrics: None,
+                is_copied_context: None,
+                extra: None,
+            }],
+            notes: None,
+            continued_trajectory_ref: None,
+            extra: None,
+        };
+
+        let mut state = ExecAtifState::default();
+        state.observe(&RuntimeEvent::AtifTrajectoryStarted {
+            schema_version: atif::SchemaVersion::V1_6,
+            session_id,
+            agent: atif::Agent {
+                name: "ignored".into(),
+                version: "ignored".into(),
+                model_name: None,
+                tool_definitions: None,
+                extra: None,
+            },
+        });
+        state.observe(&RuntimeEvent::AtifTrajectoryCompleted {
+            trajectory: completed.clone(),
+        });
+
+        let error = state
+            .build_trajectory()
+            .expect_err("expected mismatch error");
+        assert!(
+            error
+                .to_string()
+                .contains("completed ATIF trajectory steps did not match")
+        );
+    }
+
+    #[test]
+    fn resolve_exec_config_enables_atif_event_emission() {
+        let temp = std::env::temp_dir().join(format!("agent-cli-exec-config-{}", Ulid::new()));
+        std::fs::create_dir_all(&temp).unwrap();
+        let config = resolve_exec_config(&temp, "mock", "mock-model", "simple");
+
+        assert!(config.runtime.atif.emit_events);
+        assert_eq!(config.default_provider.as_deref(), Some("mock"));
+        assert_eq!(config.default_model.as_deref(), Some("mock-model"));
+        assert_eq!(config.default_loop.as_deref(), Some("simple"));
+    }
+
+    #[test]
+    fn augment_exec_trajectory_adds_exec_metadata() {
+        let trajectory = augment_exec_trajectory(
+            Trajectory {
+                schema_version: atif::SchemaVersion::V1_6,
+                session_id: "session".into(),
+                agent: atif::Agent {
+                    name: "agent".into(),
+                    version: "0.1.0".into(),
+                    model_name: None,
+                    tool_definitions: None,
+                    extra: None,
+                },
+                final_metrics: None,
+                steps: vec![atif::Step {
+                    step_id: 1,
+                    timestamp: None,
+                    source: atif::StepSource::User,
+                    model_name: None,
+                    reasoning_effort: None,
+                    message: "hello".into(),
+                    reasoning_content: None,
+                    tool_calls: None,
+                    observation: None,
+                    metrics: None,
+                    is_copied_context: None,
+                    extra: None,
+                }],
+                notes: None,
+                continued_trajectory_ref: None,
+                extra: None,
+            },
+            Path::new("/tmp/project"),
+            Path::new("events.jsonl"),
+        );
+
+        let extra = trajectory.extra.expect("expected extra metadata");
+        assert_eq!(
+            extra.get("project_root").and_then(Value::as_str),
+            Some("/tmp/project")
+        );
+        assert_eq!(
+            extra.get("events_path").and_then(Value::as_str),
+            Some("events.jsonl")
+        );
     }
 }

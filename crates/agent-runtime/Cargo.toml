@@ -4,6 +4,8 @@ edition.workspace = true
 version.workspace = true
 
 [dependencies]
+atif = { workspace = true }
+chrono = { workspace = true }
 provider = { workspace = true }
 futures = { workspace = true }
 tokio = { workspace = true, features = ["sync", "rt", "time"] }

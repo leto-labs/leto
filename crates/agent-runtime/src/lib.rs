@@ -1,3 +1,4 @@
+mod atif;
 mod command;
 mod config;
 mod engine;

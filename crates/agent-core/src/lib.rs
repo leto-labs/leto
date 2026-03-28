@@ -769,6 +769,7 @@ impl AgentCoreNative {
                             Err(broadcast::error::RecvError::Lagged(_)) => continue,
                             Err(broadcast::error::RecvError::Closed) => break,
                         };
+                        core.persist_completed_trajectory(session_id, &event).await;
                         let is_terminal = matches!(
                             event,
                             RuntimeEvent::TurnFinished { .. }
@@ -905,6 +906,21 @@ impl AgentCoreNative {
                 session_id,
                 event: RuntimeEvent::Error {
                     message: format!("failed to update session timestamp: {error}"),
+                    recoverable: false,
+                },
+            });
+        }
+    }
+
+    async fn persist_completed_trajectory(&self, session_id: SessionId, event: &RuntimeEvent) {
+        let RuntimeEvent::AtifTrajectoryCompleted { trajectory } = event else {
+            return;
+        };
+        if let Err(error) = self.upsert_trajectory(session_id, trajectory.clone()).await {
+            self.emit(CoreEvent::Turn {
+                session_id,
+                event: RuntimeEvent::Error {
+                    message: format!("failed to persist trajectory: {error}"),
                     recoverable: false,
                 },
             });
@@ -1849,6 +1865,57 @@ max_tokens = 512
 
         let loaded = core.trajectory(session.id).await.unwrap().unwrap();
         assert_eq!(loaded.session_id, trajectory.session_id);
+    }
+
+    #[tokio::test]
+    async fn completed_trajectory_event_persists_through_core() {
+        let store = Arc::new(InMemoryStore::new());
+        let core = AgentCoreNative::builder(store.clone())
+            .with_provider("mock", Arc::new(MockProvider::new()))
+            .build()
+            .await
+            .unwrap();
+        let project = core
+            .resolve_or_create_project("/tmp/trajectory-event-core")
+            .await
+            .unwrap();
+        let session = core.create_session(project.id).await.unwrap();
+        let trajectory = sample_trajectory(session.id);
+
+        core.persist_completed_trajectory(
+            session.id,
+            &RuntimeEvent::AtifTrajectoryCompleted {
+                trajectory: trajectory.clone(),
+            },
+        )
+        .await;
+
+        let loaded = core.trajectory(session.id).await.unwrap().unwrap();
+        assert_eq!(loaded, trajectory);
+    }
+
+    #[tokio::test]
+    async fn persist_completed_trajectory_upserts_when_present() {
+        let store = Arc::new(InMemoryStore::new());
+        let core = AgentCoreNative::builder(store.clone())
+            .with_provider("mock", Arc::new(MockProvider::new()))
+            .build()
+            .await
+            .unwrap();
+        let project = core
+            .resolve_or_create_project("/tmp/trajectory-persist-core")
+            .await
+            .unwrap();
+        let session = core.create_session(project.id).await.unwrap();
+        let trajectory = sample_trajectory(session.id);
+
+        let event = RuntimeEvent::AtifTrajectoryCompleted {
+            trajectory: trajectory.clone(),
+        };
+        core.persist_completed_trajectory(session.id, &event).await;
+
+        let loaded = core.trajectory(session.id).await.unwrap().unwrap();
+        assert_eq!(loaded, trajectory);
     }
 
     #[tokio::test]

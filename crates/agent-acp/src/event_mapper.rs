@@ -133,7 +133,12 @@ impl EventMapper {
             | RuntimeEvent::TranscriptMessagesAppended { .. }
             | RuntimeEvent::Retry { .. }
             | RuntimeEvent::Compaction { .. }
-            | RuntimeEvent::DoomLoopWarning { .. } => MappedEvent::Updates(vec![]),
+            | RuntimeEvent::DoomLoopWarning { .. }
+            | RuntimeEvent::AtifTrajectoryStarted { .. }
+            | RuntimeEvent::AtifStepCompleted { .. }
+            | RuntimeEvent::AtifFinalMetrics { .. }
+            | RuntimeEvent::AtifTrajectoryCompleted { .. }
+            => MappedEvent::Updates(vec![]),
         }
     }
 

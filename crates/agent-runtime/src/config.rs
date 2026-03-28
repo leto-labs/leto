@@ -1,6 +1,20 @@
 use provider::RequestOptions;
 use serde::{Deserialize, Serialize};
 
+/// Configuration controlling runtime ATIF emission.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AtifConfig {
+    /// Whether the runtime should emit native ATIF lifecycle events.
+    pub emit_events: bool,
+}
+
+impl Default for AtifConfig {
+    fn default() -> Self {
+        Self { emit_events: false }
+    }
+}
+
 /// Configuration controlling transcript compaction support.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -70,6 +84,8 @@ pub struct RuntimeConfig {
     pub model: Option<String>,
     /// Shared provider request options forwarded into each provider call.
     pub request: RequestOptions,
+    /// ATIF emission settings.
+    pub atif: AtifConfig,
     /// Transcript compaction settings.
     pub compaction: CompactionConfig,
     /// Doom-loop detection settings.
@@ -85,6 +101,7 @@ impl Default for RuntimeConfig {
             tool_output_max_bytes: 16_000,
             model: None,
             request: RequestOptions::default(),
+            atif: AtifConfig::default(),
             compaction: CompactionConfig::default(),
             doom_loop: DoomLoopConfig::default(),
         }

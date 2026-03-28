@@ -159,6 +159,8 @@ name = "agent-runtime"
 version = "0.1.0"
 dependencies = [
  "async-stream",
+ "atif",
+ "chrono",
  "futures",
  "portable-pty",
  "provider",
