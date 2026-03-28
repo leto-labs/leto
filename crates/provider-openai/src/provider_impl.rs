@@ -1315,6 +1315,62 @@ mod tests {
     }
 
     #[test]
+    fn responses_request_preserves_multi_turn_memory() {
+        let request = Request {
+            messages: vec![
+                Message::system_text("Follow repo policy."),
+                Message::developer_text("Answer with concise diffs."),
+                Message::user_text("Original bug report"),
+                Message::assistant_text("Investigating the issue."),
+                Message::new(
+                    MessageRole::User,
+                    vec![
+                        provider::ContentBlock::text("Latest follow-up"),
+                        provider::ContentBlock::image_url("https://example.com/screenshot.png"),
+                    ],
+                ),
+            ],
+            ..Request::default()
+        };
+
+        let mapped = OpenAiProvider::map_responses_request(&request, false).unwrap();
+
+        assert_eq!(
+            mapped.instructions.as_deref(),
+            Some("Follow repo policy.\n\nAnswer with concise diffs.")
+        );
+        assert_eq!(mapped.input.len(), 3);
+        assert_eq!(
+            mapped.last_user_input_text_lossy().as_deref(),
+            Some("Latest follow-up")
+        );
+
+        match &mapped.input[0] {
+            ResponseInputItem::Message { role, content } => {
+                assert_eq!(*role, ResponseInputRole::User);
+                assert_eq!(content.len(), 1);
+            }
+            other => panic!("expected first input message, got {other:?}"),
+        }
+
+        match &mapped.input[1] {
+            ResponseInputItem::Message { role, content } => {
+                assert_eq!(*role, ResponseInputRole::Assistant);
+                assert_eq!(content.len(), 1);
+            }
+            other => panic!("expected assistant memory message, got {other:?}"),
+        }
+
+        match &mapped.input[2] {
+            ResponseInputItem::Message { role, content } => {
+                assert_eq!(*role, ResponseInputRole::User);
+                assert_eq!(content.len(), 2);
+            }
+            other => panic!("expected latest user memory message, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn provider_new_initializes_default_transport_and_model_state() {
         let provider = OpenAiProvider::new(
             Config::new("test")
