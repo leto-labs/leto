@@ -7,7 +7,7 @@ use agent_core_remote::{
     UpdateCredentialHealthRequest,
 };
 use agent_runtime::RuntimeEvent;
-use agent_server::{AgentServer, build_router};
+use agent_server::{AgentServer, AgentServerStatus, build_router};
 use agent_store::{CredentialEntry, CredentialHealth, Project, Session};
 use provider::{FinishReason, MockProvider};
 use provider_openai::ChatCompletionObject;
@@ -102,7 +102,7 @@ fn parse_ndjson_events(body: &str) -> Vec<CoreEvent> {
 }
 
 #[tokio::test]
-async fn canonical_health_and_status_are_available() {
+async fn canonical_health_route_is_available() {
     let base = start_server().await;
     let client = reqwest::Client::new();
 
@@ -112,13 +112,32 @@ async fn canonical_health_and_status_are_available() {
         .await
         .unwrap();
     assert_eq!(health.status(), reqwest::StatusCode::OK);
+}
 
-    let status = client
+#[tokio::test]
+async fn runtime_status_returns_server_status() {
+    let base = start_server().await;
+    let client = reqwest::Client::new();
+
+    let project = create_project(&client, &base).await;
+    let _session = create_session(&client, &base, &project).await;
+
+    let status: AgentServerStatus = client
         .get(format!("{base}/v1/status"))
         .send()
         .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
         .unwrap();
-    assert_eq!(status.status(), reqwest::StatusCode::OK);
+    assert_eq!(status.provider_names, vec!["mock".to_owned()]);
+    assert_eq!(status.default_provider_name, "mock");
+    assert_eq!(status.default_loop_name, "simple");
+    assert!(status.loop_names.contains(&status.default_loop_name));
+    assert_eq!(status.project_count, 1);
+    assert_eq!(status.session_count, 1);
 }
 
 #[tokio::test]
