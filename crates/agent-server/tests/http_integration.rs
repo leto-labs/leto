@@ -322,6 +322,40 @@ async fn canonical_project_and_session_routes_round_trip() {
 }
 
 #[tokio::test]
+async fn canonical_projects_route_lists_created_projects() {
+    let base = start_server().await;
+    let client = reqwest::Client::new();
+
+    let first = create_project(&client, &base).await;
+    let second: Project = client
+        .post(format!("{base}/v1/projects"))
+        .json(&serde_json::json!({"name": "agent-server-test-two"}))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    let projects: Vec<Project> = client
+        .get(format!("{base}/v1/projects"))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(projects.len(), 2);
+    assert!(projects.iter().any(|project| project.id == first.id));
+    assert!(projects.iter().any(|project| project.id == second.id));
+}
+
+#[tokio::test]
 async fn canonical_session_management_routes_cover_project_and_session_reads() {
     let base = start_server().await;
     let client = reqwest::Client::new();
