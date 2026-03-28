@@ -260,6 +260,43 @@ async fn openai_provider_streams_usage_stats_from_completed_event() {
 }
 
 #[tokio::test]
+async fn openai_provider_emits_stream_telemetry_metadata() {
+    let (base_url, request_rx) = spawn_mock_sse_server(completed_sse_body()).await;
+    let provider = OpenAiProvider::new(
+        Config::new("sk-test")
+            .with_base_url(base_url)
+            .with_model("gpt-telemetry"),
+    );
+    let request = Request::user_text("emit telemetry");
+
+    let mut stream = provider.stream(&request).await.unwrap();
+    let mut started_model = None;
+    let mut completed_response_id = None;
+
+    while let Some(event) = stream.next().await {
+        match event.unwrap() {
+            provider::Event::ResponseStart { response_id, model } => {
+                assert!(response_id.is_none());
+                started_model = model;
+            }
+            provider::Event::Completed { response_id, .. } => {
+                completed_response_id = response_id;
+            }
+            provider::Event::BlockStart { .. }
+            | provider::Event::BlockDelta { .. }
+            | provider::Event::BlockStop { .. }
+            | provider::Event::Usage { .. } => {}
+        }
+    }
+
+    let request = request_rx.await.unwrap().to_lowercase();
+    assert!(request.contains("post /v1/responses"));
+    assert!(request.contains("authorization: bearer sk-test"));
+    assert_eq!(started_model.as_deref(), Some("gpt-telemetry"));
+    assert_eq!(completed_response_id.as_deref(), Some("resp_test"));
+}
+
+#[tokio::test]
 async fn openai_oauth_provider_uses_shared_pool_metadata() {
     let pool = Arc::new(CredentialPool::new(Arc::new(StickyRoundRobin::new())));
     pool.insert(
