@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::Duration;
 use std::{fs, path::Path};
 
 use agent_core::{AgentCore, AgentCoreNative, CoreEvent};
@@ -9,6 +10,7 @@ use agent_core_remote::{
 use agent_runtime::RuntimeEvent;
 use agent_server::{AgentInfoRecord, AgentServer, AgentServerStatus, build_router};
 use agent_store::{CredentialEntry, CredentialHealth, Project, Session, StoredMessage};
+use futures::StreamExt;
 use provider::{ContentBlock, FinishReason, Message, MessageRole, MockProvider};
 use provider_openai::ChatCompletionObject;
 
@@ -99,6 +101,47 @@ fn parse_ndjson_events(body: &str) -> Vec<CoreEvent> {
         .filter(|line| !line.trim().is_empty())
         .map(|line| serde_json::from_str(line).unwrap())
         .collect()
+}
+
+async fn read_sse_events_until<F>(response: reqwest::Response, predicate: F) -> Vec<CoreEvent>
+where
+    F: Fn(&[CoreEvent]) -> bool,
+{
+    let mut stream = response.bytes_stream();
+    let mut pending = String::new();
+    let mut events = Vec::new();
+
+    loop {
+        let chunk = tokio::time::timeout(Duration::from_secs(5), stream.next())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        pending.push_str(std::str::from_utf8(&chunk).unwrap());
+
+        while let Some(boundary) = pending.find("\n\n") {
+            let frame = pending[..boundary].to_owned();
+            pending.drain(..boundary + 2);
+
+            let mut data_lines = Vec::new();
+            for line in frame.lines() {
+                if line.starts_with(':') {
+                    continue;
+                }
+                if let Some(data) = line.strip_prefix("data:") {
+                    data_lines.push(data.trim_start().to_owned());
+                }
+            }
+
+            if !data_lines.is_empty() {
+                events.push(serde_json::from_str(&data_lines.join("\n")).unwrap());
+            }
+        }
+
+        if predicate(&events) {
+            return events;
+        }
+    }
 }
 
 #[tokio::test]
@@ -974,6 +1017,76 @@ async fn canonical_and_compat_event_endpoints_are_sse() {
             .unwrap()
             .starts_with("text/event-stream")
     );
+}
+
+#[tokio::test]
+async fn canonical_event_endpoint_streams_runtime_events() {
+    let base = start_server().await;
+    let client = reqwest::Client::new();
+    let project = create_project(&client, &base).await;
+    let session = create_session(&client, &base, &project).await;
+
+    let response = client
+        .get(format!("{base}/v1/events"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), reqwest::StatusCode::OK);
+    assert!(
+        response
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .starts_with("text/event-stream")
+    );
+
+    let turn_response = client
+        .post(format!("{base}/v1/sessions/{}/turns", session.id))
+        .json(&serde_json::json!({
+            "input": [
+                {
+                    "role": "user",
+                    "content": [{"type": "text", "text": "hello runtime bus"}]
+                }
+            ]
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(turn_response.status(), reqwest::StatusCode::OK);
+
+    let events = read_sse_events_until(response, |events| {
+        events.iter().any(|event| {
+            matches!(
+                event,
+                CoreEvent::Turn {
+                    session_id,
+                    event: RuntimeEvent::TurnFinished {
+                        session_id: finished_session_id,
+                        finish_reason: Some(FinishReason::Stop),
+                        ..
+                    },
+                } if *session_id == session.id && *finished_session_id == session.id
+            )
+        })
+    })
+    .await;
+
+    assert!(events.iter().any(|event| {
+        matches!(
+            event,
+            CoreEvent::Turn {
+                session_id,
+                event: RuntimeEvent::TurnFinished {
+                    session_id: finished_session_id,
+                    finish_reason: Some(FinishReason::Stop),
+                    ..
+                },
+            } if *session_id == session.id && *finished_session_id == session.id
+        )
+    }));
 }
 
 #[tokio::test]
