@@ -1432,6 +1432,74 @@ async fn compat_config_provider_and_prompt_routes_are_real() {
 }
 
 #[tokio::test]
+async fn compat_assistant_endpoint_returns_assistant_message_with_parts() {
+    let base = start_server().await;
+    let client = reqwest::Client::new();
+    let project = create_project(&client, &base).await;
+    let session = create_session(&client, &base, &project).await;
+
+    let assistant: serde_json::Value = client
+        .post(format!(
+            "{base}/v1/compat/opencode/session/{}/message",
+            session.id
+        ))
+        .json(&serde_json::json!({
+            "parts": [{"type": "text", "text": "hello compat assistant"}]
+        }))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    let assistant_id = assistant["info"]["id"]
+        .as_str()
+        .expect("compat assistant response should include a message id")
+        .to_owned();
+
+    assert_eq!(assistant["info"]["role"], "assistant");
+    assert_eq!(assistant["info"]["sessionID"], format!("ses{}", session.id));
+    assert_eq!(assistant["info"]["modelID"], "compat");
+    assert_eq!(assistant["info"]["providerID"], "compat");
+    assert_eq!(assistant["info"]["agent"], "general");
+    assert_eq!(assistant["info"]["mode"], "chat");
+    assert!(
+        assistant_id.starts_with("msg"),
+        "compat assistant message ids should use the msg prefix"
+    );
+
+    let parts = assistant["parts"]
+        .as_array()
+        .expect("compat assistant response should include message parts");
+    assert_eq!(parts.len(), 1);
+    assert_eq!(parts[0]["type"], "text");
+    assert_eq!(parts[0]["text"], "hello compat assistant ");
+    assert_eq!(parts[0]["sessionID"], format!("ses{}", session.id));
+    assert_eq!(parts[0]["messageID"], assistant_id);
+
+    let fetched: serde_json::Value = client
+        .get(format!(
+            "{base}/v1/compat/opencode/session/{}/message/{}",
+            session.id, assistant_id
+        ))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(fetched["info"]["id"], assistant["info"]["id"]);
+    assert_eq!(fetched["info"]["role"], "assistant");
+    assert_eq!(fetched["parts"], assistant["parts"]);
+}
+
+#[tokio::test]
 async fn compat_file_routes_list_directory_and_read_file_content() {
     let base = start_server().await;
     let client = reqwest::Client::new();
