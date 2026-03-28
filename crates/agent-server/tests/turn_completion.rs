@@ -1,6 +1,7 @@
 use std::borrow::Cow;
 use std::sync::Arc;
 use std::sync::LazyLock;
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
@@ -315,6 +316,104 @@ struct TaggedProvider {
 impl TaggedProvider {
     fn new(tag: &'static str) -> Self {
         Self { tag }
+    }
+}
+
+#[derive(Default)]
+struct RecordingMemoryProvider {
+    requests: Mutex<Vec<Vec<(MessageRole, String)>>>,
+}
+
+impl RecordingMemoryProvider {
+    fn recorded_requests(&self) -> Vec<Vec<(MessageRole, String)>> {
+        self.requests.lock().unwrap().clone()
+    }
+}
+
+impl Provider for RecordingMemoryProvider {
+    fn stream<'a>(
+        &'a self,
+        request: &'a Request,
+    ) -> futures::future::BoxFuture<'a, Result<EventStream<'a>, provider::Error>> {
+        Box::pin(async move {
+            let transcript = request
+                .messages
+                .iter()
+                .map(|message| (message.role, message.plain_text_lossy()))
+                .collect();
+            self.requests.lock().unwrap().push(transcript);
+
+            let block_id = "memory-text-1".to_owned();
+            let response_id = "memory-response-1".to_owned();
+            let text = format!(
+                "memory: {}",
+                request.last_user_text_lossy().unwrap_or_default()
+            );
+
+            Ok(Box::pin(futures::stream::iter(vec![
+                Ok(Event::ResponseStart {
+                    response_id: Some(response_id.clone()),
+                    model: Some("memory-echo".into()),
+                }),
+                Ok(Event::BlockStart {
+                    block: Block {
+                        id: block_id.clone(),
+                        output_index: 0,
+                        kind: BlockKind::Text,
+                        item_id: Some("memory-item-1".into()),
+                    },
+                }),
+                Ok(Event::text_delta(block_id.clone(), text)),
+                Ok(Event::BlockStop { id: block_id }),
+                Ok(Event::Usage {
+                    usage: Usage::with_totals(Some(1), Some(1)),
+                }),
+                Ok(Event::Completed {
+                    response_id: Some(response_id),
+                    finish_reason: Some(FinishReason::Stop),
+                }),
+            ])) as EventStream<'a>)
+        })
+    }
+
+    fn info(&self) -> ProviderInfo {
+        ProviderInfo {
+            name: "memory".into(),
+            default_model_id: Some("memory-echo".into()),
+            capabilities: ProviderCapabilities {
+                system_messages: true,
+                developer_messages: true,
+                input_text: true,
+                input_image_urls: false,
+                tool_calls: false,
+                tool_results: false,
+                reasoning_blocks: false,
+                refusal_blocks: false,
+                tool_call_argument_deltas: false,
+                parallel_tool_calls: false,
+                stream_granularity: StreamGranularity::Block,
+            },
+            models: vec![ModelInfo {
+                id: Cow::Borrowed("memory-echo"),
+                name: Cow::Borrowed("Memory Echo"),
+                family: Some(Cow::Borrowed("mock")),
+                reasoning_efforts: Cow::Borrowed(&[]),
+                tool_call: false,
+                attachment: false,
+                structured_output: Some(false),
+                temperature: Some(true),
+                knowledge: None,
+                release_date: None,
+                last_updated: None,
+                open_weights: None,
+                input_modalities: Cow::Borrowed(&["text"]),
+                output_modalities: Cow::Borrowed(&["text"]),
+                cost: None,
+                limit: None,
+                status: None,
+                capabilities: None,
+            }],
+        }
     }
 }
 
@@ -651,6 +750,63 @@ async fn post_turns_allows_follow_up_turn_after_completion() {
             .message
             .plain_text_lossy()
             .contains("second turn")
+    );
+}
+
+#[tokio::test]
+async fn post_turns_send_prior_transcript_as_memory_on_follow_up_turns() {
+    let provider = Arc::new(RecordingMemoryProvider::default());
+    let base = start_server_with_provider(provider.clone()).await;
+    let client = reqwest::Client::new();
+    let project = create_project(&client, &base).await;
+    let session = create_session(&client, &base, &project).await;
+
+    let first = post_turn(&client, &base, &session, "first memory turn").await;
+    assert_eq!(first.status(), reqwest::StatusCode::OK);
+    let first_events = parse_ndjson_events(&first.text().await.unwrap());
+    assert!(matches!(
+        first_events.last(),
+        Some(CoreEvent::Turn {
+            session_id,
+            event: RuntimeEvent::TurnFinished {
+                session_id: finished_session_id,
+                finish_reason: Some(FinishReason::Stop),
+                ..
+            },
+        }) if *session_id == session.id && *finished_session_id == session.id
+    ));
+
+    let second = post_turn(&client, &base, &session, "second memory turn").await;
+    assert_eq!(second.status(), reqwest::StatusCode::OK);
+    let second_events = parse_ndjson_events(&second.text().await.unwrap());
+    assert!(matches!(
+        second_events.last(),
+        Some(CoreEvent::Turn {
+            session_id,
+            event: RuntimeEvent::TurnFinished {
+                session_id: finished_session_id,
+                finish_reason: Some(FinishReason::Stop),
+                ..
+            },
+        }) if *session_id == session.id && *finished_session_id == session.id
+    ));
+
+    let recorded_requests = provider.recorded_requests();
+    assert_eq!(recorded_requests.len(), 2);
+    assert_eq!(
+        recorded_requests[0],
+        vec![(MessageRole::User, "first memory turn".to_owned())]
+    );
+    assert_eq!(
+        recorded_requests[1],
+        vec![
+            (MessageRole::User, "first memory turn".to_owned()),
+            (
+                MessageRole::Assistant,
+                "memory: first memory turn".to_owned(),
+            ),
+            (MessageRole::User, "second memory turn".to_owned()),
+        ]
     );
 }
 
