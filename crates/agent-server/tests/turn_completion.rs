@@ -2,16 +2,20 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use agent_core::{AgentCore, AgentCoreNative, CoreEvent};
-use futures::StreamExt;
 use agent_runtime::RuntimeEvent;
 use agent_server::{AgentServer, build_router};
 use agent_store::{Project, Session, StoredMessage};
+use futures::StreamExt;
 use provider::{FinishReason, MessageRole, MockProvider};
 
 fn make_server() -> Arc<AgentServer> {
+    make_server_with_provider(MockProvider::new())
+}
+
+fn make_server_with_provider(provider: MockProvider) -> Arc<AgentServer> {
     let core: Arc<dyn AgentCore> = Arc::new(futures::executor::block_on(async {
         AgentCoreNative::builder(Arc::new(agent_store::InMemoryStore::new()))
-            .with_provider("mock", Arc::new(MockProvider::new()))
+            .with_provider("mock", Arc::new(provider))
             .build()
             .await
             .unwrap()
@@ -21,6 +25,17 @@ fn make_server() -> Arc<AgentServer> {
 
 async fn start_server() -> String {
     let server = make_server();
+    let router = build_router(server);
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, router).await.unwrap();
+    });
+    format!("http://{addr}")
+}
+
+async fn start_server_with_provider(provider: MockProvider) -> String {
+    let server = make_server_with_provider(provider);
     let router = build_router(server);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -95,6 +110,18 @@ async fn post_stream_turn(
                 }
             ]
         }))
+        .send()
+        .await
+        .unwrap()
+}
+
+async fn post_cancel_turn(
+    client: &reqwest::Client,
+    base: &str,
+    session: &Session,
+) -> reqwest::Response {
+    client
+        .post(format!("{base}/v1/sessions/{}/cancel", session.id))
         .send()
         .await
         .unwrap()
@@ -366,6 +393,52 @@ async fn post_stream_turns_streams_sse_until_turn_finished() {
             .plain_text_lossy()
             .contains("hello sse turn")
     );
+}
+
+#[tokio::test]
+async fn post_cancel_cancels_active_turn() {
+    let base = start_server_with_provider(MockProvider::new().with_delay(250)).await;
+    let client = reqwest::Client::new();
+    let project = create_project(&client, &base).await;
+    let session = create_session(&client, &base, &project).await;
+
+    let turn_response = post_turn(&client, &base, &session, "cancel this active turn").await;
+    assert_eq!(turn_response.status(), reqwest::StatusCode::OK);
+
+    let cancel_response = post_cancel_turn(&client, &base, &session).await;
+    assert_eq!(cancel_response.status(), reqwest::StatusCode::OK);
+
+    let events = parse_ndjson_events(&turn_response.text().await.unwrap());
+    assert!(events.iter().any(|event| {
+        matches!(
+            event,
+            CoreEvent::TurnCancelled { session_id } if *session_id == session.id
+        )
+    }));
+    assert!(!events.iter().any(|event| {
+        matches!(
+            event,
+            CoreEvent::Turn {
+                session_id,
+                event: RuntimeEvent::TurnFinished { .. },
+            } if *session_id == session.id
+        )
+    }));
+
+    let follow_up = post_turn(&client, &base, &session, "follow up after cancel").await;
+    assert_eq!(follow_up.status(), reqwest::StatusCode::OK);
+    let follow_up_events = parse_ndjson_events(&follow_up.text().await.unwrap());
+    assert!(matches!(
+        follow_up_events.last(),
+        Some(CoreEvent::Turn {
+            session_id,
+            event: RuntimeEvent::TurnFinished {
+                session_id: finished_session_id,
+                finish_reason: Some(FinishReason::Stop),
+                ..
+            },
+        }) if *session_id == session.id && *finished_session_id == session.id
+    ));
 }
 
 #[tokio::test]
