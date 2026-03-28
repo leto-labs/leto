@@ -1356,6 +1356,49 @@ async fn canonical_project_routes_support_connection_reuse_after_json_post() {
 }
 
 #[tokio::test]
+async fn canonical_project_routes_preserve_large_request_bodies() {
+    let server = make_server();
+    let router = build_router(server);
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, router).await.unwrap();
+    });
+
+    let oversized_name = "request-bloat-".repeat(2_048);
+    let create_project_body = serde_json::json!({
+        "name": oversized_name,
+    })
+    .to_string();
+
+    let mut connection = BufferedTcpConnection::connect(addr).await;
+    let create_project_request =
+        build_json_request("POST", "/v1/projects", addr, &create_project_body);
+
+    connection.send(&create_project_request).await;
+    let create_project_response = connection.read_response().await;
+    assert!(create_project_response.status_line.contains("201 Created"));
+
+    let project: Project = serde_json::from_slice(&create_project_response.body).unwrap();
+    assert!(create_project_body.len() > 16 * 1024);
+    assert_eq!(project.name.as_deref(), Some(oversized_name.as_str()));
+
+    let create_session_request = build_json_request(
+        "POST",
+        &format!("/v1/projects/{}/sessions", project.id),
+        addr,
+        "{}",
+    );
+
+    connection.send(&create_session_request).await;
+    let create_session_response = connection.read_response().await;
+    assert!(create_session_response.status_line.contains("201 Created"));
+
+    let session: Session = serde_json::from_slice(&create_session_response.body).unwrap();
+    assert_eq!(session.project_id, project.id);
+}
+
+#[tokio::test]
 async fn canonical_credential_health_route_returns_health_records() {
     let base = start_server().await;
     let client = reqwest::Client::new();
