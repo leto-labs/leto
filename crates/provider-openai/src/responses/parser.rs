@@ -680,4 +680,23 @@ mod tests {
             other => panic!("expected message output item, got {other:?}"),
         }
     }
+
+    #[test]
+    fn reports_diagnostic_error_for_stream_event_without_type() {
+        let raw = serde_json::json!({
+            "sequence_number": 9,
+            "response": {
+                "id": "resp_broken"
+            }
+        });
+
+        let err = parse_response_stream_event(raw).unwrap_err();
+
+        match err {
+            Error::Inference(message) => {
+                assert_eq!(message, "responses event missing type");
+            }
+            other => panic!("expected inference error, got {other:?}"),
+        }
+    }
 }
