@@ -64,8 +64,11 @@ pub enum LogLevelDoc {
     Error,
 }
 
+/// Log levels accepted by the compat app-log endpoint.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub enum AppLogLevelDoc {
+    #[serde(rename = "trace")]
+    Trace,
     #[serde(rename = "debug")]
     Debug,
     #[serde(rename = "info")]

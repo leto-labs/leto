@@ -17,8 +17,8 @@ use super::super::types::events::{
     EventDoc, EventServerConnectedDoc, EventServerConnectedTypeDoc, GlobalEventDoc,
 };
 use super::super::types::global::{
-    AppLogRequestDoc, CompatConfigDoc, EmptyPropertiesDoc, HealthDoc, UpgradeRequestDoc,
-    UpgradeResultDoc,
+    AppLogLevelDoc, AppLogRequestDoc, CompatConfigDoc, EmptyPropertiesDoc, HealthDoc,
+    UpgradeRequestDoc, UpgradeResultDoc,
 };
 use super::super::types::provider::TrueConstDoc;
 use super::super::*;
@@ -396,14 +396,48 @@ async fn app_log(
     Query(_query): Query<CompatQuery>,
     Json(body): Json<AppLogRequestDoc>,
 ) -> Response {
-    tracing::info!(
-        target: "agent_server::compat",
-        service = %body.service,
-        level = ?body.level,
-        message = %body.message,
-        extra = ?body.extra,
-        "compat log"
-    );
+    match body.level {
+        AppLogLevelDoc::Trace => tracing::trace!(
+            target: "agent_server::compat",
+            service = %body.service,
+            level = ?body.level,
+            message = %body.message,
+            extra = ?body.extra,
+            "compat log"
+        ),
+        AppLogLevelDoc::Debug => tracing::debug!(
+            target: "agent_server::compat",
+            service = %body.service,
+            level = ?body.level,
+            message = %body.message,
+            extra = ?body.extra,
+            "compat log"
+        ),
+        AppLogLevelDoc::Info => tracing::info!(
+            target: "agent_server::compat",
+            service = %body.service,
+            level = ?body.level,
+            message = %body.message,
+            extra = ?body.extra,
+            "compat log"
+        ),
+        AppLogLevelDoc::Warn => tracing::warn!(
+            target: "agent_server::compat",
+            service = %body.service,
+            level = ?body.level,
+            message = %body.message,
+            extra = ?body.extra,
+            "compat log"
+        ),
+        AppLogLevelDoc::Error => tracing::error!(
+            target: "agent_server::compat",
+            service = %body.service,
+            level = ?body.level,
+            message = %body.message,
+            extra = ?body.extra,
+            "compat log"
+        ),
+    }
     Json(true).into_response()
 }
 
@@ -605,6 +639,77 @@ mod tests {
         assert!(logs.contains("request_id"), "logs were: {logs}");
         assert!(logs.contains("req_123"), "logs were: {logs}");
         assert!(logs.contains("attempt"), "logs were: {logs}");
+    }
+
+    #[test]
+    fn app_log_should_honor_trace_level_filtering() {
+        let suppressed_log_buffer = SharedLogBuffer::default();
+        let suppressed_subscriber = tracing_subscriber::fmt()
+            .with_ansi(false)
+            .without_time()
+            .with_max_level(tracing::Level::INFO)
+            .with_writer({
+                let log_buffer = suppressed_log_buffer.clone();
+                move || log_buffer.clone()
+            })
+            .finish();
+
+        let response = with_default(suppressed_subscriber, || {
+            futures::executor::block_on(super::app_log(
+                Query(CompatQuery::default()),
+                Json(AppLogRequestDoc {
+                    service: "desktop".into(),
+                    level: AppLogLevelDoc::Trace,
+                    message: "trace refresh".into(),
+                    extra: Some(std::collections::BTreeMap::from([(
+                        "trace_id".into(),
+                        serde_json::json!("trace-123"),
+                    )])),
+                }),
+            ))
+        });
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        assert!(
+            suppressed_log_buffer.contents().trim().is_empty(),
+            "trace log should be filtered at INFO: {}",
+            suppressed_log_buffer.contents()
+        );
+
+        let trace_log_buffer = SharedLogBuffer::default();
+        let trace_subscriber = tracing_subscriber::fmt()
+            .with_ansi(false)
+            .without_time()
+            .with_max_level(tracing::Level::TRACE)
+            .with_writer({
+                let log_buffer = trace_log_buffer.clone();
+                move || log_buffer.clone()
+            })
+            .finish();
+
+        let response = with_default(trace_subscriber, || {
+            futures::executor::block_on(super::app_log(
+                Query(CompatQuery::default()),
+                Json(AppLogRequestDoc {
+                    service: "desktop".into(),
+                    level: AppLogLevelDoc::Trace,
+                    message: "trace refresh".into(),
+                    extra: Some(std::collections::BTreeMap::from([(
+                        "trace_id".into(),
+                        serde_json::json!("trace-123"),
+                    )])),
+                }),
+            ))
+        });
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+
+        let logs = trace_log_buffer.contents();
+        assert!(logs.contains("TRACE"), "logs were: {logs}");
+        assert!(logs.contains("compat log"), "logs were: {logs}");
+        assert!(logs.contains("agent_server::compat"), "logs were: {logs}");
+        assert!(logs.contains("level=Trace"), "logs were: {logs}");
+        assert!(logs.contains("trace refresh"), "logs were: {logs}");
+        assert!(logs.contains("trace_id"), "logs were: {logs}");
+        assert!(logs.contains("trace-123"), "logs were: {logs}");
     }
 
     #[test]
