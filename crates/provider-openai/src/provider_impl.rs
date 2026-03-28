@@ -1410,6 +1410,26 @@ mod tests {
     }
 
     #[test]
+    fn exports_openai_usage_as_provider_metrics() {
+        let usage = map_openai_usage(Some(&crate::TokenUsage {
+            prompt: 21,
+            completion: 13,
+            total: 34,
+            cache_read: Some(8),
+            cache_write: Some(5),
+            reasoning: Some(3),
+        }))
+        .expect("usage should map");
+
+        assert_eq!(usage.input_tokens, Some(21));
+        assert_eq!(usage.output_tokens, Some(13));
+        assert_eq!(usage.total_tokens, Some(34));
+        assert_eq!(usage.cache_read_tokens, Some(8));
+        assert_eq!(usage.cache_write_tokens, Some(5));
+        assert_eq!(usage.reasoning_tokens, Some(3));
+    }
+
+    #[test]
     fn provider_new_initializes_default_transport_and_model_state() {
         let provider = OpenAiProvider::new(
             Config::new("test")
