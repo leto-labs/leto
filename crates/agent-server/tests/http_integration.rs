@@ -9,7 +9,7 @@ use agent_core_remote::{
     TrajectoryRecord, UpdateCredentialHealthRequest,
 };
 use agent_runtime::RuntimeEvent;
-use agent_server::{AgentInfoRecord, AgentServer, AgentServerStatus, build_router};
+use agent_server::{AgentInfoRecord, AgentServer, AgentServerStatus, HealthResponse, build_router};
 use agent_store::{
     CredentialEntry, CredentialHealth, Project, ProviderCredential, Session, StoredMessage,
 };
@@ -169,16 +169,23 @@ where
 }
 
 #[tokio::test]
-async fn canonical_health_route_is_available() {
+async fn canonical_health_route_returns_current_health_payload() {
     let base = start_server().await;
     let client = reqwest::Client::new();
 
-    let health = client
+    let health: HealthResponse = client
         .get(format!("{base}/v1/health"))
         .send()
         .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
         .unwrap();
-    assert_eq!(health.status(), reqwest::StatusCode::OK);
+
+    assert!(health.healthy);
+    assert_eq!(health.version, env!("CARGO_PKG_VERSION"));
 }
 
 #[tokio::test]
