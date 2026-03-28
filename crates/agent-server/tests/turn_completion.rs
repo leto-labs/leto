@@ -992,3 +992,129 @@ async fn session_events_stream_sse_until_turn_finished() {
         )
     }));
 }
+
+#[tokio::test]
+async fn session_events_stream_recovers_after_backpressure() {
+    let base = start_server().await;
+    let client = reqwest::Client::new();
+    let project = create_project(&client, &base).await;
+    let session = create_session(&client, &base, &project).await;
+
+    let events_response = get_session_events(&client, &base, &session).await;
+    assert_eq!(events_response.status(), reqwest::StatusCode::OK);
+    assert!(
+        events_response
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .starts_with("text/event-stream")
+    );
+
+    let backlog_input = std::iter::repeat_n("backpressure", 1_500)
+        .collect::<Vec<_>>()
+        .join(" ");
+    let backlog_response = post_turn(&client, &base, &session, &backlog_input).await;
+    assert_eq!(backlog_response.status(), reqwest::StatusCode::OK);
+    let backlog_events = parse_ndjson_events(&backlog_response.text().await.unwrap());
+    assert!(backlog_events.iter().any(|event| {
+        matches!(
+            event,
+            CoreEvent::Turn {
+                session_id,
+                event: RuntimeEvent::TurnFinished {
+                    session_id: finished_session_id,
+                    finish_reason: Some(FinishReason::Stop),
+                    ..
+                },
+            } if *session_id == session.id && *finished_session_id == session.id
+        )
+    }));
+
+    let delayed_client = client.clone();
+    let delayed_base = base.clone();
+    let delayed_session = session.clone();
+    let recovery_marker = "recovery-sentinel";
+    let follow_up_turn = tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let response = post_turn(
+            &delayed_client,
+            &delayed_base,
+            &delayed_session,
+            recovery_marker,
+        )
+        .await;
+        assert_eq!(response.status(), reqwest::StatusCode::OK);
+        let events = parse_ndjson_events(&response.text().await.unwrap());
+        assert!(events.iter().any(|event| {
+            matches!(
+                event,
+                CoreEvent::Turn {
+                    session_id,
+                    event: RuntimeEvent::OutputBlockDelta {
+                        delta: provider::BlockDelta::Text { text },
+                        ..
+                    },
+                } if *session_id == delayed_session.id && text == "recovery-sentinel "
+            )
+        }));
+        assert!(events.iter().any(|event| {
+            matches!(
+                event,
+                CoreEvent::Turn {
+                    session_id,
+                    event: RuntimeEvent::TurnFinished {
+                        session_id: finished_session_id,
+                        finish_reason: Some(FinishReason::Stop),
+                        ..
+                    },
+                } if *session_id == delayed_session.id && *finished_session_id == delayed_session.id
+            )
+        }));
+    });
+
+    let events = read_sse_events_until(events_response, |events| {
+        events.iter().any(|event| {
+            matches!(
+                event,
+                CoreEvent::Turn {
+                    session_id,
+                    event: RuntimeEvent::OutputBlockDelta {
+                        delta: provider::BlockDelta::Text { text },
+                        ..
+                    },
+                } if *session_id == session.id && text == "recovery-sentinel "
+            )
+        })
+    })
+    .await;
+
+    follow_up_turn.await.unwrap();
+
+    assert!(events.iter().any(|event| {
+        matches!(
+            event,
+            CoreEvent::Turn {
+                session_id,
+                event: RuntimeEvent::OutputBlockDelta {
+                    delta: provider::BlockDelta::Text { text },
+                    ..
+                },
+            } if *session_id == session.id && text == "recovery-sentinel "
+        )
+    }));
+    assert!(events.iter().any(|event| {
+        matches!(
+            event,
+            CoreEvent::Turn {
+                session_id,
+                event: RuntimeEvent::TurnFinished {
+                    session_id: finished_session_id,
+                    finish_reason: Some(FinishReason::Stop),
+                    ..
+                },
+            } if *session_id == session.id && *finished_session_id == session.id
+        )
+    }));
+}
