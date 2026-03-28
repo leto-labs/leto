@@ -3102,7 +3102,7 @@ async fn compat_session_lifecycle_routes_are_real() {
 }
 
 #[tokio::test]
-async fn compat_warmup_routes_return_usable_bootstrap_data() {
+async fn compat_dashboard_bootstrap_routes_return_usable_data() {
     let base = start_server().await;
     let client = reqwest::Client::new();
 
@@ -3171,6 +3171,30 @@ async fn compat_warmup_routes_return_usable_bootstrap_data() {
         providers["all"]
             .as_array()
             .is_some_and(|items| { items.iter().any(|item| item["id"] == "mock") })
+    );
+
+    let provider_auth: serde_json::Value = client
+        .get(format!("{base}/v1/compat/opencode/provider/auth"))
+        .header(
+            reqwest::header::AUTHORIZATION,
+            "Bearer dashboard-test-token",
+        )
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(
+        provider_auth["mock"],
+        serde_json::json!([
+            {
+                "type": "api",
+                "label": "API Key"
+            }
+        ])
     );
 
     let projects: serde_json::Value = client
