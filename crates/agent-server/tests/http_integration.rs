@@ -845,6 +845,64 @@ async fn canonical_projects_route_lists_created_projects() {
 }
 
 #[tokio::test]
+async fn canonical_project_resolve_route_is_idempotent() {
+    let base = start_server().await;
+    let client = reqwest::Client::new();
+
+    let temp_root = env::temp_dir().join(format!(
+        "agent-server-project-resolve-{}",
+        ulid::Ulid::new()
+    ));
+    fs::create_dir_all(&temp_root).unwrap();
+
+    let first: Project = client
+        .post(format!("{base}/v1/projects/resolve"))
+        .json(&serde_json::json!({
+            "root": temp_root.join(".").display().to_string()
+        }))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    let second: Project = client
+        .post(format!("{base}/v1/projects/resolve"))
+        .json(&serde_json::json!({
+            "root": temp_root.display().to_string()
+        }))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(first.id, second.id);
+    assert_eq!(first.root, Some(temp_root.clone()));
+    assert_eq!(second.root, Some(temp_root.clone()));
+
+    let projects: Vec<Project> = client
+        .get(format!("{base}/v1/projects"))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(projects.len(), 1);
+    assert_eq!(projects[0].id, first.id);
+}
+
+#[tokio::test]
 async fn canonical_session_management_routes_cover_project_and_session_reads() {
     let base = start_server().await;
     let client = reqwest::Client::new();
