@@ -13,6 +13,7 @@ use crate::chat_completions::ChatCompletionsClient;
 use crate::config::Config;
 use crate::embeddings::EmbeddingsClient;
 use crate::fine_tuning::FineTuningClient;
+use crate::rate_limits::RateLimitsClient;
 use crate::responses::ResponsesClient;
 use crate::vector_stores::VectorStoresClient;
 use crate::videos::VideosClient;
@@ -84,6 +85,14 @@ impl Client {
     /// <https://platform.openai.com/docs/api-reference/fine-tuning>
     pub fn fine_tuning(&self) -> FineTuningClient<'_> {
         FineTuningClient::new(self)
+    }
+
+    /// Returns the Rate Limits API surface.
+    ///
+    /// Official reference:
+    /// <https://platform.openai.com/docs/api-reference/project-rate-limits>
+    pub fn rate_limits(&self) -> RateLimitsClient<'_> {
+        RateLimitsClient::new(self)
     }
 
     /// Returns the Embeddings API surface.

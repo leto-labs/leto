@@ -27,6 +27,7 @@ pub mod fine_tuning;
 pub mod oauth;
 pub mod presets;
 pub mod provider_impl;
+pub mod rate_limits;
 pub mod responses;
 mod shared;
 pub mod vector_stores;
@@ -47,6 +48,7 @@ pub use oauth::{
 };
 pub use presets::OpenAiConfigPreset;
 pub use provider_impl::OpenAiProvider;
+pub use rate_limits::*;
 pub use responses::*;
 pub use shared::TokenUsage;
 pub use vector_stores::*;
