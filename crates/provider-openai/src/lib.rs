@@ -19,6 +19,7 @@
 pub mod chat_completions;
 pub mod client;
 pub mod config;
+pub mod embeddings;
 pub mod error;
 pub mod fine_tuning;
 pub mod oauth;
@@ -30,6 +31,7 @@ mod shared;
 pub use chat_completions::*;
 pub use client::Client;
 pub use config::{Config, OpenAiApiMode, OpenAiApiSurface};
+pub use embeddings::*;
 pub use error::Error;
 pub use fine_tuning::*;
 pub use oauth::{

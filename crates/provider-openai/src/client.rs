@@ -9,6 +9,7 @@ use reqwest::Url;
 use crate::Error;
 use crate::chat_completions::ChatCompletionsClient;
 use crate::config::Config;
+use crate::embeddings::EmbeddingsClient;
 use crate::fine_tuning::FineTuningClient;
 use crate::responses::ResponsesClient;
 
@@ -63,6 +64,14 @@ impl Client {
     /// <https://platform.openai.com/docs/api-reference/fine-tuning>
     pub fn fine_tuning(&self) -> FineTuningClient<'_> {
         FineTuningClient::new(self)
+    }
+
+    /// Returns the Embeddings API surface.
+    ///
+    /// Official reference:
+    /// <https://platform.openai.com/docs/api-reference/embeddings>
+    pub fn embeddings(&self) -> EmbeddingsClient<'_> {
+        EmbeddingsClient::new(self)
     }
 
     pub(crate) fn http(&self) -> &reqwest::Client {
