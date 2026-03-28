@@ -75,3 +75,58 @@ impl AgentServer {
             .collect()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use agent_core::{AgentCore, AgentCoreNative};
+    use agent_store::{Project, Session};
+    use provider::{MockProvider, Provider};
+
+    use super::*;
+
+    async fn make_server_with_provider(provider: Arc<dyn Provider>) -> AgentServer {
+        let core: Arc<dyn AgentCore> = Arc::new(
+            AgentCoreNative::builder(Arc::new(agent_store::InMemoryStore::new()))
+                .with_provider("mock", provider)
+                .build()
+                .await
+                .unwrap(),
+        );
+        AgentServer::new(core)
+    }
+
+    #[tokio::test]
+    async fn status_reports_registered_providers_loops_and_store_counts() {
+        let server = make_server_with_provider(Arc::new(MockProvider::new())).await;
+
+        let project = server
+            .core()
+            .store()
+            .projects()
+            .create(Project::new(
+                Some("status-test".to_owned()),
+                None,
+                Default::default(),
+            ))
+            .await
+            .unwrap();
+        server
+            .core()
+            .store()
+            .sessions()
+            .create(Session::new(project.id))
+            .await
+            .unwrap();
+
+        let status = server.status().await.unwrap();
+
+        assert_eq!(status.provider_names, vec!["mock".to_owned()]);
+        assert_eq!(status.default_provider_name, "mock");
+        assert_eq!(status.default_loop_name, "simple");
+        assert!(status.loop_names.contains(&status.default_loop_name));
+        assert_eq!(status.project_count, 1);
+        assert_eq!(status.session_count, 1);
+    }
+}
