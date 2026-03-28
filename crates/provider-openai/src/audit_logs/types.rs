@@ -7,6 +7,17 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+/// Optional pagination parameters for `GET /organization/audit_logs`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AuditLogListParams {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub after: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub before: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+}
+
 /// Paginated response returned by `GET /organization/audit_logs`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AuditLogPage {

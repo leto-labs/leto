@@ -1,4 +1,4 @@
-use provider_openai::{AuditActor, AuditLogPage, Client, Config};
+use provider_openai::{AuditActor, AuditLogListParams, AuditLogPage, Client, Config};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
@@ -116,4 +116,44 @@ async fn list_audit_logs_fetches_event_page() {
         } if actor_type == "session"
     ));
     assert!(page.data[0].extra.contains_key("api_key.created"));
+}
+
+#[tokio::test]
+async fn list_audit_logs_sends_pagination_query_parameters() {
+    let response_body = serde_json::json!({
+        "object": "list",
+        "has_more": true,
+        "data": []
+    })
+    .to_string();
+
+    let (base_url, request_rx) = spawn_json_server(response_body).await;
+    let client = Client::new(
+        Config::new("sk-admin-test")
+            .with_base_url(base_url)
+            .with_default_header("x-provider", "provider-openai-test"),
+    );
+
+    let page: AuditLogPage = client
+        .audit_logs()
+        .list_with_params(&AuditLogListParams {
+            after: Some("req_after_123".into()),
+            before: Some("req_before_456".into()),
+            limit: Some(25),
+        })
+        .await
+        .unwrap();
+
+    let request = request_rx.await.unwrap();
+    let request_head = request.head.to_lowercase();
+    assert!(request_head.contains("get /v1/organization/audit_logs?"));
+    assert!(request_head.contains("after=req_after_123"));
+    assert!(request_head.contains("before=req_before_456"));
+    assert!(request_head.contains("limit=25"));
+    assert!(request_head.contains("authorization: bearer sk-admin-test"));
+    assert!(request_head.contains("x-provider: provider-openai-test"));
+
+    assert_eq!(page.object, "list");
+    assert!(page.has_more);
+    assert!(page.data.is_empty());
 }

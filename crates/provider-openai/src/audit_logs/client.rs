@@ -4,7 +4,7 @@
 //! - List audit logs: <https://platform.openai.com/docs/api-reference/audit-logs>
 
 use crate::Error;
-use crate::audit_logs::types::AuditLogPage;
+use crate::audit_logs::types::{AuditLogListParams, AuditLogPage};
 use crate::client::Client;
 use crate::shared::{ensure_success, json_value};
 
@@ -25,12 +25,26 @@ impl<'a> AuditLogsClient<'a> {
     /// Returns [`Error`] if the HTTP request fails or the response cannot be
     /// parsed into an [`AuditLogPage`].
     pub async fn list(&self) -> Result<AuditLogPage, Error> {
+        self.list_with_params(&AuditLogListParams::default()).await
+    }
+
+    /// Lists organization audit-log events using explicit pagination controls.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error`] if the HTTP request fails or the response cannot be
+    /// parsed into an [`AuditLogPage`].
+    pub async fn list_with_params(
+        &self,
+        params: &AuditLogListParams,
+    ) -> Result<AuditLogPage, Error> {
         let response = self
             .client
             .apply_default_headers(
                 self.client
                     .http()
                     .get(self.client.endpoint_url("organization/audit_logs"))
+                    .query(params)
                     .header("Authorization", self.client.auth_header()),
             )
             .send()
