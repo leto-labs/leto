@@ -564,4 +564,36 @@ mod tests {
             other => panic!("unexpected event: {other:?}"),
         }
     }
+
+    #[test]
+    fn parses_response_prompt_version_and_variables() {
+        let raw = serde_json::json!({
+            "id": "resp_prompt",
+            "object": "response",
+            "status": "completed",
+            "output": [],
+            "prompt": {
+                "id": "pmpt_123",
+                "version": "v42",
+                "variables": {
+                    "topic": "testing",
+                    "count": 2
+                }
+            }
+        });
+
+        let parsed = parse_response_object_value(raw);
+        let prompt = parsed.prompt.expect("prompt should parse");
+
+        assert_eq!(prompt.id, "pmpt_123");
+        assert_eq!(prompt.version.as_deref(), Some("v42"));
+        assert_eq!(
+            prompt.variables.get("topic").and_then(Value::as_str),
+            Some("testing")
+        );
+        assert_eq!(
+            prompt.variables.get("count").and_then(Value::as_i64),
+            Some(2)
+        );
+    }
 }
