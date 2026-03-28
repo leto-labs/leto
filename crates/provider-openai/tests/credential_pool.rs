@@ -1,7 +1,9 @@
 use std::sync::Arc;
 
 use futures::StreamExt;
-use provider::{CredentialEntry, CredentialFailure, CredentialPool, Request, StickyRoundRobin};
+use provider::{
+    CredentialEntry, CredentialFailure, CredentialPool, Provider as _, Request, StickyRoundRobin,
+};
 use provider_openai::{Config, OpenAiOAuthPreset, OpenAiOAuthProvider, OpenAiProvider};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
@@ -17,6 +19,14 @@ fn completed_sse_body() -> String {
 
 fn created_only_sse_body() -> String {
     "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_test\",\"status\":\"in_progress\",\"output\":[]}}\n\n".to_owned()
+}
+
+fn completed_sse_body_with_usage_details() -> String {
+    concat!(
+        "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_usage\",\"status\":\"completed\",\"output\":[],\"usage\":{\"input_tokens\":11,\"output_tokens\":7,\"total_tokens\":18,\"input_tokens_details\":{\"cached_tokens\":3,\"cache_creation_tokens\":2},\"output_tokens_details\":{\"reasoning_tokens\":5}}}}\n\n",
+        "data: [DONE]\n\n"
+    )
+    .to_owned()
 }
 
 async fn spawn_mock_sse_server(body: String) -> (String, oneshot::Receiver<String>) {
@@ -205,6 +215,48 @@ async fn openai_provider_uses_shared_pool_headers_and_marks_success() {
     let entries = pool.entries("openai").await;
     assert_eq!(entries[0].health.consecutive_errors, 0);
     assert!(entries[0].health.last_error.is_none());
+}
+
+#[tokio::test]
+async fn openai_provider_streams_usage_stats_from_completed_event() {
+    let (base_url, request_rx) =
+        spawn_mock_sse_server(completed_sse_body_with_usage_details()).await;
+    let provider = OpenAiProvider::new(
+        Config::new("sk-test")
+            .with_base_url(base_url)
+            .with_model("gpt-stream-stats"),
+    );
+    let request = Request::user_text("collect usage stats");
+
+    let mut stream = provider.stream(&request).await.unwrap();
+    let mut usage_event = None;
+    let mut completed_response_id = None;
+
+    while let Some(event) = stream.next().await {
+        match event.unwrap() {
+            provider::Event::Usage { usage } => usage_event = Some(usage),
+            provider::Event::Completed { response_id, .. } => {
+                completed_response_id = response_id;
+            }
+            provider::Event::ResponseStart { .. }
+            | provider::Event::BlockStart { .. }
+            | provider::Event::BlockDelta { .. }
+            | provider::Event::BlockStop { .. } => {}
+        }
+    }
+
+    let request = request_rx.await.unwrap().to_lowercase();
+    assert!(request.contains("post /v1/responses"));
+    assert!(request.contains("authorization: bearer sk-test"));
+
+    let usage = usage_event.expect("usage event should be emitted");
+    assert_eq!(usage.input_tokens, Some(11));
+    assert_eq!(usage.output_tokens, Some(7));
+    assert_eq!(usage.total_tokens, Some(18));
+    assert_eq!(usage.cache_read_tokens, Some(3));
+    assert_eq!(usage.cache_write_tokens, Some(2));
+    assert_eq!(usage.reasoning_tokens, Some(5));
+    assert_eq!(completed_response_id.as_deref(), Some("resp_usage"));
 }
 
 #[tokio::test]
