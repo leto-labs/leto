@@ -282,6 +282,15 @@ fn completed_openai_sse_body_with_token_tracking_aliases() -> String {
     .to_owned()
 }
 
+fn completed_openai_sse_body_with_debug_dump() -> String {
+    concat!(
+        "data: {\"type\":\"response.output_text.delta\",\"sequence_number\":1,\"item_id\":\"msg_debug\",\"output_index\":0,\"content_index\":0,\"delta\":\"debug dump ok\"}\n\n",
+        "data: {\"type\":\"response.completed\",\"sequence_number\":2,\"response\":{\"id\":\"resp_debug\",\"status\":\"completed\",\"service_tier\":\"priority\",\"debug_dump\":{\"trace_id\":\"trace-debug-123\",\"node\":\"edge-a\"},\"output\":[{\"type\":\"message\",\"id\":\"msg_debug\",\"role\":\"assistant\",\"status\":\"completed\",\"content\":[{\"type\":\"output_text\",\"text\":\"debug dump ok\",\"annotations\":[]}],\"debug_part\":{\"segment\":7}}],\"usage\":{\"input_tokens\":3,\"output_tokens\":2,\"total_tokens\":5}}}\n\n",
+        "data: [DONE]\n\n"
+    )
+    .to_owned()
+}
+
 fn created_only_openai_sse_body() -> String {
     "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_test\",\"status\":\"in_progress\",\"output\":[]}}\n\n".to_owned()
 }
@@ -1286,6 +1295,69 @@ async fn post_stream_turns_track_usage_from_prompt_and_completion_aliases() {
 
     let requests = requests_rx.await.unwrap();
     assert_eq!(requests.len(), 1);
+}
+
+#[tokio::test]
+async fn post_stream_turns_tolerate_provider_debug_dump_fields_in_completed_response() {
+    let _lock = OLLAMA_MOCK_SERVER_LOCK.lock().await;
+    let requests_rx =
+        spawn_ollama_mock_server(vec![completed_openai_sse_body_with_debug_dump()]).await;
+
+    let store: Arc<dyn Store> = Arc::new(agent_store::InMemoryStore::new());
+    store
+        .credentials()
+        .create(
+            ("ollama".into(), "cred-1".into()),
+            CredentialEntry::api_key("Primary", "sk-debug"),
+        )
+        .await
+        .unwrap();
+
+    let core: Arc<dyn AgentCore> =
+        Arc::new(AgentCoreNative::build_default_local(store).await.unwrap());
+    let base = start_server_with_core(core).await;
+    let client = reqwest::Client::new();
+    let project = create_project(&client, &base).await;
+    let session = create_session(&client, &base, &project).await;
+
+    let response = post_stream_turn(&client, &base, &session, "collect debug dump").await;
+
+    assert_eq!(response.status(), reqwest::StatusCode::OK);
+    let events = parse_sse_events(&response.text().await.unwrap());
+    assert!(matches!(
+        events.last(),
+        Some(CoreEvent::Turn {
+            session_id,
+            event: RuntimeEvent::TurnFinished {
+                session_id: finished_session_id,
+                finish_reason: Some(FinishReason::Stop),
+                ..
+            },
+        }) if *session_id == session.id && *finished_session_id == session.id
+    ));
+
+    let messages: Vec<StoredMessage> = client
+        .get(format!("{base}/v1/sessions/{}/messages", session.id))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(messages.len(), 2);
+    assert_eq!(messages[1].message.role, MessageRole::Assistant);
+    assert_eq!(messages[1].message.plain_text_lossy(), "debug dump ok");
+
+    let requests = requests_rx.await.unwrap();
+    assert_eq!(requests.len(), 1);
+    assert!(
+        requests[0]
+            .to_lowercase()
+            .contains("authorization: bearer sk-debug")
+    );
 }
 
 #[tokio::test]
