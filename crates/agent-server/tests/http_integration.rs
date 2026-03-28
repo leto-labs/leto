@@ -78,6 +78,15 @@ async fn canonical_health_and_status_are_available() {
 }
 
 #[tokio::test]
+async fn root_health_route_is_available() {
+    let base = start_server().await;
+    let client = reqwest::Client::new();
+
+    let health = client.get(format!("{base}/health")).send().await.unwrap();
+    assert_eq!(health.status(), reqwest::StatusCode::OK);
+}
+
+#[tokio::test]
 async fn invalid_routes_return_not_found() {
     let base = start_server().await;
     let client = reqwest::Client::new();

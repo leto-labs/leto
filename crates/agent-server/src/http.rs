@@ -33,6 +33,7 @@ type AppState = Arc<AgentServer>;
 /// Builds the canonical and compatibility HTTP router.
 pub fn build_router(server: Arc<AgentServer>) -> Router {
     Router::new()
+        .route("/health", routing::get(health))
         .nest("/v1", canonical_router())
         .nest("/v1/compat/opencode", compat::opencode::router())
         .layer(
