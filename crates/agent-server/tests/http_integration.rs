@@ -322,6 +322,22 @@ async fn canonical_project_and_session_routes_round_trip() {
 }
 
 #[tokio::test]
+async fn canonical_projects_route_returns_empty_list() {
+    let base = start_server().await;
+    let client = reqwest::Client::new();
+
+    let response = client
+        .get(format!("{base}/v1/projects"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), reqwest::StatusCode::OK);
+
+    let projects: Vec<Project> = response.json().await.unwrap();
+    assert!(projects.is_empty());
+}
+
+#[tokio::test]
 async fn canonical_projects_route_lists_created_projects() {
     let base = start_server().await;
     let client = reqwest::Client::new();
