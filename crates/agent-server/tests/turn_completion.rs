@@ -3,14 +3,14 @@ use std::sync::Arc;
 use std::sync::LazyLock;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use agent_core::{AgentCore, AgentCoreNative, CoreEvent};
 use agent_core_remote::CredentialHealthRecord;
 use agent_runtime::RuntimeEvent;
 use agent_server::{AgentServer, SessionRuntimeView, build_router};
 use agent_store::{CredentialEntry, Project, ProjectConfig, Session, Store, StoredMessage};
-use futures::StreamExt;
+use futures::{StreamExt, future::join_all};
 use provider::{
     Block, BlockKind, Event, EventStream, FinishReason, MessageRole, MockProvider, ModelInfo,
     Provider, ProviderCapabilities, ProviderInfo, Request, StreamGranularity, Usage,
@@ -606,6 +606,99 @@ impl Provider for TimeoutProvider {
     }
 }
 
+struct ProfilingProvider {
+    chunk_count: usize,
+}
+
+impl Default for ProfilingProvider {
+    fn default() -> Self {
+        Self { chunk_count: 8 }
+    }
+}
+
+impl Provider for ProfilingProvider {
+    fn stream<'a>(
+        &'a self,
+        request: &'a Request,
+    ) -> futures::future::BoxFuture<'a, Result<EventStream<'a>, provider::Error>> {
+        Box::pin(async move {
+            let block_id = "profiling-text-1".to_owned();
+            let response_id = "profiling-response-1".to_owned();
+            let prompt = request.last_user_text_lossy().unwrap_or_default();
+            let mut events = Vec::with_capacity(self.chunk_count + 5);
+
+            events.push(Ok(Event::ResponseStart {
+                response_id: Some(response_id.clone()),
+                model: Some("profiling-echo".into()),
+            }));
+            events.push(Ok(Event::BlockStart {
+                block: Block {
+                    id: block_id.clone(),
+                    output_index: 0,
+                    kind: BlockKind::Text,
+                    item_id: Some("profiling-item-1".into()),
+                },
+            }));
+            for chunk in 0..self.chunk_count {
+                events.push(Ok(Event::text_delta(
+                    block_id.clone(),
+                    format!("profile[{chunk}]: {prompt}"),
+                )));
+            }
+            events.push(Ok(Event::BlockStop { id: block_id }));
+            events.push(Ok(Event::Usage {
+                usage: Usage::with_totals(Some(1), Some(self.chunk_count as u32)),
+            }));
+            events.push(Ok(Event::Completed {
+                response_id: Some(response_id),
+                finish_reason: Some(FinishReason::Stop),
+            }));
+
+            Ok(Box::pin(futures::stream::iter(events)) as EventStream<'a>)
+        })
+    }
+
+    fn info(&self) -> ProviderInfo {
+        ProviderInfo {
+            name: "profiling".into(),
+            default_model_id: Some("profiling-echo".into()),
+            capabilities: ProviderCapabilities {
+                system_messages: true,
+                developer_messages: true,
+                input_text: true,
+                input_image_urls: false,
+                tool_calls: false,
+                tool_results: false,
+                reasoning_blocks: false,
+                refusal_blocks: false,
+                tool_call_argument_deltas: false,
+                parallel_tool_calls: false,
+                stream_granularity: StreamGranularity::Block,
+            },
+            models: vec![ModelInfo {
+                id: Cow::Borrowed("profiling-echo"),
+                name: Cow::Borrowed("Profiling Echo"),
+                family: Some(Cow::Borrowed("mock")),
+                reasoning_efforts: Cow::Borrowed(&[]),
+                tool_call: false,
+                attachment: false,
+                structured_output: Some(false),
+                temperature: Some(true),
+                knowledge: None,
+                release_date: None,
+                last_updated: None,
+                open_weights: None,
+                input_modalities: Cow::Borrowed(&["text"]),
+                output_modalities: Cow::Borrowed(&["text"]),
+                cost: None,
+                limit: None,
+                status: None,
+                capabilities: None,
+            }],
+        }
+    }
+}
+
 async fn read_sse_events_until<F>(response: reqwest::Response, predicate: F) -> Vec<CoreEvent>
 where
     F: Fn(&[CoreEvent]) -> bool,
@@ -958,6 +1051,62 @@ async fn post_turns_pick_up_hot_reloaded_project_runtime_defaults_for_existing_s
     assert_eq!(
         messages[1].message.plain_text_lossy(),
         "fallback: hello after reload"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "manual profiling harness"]
+async fn post_turns_profile_end_to_end_turn_path() {
+    const WARMUP_REQUESTS: usize = 4;
+    const PROFILE_REQUESTS: usize = 32;
+
+    let base = start_server_with_provider(Arc::new(ProfilingProvider::default())).await;
+    let client = reqwest::Client::new();
+    let project = create_project(&client, &base).await;
+    let sessions = join_all(
+        (0..(WARMUP_REQUESTS + PROFILE_REQUESTS)).map(|_| create_session(&client, &base, &project)),
+    )
+    .await;
+
+    for (index, session) in sessions.iter().take(WARMUP_REQUESTS).enumerate() {
+        let response = post_turn(&client, &base, session, &format!("warmup turn {index}")).await;
+        assert_eq!(response.status(), reqwest::StatusCode::OK);
+        assert!(!response.text().await.unwrap().is_empty());
+    }
+
+    let started = Instant::now();
+    let profiled = join_all(sessions.iter().skip(WARMUP_REQUESTS).enumerate().map(
+        |(index, session)| {
+            let client = client.clone();
+            let base = base.clone();
+            let session = session.clone();
+            async move {
+                let response =
+                    post_turn(&client, &base, &session, &format!("profile turn {index}")).await;
+                assert_eq!(response.status(), reqwest::StatusCode::OK);
+                let body = response.text().await.unwrap();
+                let events = parse_ndjson_events(&body);
+                assert!(matches!(
+                    events.last(),
+                    Some(CoreEvent::Turn {
+                        session_id,
+                        event: RuntimeEvent::TurnFinished {
+                            session_id: finished_session_id,
+                            finish_reason: Some(FinishReason::Stop),
+                            ..
+                        },
+                    }) if *session_id == session.id && *finished_session_id == session.id
+                ));
+                body.len()
+            }
+        },
+    ))
+    .await;
+    let elapsed = started.elapsed();
+    let total_bytes: usize = profiled.into_iter().sum();
+
+    eprintln!(
+        "agent-server profiling harness: {PROFILE_REQUESTS} turn requests, {total_bytes} response bytes, elapsed={elapsed:?}"
     );
 }
 
