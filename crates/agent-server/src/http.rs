@@ -107,6 +107,10 @@ fn canonical_router() -> Router<AppState> {
             routing::post(routes::chat_completions::create_chat_completion),
         )
         .route(
+            "/organization/audit_logs",
+            routing::get(routes::audit_logs::list_audit_logs),
+        )
+        .route(
             "/embeddings",
             routing::post(routes::embeddings::create_embeddings),
         )

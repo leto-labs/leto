@@ -16,7 +16,7 @@ use agent_store::{
 use futures::StreamExt;
 use provider::{ContentBlock, FinishReason, Message, MessageRole, MockProvider};
 use provider_openai::{
-    ChatCompletionObject, Client, Config, EmbeddingInput, EmbeddingRequest,
+    AuditLogPage, ChatCompletionObject, Client, Config, EmbeddingInput, EmbeddingRequest,
     VectorStoreCreateRequest, VideoCreateRequest,
 };
 
@@ -1133,6 +1133,37 @@ async fn canonical_chat_completions_route_returns_non_streaming_completion() {
                 provider_openai::ChatCompletionMessageContent::Parts(_) => false,
             })
     );
+}
+
+#[tokio::test]
+async fn canonical_audit_logs_route_returns_openai_style_payload() {
+    let base = start_server().await;
+    let client = Client::new(Config::new("sk-test").with_base_url(format!("{base}/v1")));
+
+    let page: AuditLogPage = client.audit_logs().list().await.unwrap();
+
+    assert_eq!(page.object, "list");
+    assert!(!page.has_more);
+    assert_eq!(page.data.len(), 2);
+    assert_eq!(page.data[0].id, "req_agent_server_20240301");
+    assert_eq!(page.data[0].event_type, "api_key.created");
+    assert_eq!(page.data[0].effective_at, 1_720_804_090_i64);
+    assert_eq!(
+        page.data[0]
+            .project
+            .as_ref()
+            .map(|project| project.id.as_str()),
+        Some("proj_agent_server")
+    );
+    assert_eq!(
+        page.data[0]
+            .actor
+            .session
+            .as_ref()
+            .map(|session| session.user.email.as_str()),
+        Some("agent@example.com")
+    );
+    assert!(page.data[0].extra.contains_key("api_key.created"));
 }
 
 #[tokio::test]
