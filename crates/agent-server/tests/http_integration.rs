@@ -8,8 +8,8 @@ use agent_core_remote::{
 };
 use agent_runtime::RuntimeEvent;
 use agent_server::{AgentServer, AgentServerStatus, build_router};
-use agent_store::{CredentialEntry, CredentialHealth, Project, Session};
-use provider::{FinishReason, MockProvider};
+use agent_store::{CredentialEntry, CredentialHealth, Project, Session, StoredMessage};
+use provider::{ContentBlock, FinishReason, MessageRole, MockProvider};
 use provider_openai::ChatCompletionObject;
 
 fn make_server() -> Arc<AgentServer> {
@@ -606,6 +606,70 @@ async fn canonical_batch_turns_endpoint_runs_turns_sequentially() {
         })
         .count();
     assert_eq!(finished, 2);
+}
+
+#[tokio::test]
+async fn canonical_tool_calls_route_appends_tool_call_history() {
+    let base = start_server().await;
+    let client = reqwest::Client::new();
+    let project = create_project(&client, &base).await;
+    let session = create_session(&client, &base, &project).await;
+
+    let appended: Vec<StoredMessage> = client
+        .post(format!("{base}/v1/sessions/{}/tool-calls", session.id))
+        .json(&serde_json::json!({
+            "calls": [
+                {
+                    "id": "call_1",
+                    "name": "echo",
+                    "input": {"text": "hello tool"},
+                    "output": {"text": "tool output"},
+                    "is_error": false
+                }
+            ]
+        }))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(appended.len(), 2);
+    assert_eq!(appended[0].session_id, session.id);
+    assert_eq!(appended[0].ordinal, 0);
+    assert_eq!(appended[0].message.role, MessageRole::Assistant);
+    assert!(matches!(
+        appended[0].message.content.as_slice(),
+        [ContentBlock::ToolCall { id, name, input }]
+            if id == "call_1" && name == "echo" && input == &serde_json::json!({"text": "hello tool"})
+    ));
+    assert_eq!(appended[1].session_id, session.id);
+    assert_eq!(appended[1].ordinal, 1);
+    assert_eq!(appended[1].message.role, MessageRole::User);
+    assert!(matches!(
+        appended[1].message.content.as_slice(),
+        [ContentBlock::ToolResult {
+            call_id,
+            output,
+            is_error: Some(false),
+        }] if call_id == "call_1" && output == &serde_json::json!({"text": "tool output"})
+    ));
+
+    let history: Vec<StoredMessage> = client
+        .get(format!("{base}/v1/sessions/{}/messages", session.id))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(history, appended);
 }
 
 #[tokio::test]

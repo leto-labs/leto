@@ -32,7 +32,7 @@ use crate::server::AgentServer;
 use crate::types::{
     BatchTurnRequest, CreateProjectRequest, CreateSessionRequest, CredentialHealthRecord,
     CredentialRecord, ErrorResponse, HealthResponse, ProjectRootRequest, ProviderCatalogEntry,
-    ProviderModelRecord, SessionRuntimeView, TrajectoryRecord, TurnRequest,
+    ProviderModelRecord, SessionRuntimeView, ToolCallRequest, TrajectoryRecord, TurnRequest,
     UpdateCredentialHealthRequest,
 };
 
@@ -125,6 +125,7 @@ fn canonical_router() -> Router<AppState> {
             "/sessions/{id}/batch-turns",
             routing::post(start_batch_turns),
         )
+        .route("/sessions/{id}/tool-calls", routing::post(append_tool_calls))
         .route("/sessions/{id}/cancel", routing::post(cancel_turn))
         .route("/credentials", routing::get(list_credentials))
         .route("/credentials/health", routing::get(list_credential_health))
@@ -742,6 +743,69 @@ async fn start_batch_turns(
         .header("content-type", "application/x-ndjson")
         .body(Body::from(lines.concat()))
         .unwrap()
+}
+
+async fn append_tool_calls(
+    State(server): State<AppState>,
+    Path(id): Path<String>,
+    Json(body): Json<ToolCallRequest>,
+) -> Response {
+    let session_id = match parse_session_id(&id) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    let core = server.core();
+    let mut messages = match core.messages(session_id).await {
+        Ok(messages) => messages,
+        Err(error) => return core_error_response(error),
+    };
+    let starting_ordinal = messages.len() as u64;
+    let appended = body
+        .calls
+        .into_iter()
+        .enumerate()
+        .flat_map(|(index, call)| {
+            let ordinal = starting_ordinal + (index as u64 * 2);
+            let tool_call_id = call.id.clone();
+            let tool_call_input = call.input.clone();
+            let tool_call_message = StoredMessage::new(
+                session_id,
+                ordinal,
+                Message::new(
+                    MessageRole::Assistant,
+                    vec![ContentBlock::ToolCall {
+                        id: tool_call_id.clone(),
+                        name: call.name,
+                        input: tool_call_input,
+                    }],
+                ),
+            );
+            let tool_result_message = StoredMessage::new(
+                session_id,
+                ordinal + 1,
+                Message::new(
+                    MessageRole::User,
+                    vec![ContentBlock::ToolResult {
+                        call_id: tool_call_id,
+                        output: call.output,
+                        is_error: Some(call.is_error),
+                    }],
+                ),
+            );
+            vec![tool_call_message, tool_result_message]
+        })
+        .collect::<Vec<_>>();
+
+    messages.extend(appended.clone());
+    match core
+        .store()
+        .messages()
+        .replace_for_session(session_id, messages)
+        .await
+    {
+        Ok(_) => Json(appended).into_response(),
+        Err(error) => store_error_response(error),
+    }
 }
 
 async fn cancel_turn(State(server): State<AppState>, Path(id): Path<String>) -> Response {

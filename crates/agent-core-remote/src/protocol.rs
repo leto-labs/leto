@@ -76,6 +76,23 @@ pub struct BatchTurnRequest {
     pub turns: Vec<TurnRequest>,
 }
 
+/// One tool-call transcript item to append through the canonical API.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ToolCallRecord {
+    pub id: String,
+    pub name: String,
+    pub input: serde_json::Value,
+    pub output: serde_json::Value,
+    #[serde(default)]
+    pub is_error: bool,
+}
+
+/// Request body for appending tool-call history to one session transcript.
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct ToolCallRequest {
+    pub calls: Vec<ToolCallRecord>,
+}
+
 /// Effective runtime view for one session.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionRuntimeView {
