@@ -1119,6 +1119,73 @@ async fn post_turns_profile_end_to_end_turn_path() {
     );
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn post_turns_handle_stress_burst_across_many_sessions() {
+    const REQUEST_COUNT: usize = 16;
+
+    let base = start_server().await;
+    let client = reqwest::Client::new();
+    let project = create_project(&client, &base).await;
+    let sessions =
+        join_all((0..REQUEST_COUNT).map(|_| create_session(&client, &base, &project))).await;
+    let barrier = Arc::new(tokio::sync::Barrier::new(REQUEST_COUNT));
+
+    let responses = join_all(sessions.iter().enumerate().map(|(index, session)| {
+        let barrier = barrier.clone();
+        let client = client.clone();
+        let base = base.clone();
+        let session = session.clone();
+        async move {
+            barrier.wait().await;
+            let response =
+                post_turn(&client, &base, &session, &format!("stress turn {index}")).await;
+            assert_eq!(response.status(), reqwest::StatusCode::OK);
+            (session, response.text().await.unwrap())
+        }
+    }))
+    .await;
+
+    for (index, (session, body)) in responses.into_iter().enumerate() {
+        let events = parse_ndjson_events(&body);
+        assert!(matches!(
+            events.last(),
+            Some(CoreEvent::Turn {
+                session_id,
+                event: RuntimeEvent::TurnFinished {
+                    session_id: finished_session_id,
+                    finish_reason: Some(FinishReason::Stop),
+                    ..
+                },
+            }) if *session_id == session.id && *finished_session_id == session.id
+        ));
+
+        let messages: Vec<StoredMessage> = client
+            .get(format!("{base}/v1/sessions/{}/messages", session.id))
+            .send()
+            .await
+            .unwrap()
+            .error_for_status()
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0].message.role, MessageRole::User);
+        assert_eq!(
+            messages[0].message.plain_text_lossy(),
+            format!("stress turn {index}")
+        );
+        assert_eq!(messages[1].message.role, MessageRole::Assistant);
+        assert!(
+            messages[1]
+                .message
+                .plain_text_lossy()
+                .contains(&format!("stress turn {index}"))
+        );
+    }
+}
+
 #[tokio::test]
 async fn post_stream_turns_streams_sse_until_turn_finished() {
     let base = start_server().await;
