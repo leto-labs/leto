@@ -17,6 +17,7 @@
 //! [`provider::Provider`] trait on top of the resolved supported API surface.
 
 pub mod assistants;
+pub mod audit_logs;
 pub mod chat_completions;
 pub mod client;
 pub mod config;
@@ -33,6 +34,7 @@ pub mod videos;
 pub mod webhooks;
 
 pub use assistants::*;
+pub use audit_logs::*;
 pub use chat_completions::*;
 pub use client::Client;
 pub use config::{Config, OpenAiApiMode, OpenAiApiSurface};

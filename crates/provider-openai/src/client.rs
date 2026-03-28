@@ -8,6 +8,7 @@ use reqwest::Url;
 
 use crate::Error;
 use crate::assistants::AssistantsClient;
+use crate::audit_logs::AuditLogsClient;
 use crate::chat_completions::ChatCompletionsClient;
 use crate::config::Config;
 use crate::embeddings::EmbeddingsClient;
@@ -51,6 +52,14 @@ impl Client {
     /// <https://developers.openai.com/api/reference/resources/responses/methods/create>
     pub fn responses(&self) -> ResponsesClient<'_> {
         ResponsesClient::new(self)
+    }
+
+    /// Returns the Audit Logs API surface.
+    ///
+    /// Official reference:
+    /// <https://platform.openai.com/docs/api-reference/audit-logs>
+    pub fn audit_logs(&self) -> AuditLogsClient<'_> {
+        AuditLogsClient::new(self)
     }
 
     /// Returns the Assistants API surface.
