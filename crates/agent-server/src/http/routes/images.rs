@@ -14,7 +14,7 @@ const MAX_IMAGE_COUNT: u32 = 10;
 const PLACEHOLDER_IMAGE_PNG_BASE64: &str =
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAukB9pM5v1wAAAAASUVORK5CYII=";
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Default)]
 #[serde(default)]
 pub(in crate::http) struct ImageGenerationRequest {
     pub prompt: String,
@@ -23,19 +23,6 @@ pub(in crate::http) struct ImageGenerationRequest {
     pub size: Option<String>,
     pub response_format: Option<String>,
     pub user: Option<String>,
-}
-
-impl Default for ImageGenerationRequest {
-    fn default() -> Self {
-        Self {
-            prompt: String::new(),
-            model: None,
-            n: None,
-            size: None,
-            response_format: None,
-            user: None,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize)]

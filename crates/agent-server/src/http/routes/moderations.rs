@@ -15,20 +15,11 @@ pub(in crate::http) enum ModerationInput {
     Texts(Vec<String>),
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Default)]
 #[serde(default)]
 pub(in crate::http) struct ModerationRequest {
     pub model: Option<String>,
     pub input: Option<ModerationInput>,
-}
-
-impl Default for ModerationRequest {
-    fn default() -> Self {
-        Self {
-            model: None,
-            input: None,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize)]
