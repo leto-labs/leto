@@ -20,12 +20,13 @@ use brain_types::{
 
 use crate::api::BrainApi;
 use crate::server::BrainServer;
-use crate::types::{CreateProjectRequest, SendMessageRequest};
+use crate::types::{CreateProjectRequest, HealthResponse, SendMessageRequest};
 
 type AppState = Arc<BrainServer>;
 
 pub fn build_router(server: Arc<BrainServer>) -> Router {
     Router::new()
+        .route("/health", routing::get(health))
         // Project CRUD
         .route(
             "/projects",
@@ -88,6 +89,10 @@ pub async fn serve(
 }
 
 // -- Project handlers --
+
+async fn health() -> impl IntoResponse {
+    Json(HealthResponse::current())
+}
 
 async fn create_project(
     State(server): State<AppState>,

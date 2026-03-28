@@ -3,7 +3,7 @@ use std::sync::Arc;
 use brain_core::Brain;
 use brain_loops::SimpleLoop;
 use brain_providers::MockProvider;
-use brain_server::{BrainServer, ServerEvent, build_router};
+use brain_server::{BrainServer, HealthResponse, ServerEvent, build_router};
 use brain_stores::InMemoryStore;
 use brain_types::*;
 use futures::StreamExt;
@@ -235,6 +235,18 @@ async fn send_message_returns_202() {
 }
 
 // -- Status --
+
+#[tokio::test]
+async fn health_returns_200() {
+    let base = start_server().await;
+    let client = reqwest::Client::new();
+
+    let resp = client.get(format!("{base}/health")).send().await.unwrap();
+    assert_eq!(resp.status(), 200);
+
+    let health: HealthResponse = resp.json().await.unwrap();
+    assert_eq!(health.status, "ok");
+}
 
 #[tokio::test]
 async fn status_returns_200() {

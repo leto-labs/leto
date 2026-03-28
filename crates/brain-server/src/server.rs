@@ -656,7 +656,7 @@ mod tests {
         let msgs = server.list_messages(session.id).await.unwrap();
         assert!(!msgs.is_empty(), "should have messages after a turn");
         assert_eq!(msgs[0].role, brain_types::Role::User);
-        assert_eq!(msgs[0].content, "hello");
+        assert_eq!(msgs[0].content, brain_types::MessageContent::text("hello"));
     }
 
     #[tokio::test]

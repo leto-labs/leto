@@ -881,6 +881,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "brain-server"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "brain-core",
+ "brain-loops",
+ "brain-providers",
+ "brain-stores",
+ "brain-types",
+ "chrono",
+ "futures",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-stream",
+ "tokio-util",
+ "tracing",
+ "ulid",
+]
+
+[[package]]
 name = "brain-stores"
 version = "0.1.0"
 dependencies = [

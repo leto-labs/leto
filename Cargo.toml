@@ -26,6 +26,7 @@ members = [
     "crates/brain-loops",
     "crates/brain-tools",
     "crates/brain-transports",
+    "crates/brain-server",
     "crates/brain-core",
     "crates/brain-acp",
     "crates/brain-cli",
@@ -127,6 +128,7 @@ brain-stores = { path = "crates/brain-stores" }
 brain-loops = { path = "crates/brain-loops" }
 brain-transports = { path = "crates/brain-transports" }
 brain-tools = { path = "crates/brain-tools" }
+brain-server = { path = "crates/brain-server" }
 brain-core = { path = "crates/brain-core" }
 brain-acp = { path = "crates/brain-acp" }
 brain-config = { path = "crates/brain-config" }

@@ -1,0 +1,3 @@
+- [x] Add a `brain-server` spec delta for the lightweight health endpoint
+- [x] Implement `GET /health` in the legacy `brain-server` router
+- [x] Add HTTP integration coverage for the new route
