@@ -180,12 +180,12 @@ async fn canonical_agents_route_returns_agent_list() {
 }
 
 #[tokio::test]
-async fn canonical_mcp_tools_route_returns_agent_list() {
+async fn canonical_mcp_servers_route_returns_agent_list() {
     let base = start_server().await;
     let client = reqwest::Client::new();
 
     let tools: Vec<AgentInfoRecord> = client
-        .get(format!("{base}/v1/mcp/tools"))
+        .get(format!("{base}/v1/mcp/servers"))
         .send()
         .await
         .unwrap()
