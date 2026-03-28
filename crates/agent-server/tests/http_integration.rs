@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::env;
 use std::sync::Arc;
 use std::time::Duration;
@@ -14,16 +15,23 @@ use agent_store::{
     CredentialEntry, CredentialHealth, Project, ProviderCredential, Session, StoredMessage,
 };
 use futures::StreamExt;
-use provider::{ContentBlock, FinishReason, Message, MessageRole, MockProvider};
+use provider::{
+    ContentBlock, EventStream, FinishReason, Message, MessageRole, MockProvider, Provider,
+    ProviderCapabilities, ProviderInfo, Request, StreamGranularity,
+};
 use provider_openai::{
     AuditLogPage, ChatCompletionObject, Client, Config, EmbeddingInput, EmbeddingRequest,
     VectorStoreCreateRequest, VideoCreateRequest,
 };
 
 fn make_server() -> Arc<AgentServer> {
+    make_server_with_provider(Arc::new(MockProvider::new()))
+}
+
+fn make_server_with_provider(provider: Arc<dyn Provider>) -> Arc<AgentServer> {
     let core: Arc<dyn AgentCore> = Arc::new(futures::executor::block_on(async {
         AgentCoreNative::builder(Arc::new(agent_store::InMemoryStore::new()))
-            .with_provider("mock", Arc::new(MockProvider::new()))
+            .with_provider("mock", provider)
             .build()
             .await
             .unwrap()
@@ -40,6 +48,72 @@ async fn start_server() -> String {
         axum::serve(listener, router).await.unwrap();
     });
     format!("http://{addr}")
+}
+
+async fn start_server_with_provider(provider: Arc<dyn Provider>) -> String {
+    let server = make_server_with_provider(provider);
+    let router = build_router(server);
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, router).await.unwrap();
+    });
+    format!("http://{addr}")
+}
+
+struct RateLimitedProvider;
+
+impl Provider for RateLimitedProvider {
+    fn stream<'a>(
+        &'a self,
+        _request: &'a Request,
+    ) -> futures::future::BoxFuture<'a, Result<EventStream<'a>, provider::Error>> {
+        Box::pin(async {
+            Err(provider::Error::Inference(
+                "429 Too Many Requests: rate limit exceeded".into(),
+            ))
+        })
+    }
+
+    fn info(&self) -> ProviderInfo {
+        ProviderInfo {
+            name: "mock".into(),
+            default_model_id: Some("mock-echo".into()),
+            capabilities: ProviderCapabilities {
+                system_messages: true,
+                developer_messages: true,
+                input_text: true,
+                input_image_urls: false,
+                tool_calls: false,
+                tool_results: false,
+                reasoning_blocks: false,
+                refusal_blocks: false,
+                tool_call_argument_deltas: false,
+                parallel_tool_calls: false,
+                stream_granularity: StreamGranularity::Block,
+            },
+            models: vec![provider::ModelInfo {
+                id: Cow::Borrowed("mock-echo"),
+                name: Cow::Borrowed("Mock Echo"),
+                family: Some(Cow::Borrowed("mock")),
+                reasoning_efforts: Cow::Borrowed(&[]),
+                tool_call: false,
+                attachment: false,
+                structured_output: Some(false),
+                temperature: Some(true),
+                knowledge: None,
+                release_date: None,
+                last_updated: None,
+                open_weights: None,
+                input_modalities: Cow::Borrowed(&["text"]),
+                output_modalities: Cow::Borrowed(&["text"]),
+                cost: None,
+                limit: None,
+                status: None,
+                capabilities: None,
+            }],
+        }
+    }
 }
 
 async fn create_project(client: &reqwest::Client, base: &str) -> Project {
@@ -1140,6 +1214,33 @@ async fn canonical_chat_completions_route_returns_non_streaming_completion() {
                 provider_openai::ChatCompletionMessageContent::Parts(_) => false,
             })
     );
+}
+
+#[tokio::test]
+async fn canonical_chat_completions_route_surfaces_rate_limited_provider_errors() {
+    let base = start_server_with_provider(Arc::new(RateLimitedProvider)).await;
+    let client = reqwest::Client::new();
+
+    let response = client
+        .post(format!("{base}/v1/chat/completions"))
+        .json(&serde_json::json!({
+            "model": "mock-echo",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "trigger provider rate limit"
+                }
+            ]
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), reqwest::StatusCode::BAD_GATEWAY);
+    let error: ErrorResponse = response.json().await.unwrap();
+    assert_eq!(error.error.code, "runtime_error");
+    assert!(error.error.message.contains("429 Too Many Requests"));
+    assert!(error.error.message.contains("rate limit exceeded"));
 }
 
 #[tokio::test]
