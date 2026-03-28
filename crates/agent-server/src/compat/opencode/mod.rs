@@ -172,13 +172,14 @@ async fn session_meta(server: &AppState, session_id: SessionId) -> CompatSession
         })
 }
 
-fn compat_project(
+async fn compat_project(
     project: &Project,
     compat: &Arc<crate::compat::opencode::state::CompatState>,
 ) -> ProjectDoc {
     let sandboxes = compat
         .worktrees
-        .blocking_read()
+        .read()
+        .await
         .keys()
         .cloned()
         .collect::<Vec<_>>();

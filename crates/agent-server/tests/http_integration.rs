@@ -469,6 +469,23 @@ async fn create_project(client: &reqwest::Client, base: &str) -> Project {
         .unwrap()
 }
 
+async fn create_project_with_root(client: &reqwest::Client, base: &str, root: &Path) -> Project {
+    client
+        .post(format!("{base}/v1/projects"))
+        .json(&serde_json::json!({
+            "name": "agent-server-test",
+            "root": root.display().to_string(),
+        }))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap()
+}
+
 async fn create_session(client: &reqwest::Client, base: &str, project: &Project) -> Session {
     client
         .post(format!("{base}/v1/projects/{}/sessions", project.id))
@@ -2402,6 +2419,267 @@ async fn compat_config_provider_and_prompt_routes_are_real() {
         .await
         .unwrap();
     assert_eq!(prompt_async.status(), reqwest::StatusCode::NO_CONTENT);
+}
+
+#[tokio::test]
+async fn compat_warmup_routes_return_usable_bootstrap_data() {
+    let base = start_server().await;
+    let client = reqwest::Client::new();
+
+    let temp_root =
+        env::temp_dir().join(format!("agent-server-compat-warmup-{}", ulid::Ulid::new()));
+    fs::create_dir_all(&temp_root).unwrap();
+    let directory = temp_root.display().to_string();
+
+    let project = create_project_with_root(&client, &base, &temp_root).await;
+    let session = create_session(&client, &base, &project).await;
+    let compat_session_id = format!("ses{}", session.id);
+    let project_id = project.id.to_string();
+
+    let health: serde_json::Value = client
+        .get(format!("{base}/v1/compat/opencode/global/health"))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(health["healthy"], serde_json::json!(true));
+
+    let global_path: serde_json::Value = client
+        .get(format!("{base}/v1/compat/opencode/path"))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(
+        global_path["directory"]
+            .as_str()
+            .is_some_and(|value| !value.is_empty())
+    );
+    assert_eq!(global_path["directory"], global_path["worktree"]);
+
+    let global_config: serde_json::Value = client
+        .get(format!("{base}/v1/compat/opencode/global/config"))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(global_config.as_object().is_some());
+
+    let providers: serde_json::Value = client
+        .get(format!("{base}/v1/compat/opencode/provider"))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(
+        providers["all"]
+            .as_array()
+            .is_some_and(|items| { items.iter().any(|item| item["id"] == "mock") })
+    );
+
+    let projects: serde_json::Value = client
+        .get(format!("{base}/v1/compat/opencode/project"))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(projects.as_array().is_some_and(|items| {
+        items
+            .iter()
+            .any(|item| item["id"] == project_id && item["worktree"] == directory)
+    }));
+
+    let current_project: serde_json::Value = client
+        .get(format!("{base}/v1/compat/opencode/project/current"))
+        .query(&[("directory", directory.as_str())])
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(current_project["id"], serde_json::json!(project_id));
+    assert_eq!(current_project["worktree"], serde_json::json!(directory));
+
+    let agents: serde_json::Value = client
+        .get(format!("{base}/v1/compat/opencode/agent"))
+        .query(&[("directory", directory.as_str())])
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(
+        agents
+            .as_array()
+            .is_some_and(|items| items.iter().any(|item| item["name"] == "build"))
+    );
+
+    let config: serde_json::Value = client
+        .get(format!("{base}/v1/compat/opencode/config"))
+        .query(&[("directory", directory.as_str())])
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(config.as_object().is_some());
+
+    let scoped_path: serde_json::Value = client
+        .get(format!("{base}/v1/compat/opencode/path"))
+        .query(&[("directory", directory.as_str())])
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(scoped_path["directory"], serde_json::json!(directory));
+    assert_eq!(scoped_path["worktree"], serde_json::json!(directory));
+
+    let session_status: serde_json::Value = client
+        .get(format!("{base}/v1/compat/opencode/session/status"))
+        .query(&[("directory", directory.as_str())])
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(
+        session_status
+            .as_object()
+            .is_some_and(|items| items.contains_key(&compat_session_id))
+    );
+
+    let vcs: serde_json::Value = client
+        .get(format!("{base}/v1/compat/opencode/vcs"))
+        .query(&[("directory", directory.as_str())])
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(vcs["branch"].as_str().is_some());
+
+    let commands: serde_json::Value = client
+        .get(format!("{base}/v1/compat/opencode/command"))
+        .query(&[("directory", directory.as_str())])
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(commands.as_array().is_some());
+
+    let permissions: serde_json::Value = client
+        .get(format!("{base}/v1/compat/opencode/permission"))
+        .query(&[("directory", directory.as_str())])
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(permissions.as_array().is_some());
+
+    let questions: serde_json::Value = client
+        .get(format!("{base}/v1/compat/opencode/question"))
+        .query(&[("directory", directory.as_str())])
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(questions.as_array().is_some());
+
+    let sessions: serde_json::Value = client
+        .get(format!("{base}/v1/compat/opencode/session"))
+        .query(&[("directory", directory.as_str()), ("limit", "20")])
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(sessions.as_array().is_some_and(|items| {
+        items
+            .iter()
+            .any(|item| item["id"] == compat_session_id && item["projectID"] == project_id)
+    }));
+
+    let mcp: serde_json::Value = client
+        .get(format!("{base}/v1/compat/opencode/mcp"))
+        .query(&[("directory", directory.as_str())])
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(mcp.as_object().is_some());
+
+    let lsp: serde_json::Value = client
+        .get(format!("{base}/v1/compat/opencode/lsp"))
+        .query(&[("directory", directory.as_str())])
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(lsp.as_array().is_some());
+
+    fs::remove_dir_all(&temp_root).unwrap();
 }
 
 #[tokio::test]
