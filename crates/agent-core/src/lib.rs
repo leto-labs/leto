@@ -1895,7 +1895,7 @@ max_tokens = 512
     }
 
     #[tokio::test]
-    async fn persist_completed_trajectory_upserts_when_present() {
+    async fn persist_completed_trajectory_ignores_non_trajectory_events() {
         let store = Arc::new(InMemoryStore::new());
         let core = AgentCoreNative::builder(store.clone())
             .with_provider("mock", Arc::new(MockProvider::new()))
@@ -1909,8 +1909,14 @@ max_tokens = 512
         let session = core.create_session(project.id).await.unwrap();
         let trajectory = sample_trajectory(session.id);
 
-        let event = RuntimeEvent::AtifTrajectoryCompleted {
-            trajectory: trajectory.clone(),
+        core.upsert_trajectory(session.id, trajectory.clone())
+            .await
+            .unwrap();
+
+        let event = RuntimeEvent::TurnFinished {
+            session_id: session.id,
+            turn_index: 0,
+            finish_reason: Some(FinishReason::Stop),
         };
         core.persist_completed_trajectory(session.id, &event).await;
 
