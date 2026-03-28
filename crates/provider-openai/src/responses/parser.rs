@@ -628,4 +628,56 @@ mod tests {
         assert_eq!(usage.cache_write, Some(3));
         assert_eq!(usage.reasoning, Some(6));
     }
+
+    #[test]
+    fn preserves_raw_response_payload_for_debug_dumping() {
+        let raw = serde_json::json!({
+            "id": "resp_debug",
+            "object": "response",
+            "status": "completed",
+            "service_tier": "priority",
+            "debug_dump": {
+                "trace_id": "trace-debug-123",
+                "node": "edge-a"
+            },
+            "output": [{
+                "type": "message",
+                "id": "msg_debug",
+                "role": "assistant",
+                "status": "completed",
+                "content": [{
+                    "type": "output_text",
+                    "text": "hello",
+                    "annotations": []
+                }],
+                "debug_part": {
+                    "segment": 7
+                }
+            }]
+        });
+
+        let parsed = parse_response_object_value(raw);
+
+        assert_eq!(parsed.service_tier.as_deref(), Some("priority"));
+        assert_eq!(
+            parsed
+                .raw
+                .pointer("/debug_dump/trace_id")
+                .and_then(Value::as_str),
+            Some("trace-debug-123")
+        );
+
+        match &parsed.output[0] {
+            ResponseOutputItem::Message(message) => {
+                assert_eq!(
+                    message
+                        .raw
+                        .pointer("/debug_part/segment")
+                        .and_then(Value::as_i64),
+                    Some(7)
+                );
+            }
+            other => panic!("expected message output item, got {other:?}"),
+        }
+    }
 }
