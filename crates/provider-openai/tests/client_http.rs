@@ -1,6 +1,7 @@
+use futures::StreamExt;
 use provider_openai::{
-    Client, Config, Error, ResponseInputContentPart, ResponseInputItem, ResponseInputRole,
-    ResponseRequest,
+    Client, Config, Error, ResponseEvent, ResponseInputContentPart, ResponseInputItem,
+    ResponseInputRole, ResponseRequest, ResponseStreamTransport,
 };
 use serde_json::Value;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -50,13 +51,15 @@ async fn read_http_request(socket: &mut tokio::net::TcpStream) -> CapturedReques
     CapturedRequest { head, body }
 }
 
-async fn spawn_json_server(
+async fn spawn_http_server(
     status_line: &str,
+    content_type: &str,
     response_body: String,
 ) -> (String, oneshot::Receiver<CapturedRequest>) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let status_line = status_line.to_owned();
+    let content_type = content_type.to_owned();
     let (tx, rx) = oneshot::channel();
 
     tokio::spawn(async move {
@@ -65,7 +68,7 @@ async fn spawn_json_server(
         let _ = tx.send(request);
 
         let response = format!(
-            "HTTP/1.1 {status_line}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+            "HTTP/1.1 {status_line}\r\ncontent-type: {content_type}\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
             response_body.len(),
             response_body
         );
@@ -91,7 +94,8 @@ async fn create_response_sends_expected_headers_and_defaults() {
     })
     .to_string();
 
-    let (base_url, request_rx) = spawn_json_server("200 OK", response_body).await;
+    let (base_url, request_rx) =
+        spawn_http_server("200 OK", "application/json", response_body).await;
     let client = Client::new(
         Config::new("sk-test")
             .with_base_url(base_url)
@@ -162,7 +166,8 @@ async fn create_response_surfaces_structured_api_errors() {
     })
     .to_string();
 
-    let (base_url, request_rx) = spawn_json_server("429 Too Many Requests", response_body).await;
+    let (base_url, request_rx) =
+        spawn_http_server("429 Too Many Requests", "application/json", response_body).await;
     let client = Client::new(
         Config::new("sk-test")
             .with_base_url(base_url)
@@ -190,5 +195,73 @@ async fn create_response_surfaces_structured_api_errors() {
             assert_eq!(message, "429 Too Many Requests: rate limit exceeded");
         }
         other => panic!("expected inference error, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn stream_response_over_sse_parses_events_and_terminal_state() {
+    let response_body = concat!(
+        "data: {\"type\":\"response.output_text.delta\",\"sequence_number\":1,\"item_id\":\"msg_1\",\"output_index\":0,\"content_index\":0,\"delta\":\"hel\"}\n\n",
+        "data: {\"type\":\"response.completed\",\"sequence_number\":2,\"response\":{\"id\":\"resp_test\",\"status\":\"completed\",\"output\":[],\"usage\":{\"input_tokens\":1,\"output_tokens\":2,\"total_tokens\":3}}}\n\n",
+        "data: [DONE]\n\n"
+    )
+    .to_owned();
+
+    let (base_url, request_rx) =
+        spawn_http_server("200 OK", "text/event-stream", response_body).await;
+    let client = Client::new(
+        Config::new("sk-test")
+            .with_base_url(base_url)
+            .with_model("gpt-test"),
+    );
+
+    let mut stream = client
+        .responses()
+        .stream(
+            &ResponseRequest {
+                input: vec![ResponseInputItem::message(
+                    ResponseInputRole::User,
+                    vec![ResponseInputContentPart::input_text("hello from test")],
+                )],
+                ..ResponseRequest::default()
+            },
+            ResponseStreamTransport::Sse,
+        )
+        .await
+        .unwrap();
+
+    let mut events = Vec::new();
+    while let Some(event) = stream.next().await {
+        events.push(event.unwrap());
+    }
+
+    let request = request_rx.await.unwrap();
+    let request_head = request.head.to_lowercase();
+    assert!(request_head.contains("post /v1/responses http/1.1"));
+    assert!(request_head.contains("accept: text/event-stream"));
+    assert_eq!(
+        request.body.get("stream").and_then(Value::as_bool),
+        Some(true)
+    );
+    assert_eq!(
+        request.body.get("model").and_then(Value::as_str),
+        Some("gpt-test")
+    );
+
+    assert_eq!(events.len(), 2);
+    assert_eq!(events[0].sequence_number, Some(1));
+    match &events[0].event {
+        ResponseEvent::OutputTextDelta { delta, .. } => assert_eq!(delta, "hel"),
+        other => panic!("expected output text delta, got {other:?}"),
+    }
+
+    assert_eq!(events[1].sequence_number, Some(2));
+    match &events[1].event {
+        ResponseEvent::ResponseCompleted { response } => {
+            assert_eq!(response.id.as_deref(), Some("resp_test"));
+            assert_eq!(response.status.as_deref(), Some("completed"));
+            assert_eq!(response.usage.as_ref().map(|usage| usage.total), Some(3));
+        }
+        other => panic!("expected response completed event, got {other:?}"),
     }
 }
