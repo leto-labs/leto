@@ -54,6 +54,46 @@ async fn spawn_mock_sse_server(body: String) -> (String, oneshot::Receiver<Strin
     (format!("http://{addr}/v1"), rx)
 }
 
+async fn spawn_two_request_sse_server(body: String) -> (String, oneshot::Receiver<Vec<String>>) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let (tx, rx) = oneshot::channel();
+
+    tokio::spawn(async move {
+        let mut requests = Vec::with_capacity(2);
+        for _ in 0..2 {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut buf = vec![0u8; 16 * 1024];
+            let mut request = Vec::new();
+
+            loop {
+                let n = socket.read(&mut buf).await.unwrap();
+                if n == 0 {
+                    break;
+                }
+                request.extend_from_slice(&buf[..n]);
+                if request.windows(4).any(|window| window == b"\r\n\r\n") {
+                    break;
+                }
+            }
+
+            requests.push(String::from_utf8_lossy(&request).into_owned());
+
+            let response = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            socket.write_all(response.as_bytes()).await.unwrap();
+            socket.shutdown().await.unwrap();
+        }
+
+        let _ = tx.send(requests);
+    });
+
+    (format!("http://{addr}/v1"), rx)
+}
+
 fn oauth_preset_for_base_url(base_url: String) -> OpenAiOAuthPreset {
     OpenAiOAuthPreset {
         name: "openai-oauth",
@@ -246,4 +286,58 @@ async fn openai_provider_skips_tripped_credential_for_new_sessions() {
     let second = entries.iter().find(|entry| entry.id == "cred-2").unwrap();
     assert!(!first.health.is_healthy());
     assert!(second.health.is_healthy());
+}
+
+#[tokio::test]
+async fn openai_provider_picks_up_reloaded_pool_credentials() {
+    let pool = Arc::new(CredentialPool::new(Arc::new(StickyRoundRobin::new())));
+    pool.insert("openai", CredentialEntry::bearer("cred-old", "sk-old"))
+        .await;
+
+    let (base_url, requests_rx) = spawn_two_request_sse_server(completed_sse_body()).await;
+    let provider = OpenAiProvider::from_pool(
+        Config::new("placeholder").with_base_url(base_url),
+        pool.clone(),
+    );
+
+    let mut request = Request::user_text("hello");
+    request.options.metadata.insert(
+        "session_id".into(),
+        serde_json::Value::String("session-hot-reload".into()),
+    );
+
+    drain_to_terminal(&provider, &request).await.unwrap();
+
+    pool.set_entries(
+        "openai",
+        vec![CredentialEntry::bearer("cred-new", "sk-new")],
+    )
+    .await;
+
+    drain_to_terminal(&provider, &request).await.unwrap();
+
+    let requests = requests_rx.await.unwrap();
+    assert_eq!(requests.len(), 2);
+    assert!(
+        requests[0]
+            .to_lowercase()
+            .contains("authorization: bearer sk-old")
+    );
+    assert!(
+        requests[1]
+            .to_lowercase()
+            .contains("authorization: bearer sk-new")
+    );
+
+    let entries = pool.entries("openai").await;
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].id, "cred-new");
+    assert_eq!(
+        entries[0]
+            .material
+            .headers
+            .get("Authorization")
+            .map(String::as_str),
+        Some("Bearer sk-new")
+    );
 }
