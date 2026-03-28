@@ -199,6 +199,53 @@ async fn create_response_surfaces_structured_api_errors() {
 }
 
 #[tokio::test]
+async fn create_response_surfaces_insufficient_quota_errors() {
+    let response_body = serde_json::json!({
+        "error": {
+            "message": "You exceeded your current quota, please check your plan and billing details.",
+            "type": "insufficient_quota"
+        }
+    })
+    .to_string();
+
+    let (base_url, request_rx) =
+        spawn_http_server("429 Too Many Requests", "application/json", response_body).await;
+    let client = Client::new(
+        Config::new("sk-test")
+            .with_base_url(base_url)
+            .with_model("gpt-test"),
+    );
+
+    let err = client
+        .responses()
+        .create(&ResponseRequest {
+            input: vec![ResponseInputItem::message(
+                ResponseInputRole::User,
+                vec![ResponseInputContentPart::input_text(
+                    "hello from quota test",
+                )],
+            )],
+            ..ResponseRequest::default()
+        })
+        .await
+        .unwrap_err();
+
+    let request = request_rx.await.unwrap();
+    let request_head = request.head.to_lowercase();
+    assert!(request_head.contains("post /v1/responses http/1.1"));
+
+    match err {
+        Error::Inference(message) => {
+            assert_eq!(
+                message,
+                "429 Too Many Requests: You exceeded your current quota, please check your plan and billing details."
+            );
+        }
+        other => panic!("expected inference error, got {other:?}"),
+    }
+}
+
+#[tokio::test]
 async fn stream_response_over_sse_parses_events_and_terminal_state() {
     let response_body = concat!(
         "data: {\"type\":\"response.output_text.delta\",\"sequence_number\":1,\"item_id\":\"msg_1\",\"output_index\":0,\"content_index\":0,\"delta\":\"hel\"}\n\n",
