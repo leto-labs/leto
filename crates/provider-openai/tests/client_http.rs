@@ -79,6 +79,55 @@ async fn spawn_http_server(
     (format!("http://{addr}/v1"), rx)
 }
 
+async fn spawn_concurrent_http_server() -> (String, oneshot::Receiver<Vec<CapturedRequest>>) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let (tx, rx) = oneshot::channel();
+
+    tokio::spawn(async move {
+        let mut tasks = Vec::new();
+        for _ in 0..2 {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            tasks.push(tokio::spawn(async move {
+                let request = read_http_request(&mut socket).await;
+                let request_text = request
+                    .body
+                    .pointer("/input/0/content/0/text")
+                    .and_then(Value::as_str)
+                    .unwrap_or("unknown");
+                let response_body = serde_json::json!({
+                    "id": format!("resp_{request_text}"),
+                    "object": "response",
+                    "status": "completed",
+                    "output": [],
+                    "usage": {
+                        "input_tokens": 1,
+                        "output_tokens": 1,
+                        "total_tokens": 2
+                    }
+                })
+                .to_string();
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                    response_body.len(),
+                    response_body
+                );
+                socket.write_all(response.as_bytes()).await.unwrap();
+                socket.shutdown().await.unwrap();
+                request
+            }));
+        }
+
+        let mut requests = Vec::with_capacity(2);
+        for task in tasks {
+            requests.push(task.await.unwrap());
+        }
+        let _ = tx.send(requests);
+    });
+
+    (format!("http://{addr}/v1"), rx)
+}
+
 #[tokio::test]
 async fn create_response_sends_expected_headers_and_defaults() {
     let response_body = serde_json::json!({
@@ -336,6 +385,70 @@ async fn stream_response_treats_terminal_event_then_socket_close_as_graceful_shu
         }
         other => panic!("expected response completed event, got {other:?}"),
     }
+}
+
+#[tokio::test]
+async fn create_response_supports_concurrent_requests() {
+    let (base_url, requests_rx) = spawn_concurrent_http_server().await;
+    let client = Client::new(
+        Config::new("sk-test")
+            .with_base_url(base_url)
+            .with_model("gpt-test"),
+    );
+    let client_clone = client.clone();
+
+    let first = async {
+        client
+            .responses()
+            .create(&ResponseRequest {
+                input: vec![ResponseInputItem::message(
+                    ResponseInputRole::User,
+                    vec![ResponseInputContentPart::input_text("first")],
+                )],
+                ..ResponseRequest::default()
+            })
+            .await
+            .unwrap()
+    };
+    let second = async {
+        client_clone
+            .responses()
+            .create(&ResponseRequest {
+                input: vec![ResponseInputItem::message(
+                    ResponseInputRole::User,
+                    vec![ResponseInputContentPart::input_text("second")],
+                )],
+                ..ResponseRequest::default()
+            })
+            .await
+            .unwrap()
+    };
+
+    let (first_response, second_response) = tokio::join!(first, second);
+
+    let mut request_texts = requests_rx
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|request| {
+            request
+                .body
+                .pointer("/input/0/content/0/text")
+                .and_then(Value::as_str)
+                .unwrap()
+                .to_owned()
+        })
+        .collect::<Vec<_>>();
+    request_texts.sort();
+
+    let mut response_ids = vec![
+        first_response.id.as_deref().unwrap().to_owned(),
+        second_response.id.as_deref().unwrap().to_owned(),
+    ];
+    response_ids.sort();
+
+    assert_eq!(request_texts, vec!["first", "second"]);
+    assert_eq!(response_ids, vec!["resp_first", "resp_second"]);
 }
 
 #[tokio::test]
