@@ -96,6 +96,24 @@ fn sample_trajectory(session: &Session) -> atif::Trajectory {
     }
 }
 
+fn expected_agent_records() -> Vec<AgentInfoRecord> {
+    [
+        "plan",
+        "build",
+        "general",
+        "explore",
+        "title",
+        "summary",
+        "compaction",
+    ]
+    .into_iter()
+    .map(|name| AgentInfoRecord {
+        name: name.to_owned(),
+        description: Some(name.to_owned()),
+    })
+    .collect()
+}
+
 fn parse_ndjson_events(body: &str) -> Vec<CoreEvent> {
     body.lines()
         .filter(|line| !line.trim().is_empty())
@@ -188,38 +206,17 @@ async fn canonical_agents_route_returns_agent_list() {
     let base = start_server().await;
     let client = reqwest::Client::new();
 
-    let agents: Vec<AgentInfoRecord> = client
+    let response = client
         .get(format!("{base}/v1/agents"))
         .send()
         .await
         .unwrap()
         .error_for_status()
-        .unwrap()
-        .json()
-        .await
         .unwrap();
 
-    let names = agents
-        .iter()
-        .map(|agent| agent.name.as_str())
-        .collect::<Vec<_>>();
-    assert_eq!(
-        names,
-        vec![
-            "plan",
-            "build",
-            "general",
-            "explore",
-            "title",
-            "summary",
-            "compaction",
-        ]
-    );
-    assert!(
-        agents
-            .iter()
-            .all(|agent| agent.description.as_deref() == Some(agent.name.as_str()))
-    );
+    let agents: Vec<AgentInfoRecord> = response.json().await.unwrap();
+
+    assert_eq!(agents, expected_agent_records());
 }
 
 #[tokio::test]
@@ -238,27 +235,7 @@ async fn canonical_mcp_servers_route_returns_agent_list() {
         .await
         .unwrap();
 
-    let names = tools
-        .iter()
-        .map(|tool| tool.name.as_str())
-        .collect::<Vec<_>>();
-    assert_eq!(
-        names,
-        vec![
-            "plan",
-            "build",
-            "general",
-            "explore",
-            "title",
-            "summary",
-            "compaction",
-        ]
-    );
-    assert!(
-        tools
-            .iter()
-            .all(|tool| tool.description.as_deref() == Some(tool.name.as_str()))
-    );
+    assert_eq!(tools, expected_agent_records());
 }
 
 #[tokio::test]
