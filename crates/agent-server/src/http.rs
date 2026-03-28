@@ -65,14 +65,15 @@ pub async fn serve_with_shutdown<F>(
 where
     F: Future<Output = ()> + Send + 'static,
 {
-    let router = build_router(server);
+    let router = build_router(server.clone());
     let listener = tokio::net::TcpListener::bind(addr).await?;
     tracing::info!("agent-server listening on {addr}");
-    serve_listener_with_shutdown(listener, router, shutdown_signal).await?;
+    serve_listener_with_shutdown(server, listener, router, shutdown_signal).await?;
     Ok(())
 }
 
 async fn serve_listener_with_shutdown<F>(
+    server: Arc<AgentServer>,
     listener: tokio::net::TcpListener,
     router: Router,
     shutdown_signal: F,
@@ -80,8 +81,12 @@ async fn serve_listener_with_shutdown<F>(
 where
     F: Future<Output = ()> + Send + 'static,
 {
+    let shutdown_server = server.clone();
     axum::serve(listener, router)
-        .with_graceful_shutdown(shutdown_signal)
+        .with_graceful_shutdown(async move {
+            shutdown_signal.await;
+            shutdown_server.begin_shutdown();
+        })
         .await?;
     Ok(())
 }
@@ -332,13 +337,13 @@ mod tests {
     #[tokio::test]
     async fn graceful_shutdown_waits_for_in_flight_turns() {
         let server = make_server_with_provider(Arc::new(MockProvider::new().with_delay(500)));
-        let router = build_router(server);
+        let router = build_router(server.clone());
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let base = format!("http://{addr}");
         let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
         let server_task = tokio::spawn(async move {
-            serve_listener_with_shutdown(listener, router, async move {
+            serve_listener_with_shutdown(server, listener, router, async move {
                 let _ = shutdown_rx.await;
             })
             .await

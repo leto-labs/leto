@@ -706,6 +706,41 @@ async fn graceful_shutdown_waits_for_in_flight_turn_to_finish() {
 }
 
 #[tokio::test]
+async fn graceful_shutdown_tears_down_open_event_streams() {
+    let (base, shutdown_tx, server_task) =
+        start_server_with_shutdown(Arc::new(MockProvider::new())).await;
+    let client = reqwest::Client::new();
+
+    let mut response = client
+        .get(format!("{base}/v1/events"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), reqwest::StatusCode::OK);
+    assert!(
+        response
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .starts_with("text/event-stream")
+    );
+
+    shutdown_tx.send(()).unwrap();
+
+    tokio::time::timeout(Duration::from_secs(5), server_task)
+        .await
+        .unwrap()
+        .unwrap();
+
+    let next_chunk = tokio::time::timeout(Duration::from_secs(5), response.chunk())
+        .await
+        .unwrap();
+    assert!(matches!(next_chunk, Ok(None) | Err(_)));
+}
+
+#[tokio::test]
 async fn metrics_routes_expose_prometheus_text_payload() {
     let base = start_server().await;
     let client = reqwest::Client::new();

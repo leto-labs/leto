@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use agent_core::AgentCore;
 use agent_store::StoreError;
+use tokio_util::sync::CancellationToken;
 
 use crate::compat::opencode::state::CompatState;
 use crate::types::{AgentInfoRecord, AgentServerStatus};
@@ -21,6 +22,7 @@ const BUILTIN_AGENT_NAMES: &[&str] = &[
 pub struct AgentServer {
     core: Arc<dyn AgentCore>,
     compat: Arc<CompatState>,
+    shutdown: CancellationToken,
 }
 
 impl AgentServer {
@@ -29,6 +31,7 @@ impl AgentServer {
         Self {
             core,
             compat: Arc::new(CompatState::new()),
+            shutdown: CancellationToken::new(),
         }
     }
 
@@ -39,6 +42,14 @@ impl AgentServer {
 
     pub(crate) fn compat(&self) -> Arc<CompatState> {
         self.compat.clone()
+    }
+
+    pub(crate) fn shutdown_token(&self) -> CancellationToken {
+        self.shutdown.clone()
+    }
+
+    pub(crate) fn begin_shutdown(&self) {
+        self.shutdown.cancel();
     }
 
     /// Returns lightweight server status information.

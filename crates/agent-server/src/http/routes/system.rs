@@ -48,11 +48,17 @@ pub(in crate::http) async fn list_mcp_servers(State(server): State<AppState>) ->
 pub(in crate::http) async fn events(
     State(server): State<AppState>,
 ) -> Sse<impl futures::Stream<Item = Result<SseEvent, Infallible>>> {
+    let shutdown = server.shutdown_token();
     let core = server.core();
-    let stream = core.subscribe().map(|event| {
-        let data = serde_json::to_string(&event).unwrap_or_else(|_| "{}".to_owned());
-        Ok::<_, Infallible>(SseEvent::default().data(data))
-    });
+    let stream = core
+        .subscribe()
+        .take_until(async move {
+            shutdown.cancelled().await;
+        })
+        .map(|event| {
+            let data = serde_json::to_string(&event).unwrap_or_else(|_| "{}".to_owned());
+            Ok::<_, Infallible>(SseEvent::default().data(data))
+        });
     Sse::new(stream).keep_alive(KeepAlive::new().interval(Duration::from_secs(10)))
 }
 
@@ -64,26 +70,32 @@ pub(in crate::http) async fn session_events(
         Ok(value) => value,
         Err(response) => return response.into_response(),
     };
+    let shutdown = server.shutdown_token();
     let core = server.core();
-    let stream = core.subscribe().filter_map(move |event| {
-        let include = matches!(
-            &event,
-            CoreEvent::Turn {
-                session_id: event_session_id,
-                ..
+    let stream = core
+        .subscribe()
+        .take_until(async move {
+            shutdown.cancelled().await;
+        })
+        .filter_map(move |event| {
+            let include = matches!(
+                &event,
+                CoreEvent::Turn {
+                    session_id: event_session_id,
+                    ..
+                }
+                | CoreEvent::TurnCancelled {
+                    session_id: event_session_id,
+                } if *event_session_id == session_id
+            );
+            async move {
+                if !include {
+                    return None;
+                }
+                let data = serde_json::to_string(&event).unwrap_or_else(|_| "{}".to_owned());
+                Some(Ok::<_, Infallible>(SseEvent::default().data(data)))
             }
-            | CoreEvent::TurnCancelled {
-                session_id: event_session_id,
-            } if *event_session_id == session_id
-        );
-        async move {
-            if !include {
-                return None;
-            }
-            let data = serde_json::to_string(&event).unwrap_or_else(|_| "{}".to_owned());
-            Some(Ok::<_, Infallible>(SseEvent::default().data(data)))
-        }
-    });
+        });
     Sse::new(stream)
         .keep_alive(KeepAlive::new().interval(Duration::from_secs(10)))
         .into_response()
