@@ -1,4 +1,5 @@
 use std::borrow::Cow;
+use std::collections::BTreeSet;
 use std::env;
 use std::sync::Arc;
 use std::time::Duration;
@@ -14,7 +15,7 @@ use agent_server::{AgentInfoRecord, AgentServer, AgentServerStatus, HealthRespon
 use agent_store::{
     CredentialEntry, CredentialHealth, Project, ProviderCredential, Session, StoredMessage,
 };
-use futures::StreamExt;
+use futures::{StreamExt, future::join_all};
 use provider::{
     Block, BlockKind, ContentBlock, Event, EventStream, FinishReason, Message, MessageRole,
     MockProvider, Provider, ProviderCapabilities, ProviderInfo, Request, StreamGranularity, Usage,
@@ -992,6 +993,67 @@ async fn canonical_session_management_routes_cover_project_and_session_reads() {
         .unwrap();
     assert_eq!(fetched_session.id, first_session.id);
     assert_eq!(fetched_session.project_id, project.id);
+}
+
+#[tokio::test]
+async fn canonical_session_creation_route_handles_concurrent_requests() {
+    let base = start_server().await;
+    let client = reqwest::Client::new();
+
+    let project = create_project(&client, &base).await;
+    let project_id = project.id;
+    let request_count = 8;
+    let barrier = Arc::new(tokio::sync::Barrier::new(request_count));
+
+    let sessions = join_all((0..request_count).map(|index| {
+        let barrier = barrier.clone();
+        let client = client.clone();
+        let base = base.clone();
+        tokio::spawn(async move {
+            barrier.wait().await;
+            client
+                .post(format!("{base}/v1/projects/{project_id}/sessions"))
+                .json(&serde_json::json!({
+                    "title": format!("concurrent-session-{index}"),
+                }))
+                .send()
+                .await
+                .unwrap()
+                .error_for_status()
+                .unwrap()
+                .json::<Session>()
+                .await
+                .unwrap()
+        })
+    }))
+    .await
+    .into_iter()
+    .map(|result| result.unwrap())
+    .collect::<Vec<_>>();
+
+    let created_session_ids = sessions
+        .iter()
+        .map(|session| session.id)
+        .collect::<BTreeSet<_>>();
+    assert_eq!(created_session_ids.len(), request_count);
+
+    let stored_sessions: Vec<Session> = client
+        .get(format!("{base}/v1/projects/{project_id}/sessions"))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(stored_sessions.len(), request_count);
+
+    let stored_session_ids = stored_sessions
+        .iter()
+        .map(|session| session.id)
+        .collect::<BTreeSet<_>>();
+    assert_eq!(stored_session_ids, created_session_ids);
 }
 
 #[tokio::test]
