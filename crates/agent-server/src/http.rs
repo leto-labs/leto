@@ -19,6 +19,15 @@ use crate::types::{ErrorResponse, ProviderCatalogEntry};
 
 type AppState = Arc<AgentServer>;
 
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct InvalidRequestError(&'static str);
+
+impl IntoResponse for InvalidRequestError {
+    fn into_response(self) -> Response {
+        invalid_request(self.0)
+    }
+}
+
 /// Builds the canonical and compatibility HTTP router.
 pub fn build_router(server: Arc<AgentServer>) -> Router {
     Router::new()
@@ -176,16 +185,16 @@ fn canonical_router() -> Router<AppState> {
         )
 }
 
-pub(crate) fn parse_project_id(value: &str) -> Result<ProjectId, Response> {
+pub(crate) fn parse_project_id(value: &str) -> Result<ProjectId, InvalidRequestError> {
     value
         .parse::<Ulid>()
-        .map_err(|_| invalid_request("invalid_project_id"))
+        .map_err(|_| InvalidRequestError("invalid_project_id"))
 }
 
-pub(crate) fn parse_session_id(value: &str) -> Result<SessionId, Response> {
+pub(crate) fn parse_session_id(value: &str) -> Result<SessionId, InvalidRequestError> {
     value
         .parse::<Ulid>()
-        .map_err(|_| invalid_request("invalid_session_id"))
+        .map_err(|_| InvalidRequestError("invalid_session_id"))
 }
 
 pub(crate) fn invalid_request(code: &str) -> Response {

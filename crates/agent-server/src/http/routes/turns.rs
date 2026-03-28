@@ -22,7 +22,7 @@ pub(in crate::http) async fn start_turn(
 ) -> Response {
     let session_id = match parse_session_id(&id) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let core = server.core();
     match core.turn(session_id, body.input).await {
@@ -49,7 +49,7 @@ pub(in crate::http) async fn start_turn_sse(
 ) -> Response {
     let session_id = match parse_session_id(&id) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let core = server.core();
     match core.turn(session_id, body.input).await {
@@ -73,7 +73,7 @@ pub(in crate::http) async fn start_batch_turns(
 ) -> Response {
     let session_id = match parse_session_id(&id) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let core = server.core();
     let mut lines = Vec::new();
@@ -104,7 +104,7 @@ pub(in crate::http) async fn append_tool_calls(
 ) -> Response {
     let session_id = match parse_session_id(&id) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let core = server.core();
     let mut messages = match core.messages(session_id).await {
@@ -166,7 +166,7 @@ pub(in crate::http) async fn cancel_turn(
 ) -> Response {
     let session_id = match parse_session_id(&id) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let core = server.core();
     match core.cancel_turn(session_id).await {

@@ -199,17 +199,14 @@ pub(super) async fn session_get(
 ) -> Response {
     let session_id = match parse_compat_session_id(&session_id) {
         Ok(id) => id,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let core = server.core();
     let session = match core.session(session_id).await {
         Ok(session) => session,
         Err(error) => return compat_error("core_error", error.to_string()),
     };
-    let project = match core.project(session.project_id).await {
-        Ok(project) => Some(project),
-        Err(_) => None,
-    };
+    let project = core.project(session.project_id).await.ok();
     let meta = session_meta(&server, session.id).await;
     Json(compat_session(&session, project.as_ref(), &meta)).into_response()
 }

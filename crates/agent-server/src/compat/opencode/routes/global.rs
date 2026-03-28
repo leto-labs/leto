@@ -192,38 +192,40 @@ fn sse_doc<T: JsonSchema>(
 ) -> ApiMethodDocs {
     // `aide` does not infer `Sse<_>` response docs like it does for `Json<T>`,
     // so SSE routes still need a small manual doc shim.
-    let mut operation = Operation::default();
-    operation.operation_id = Some(operation_id.to_owned());
-    operation.summary = Some(summary.to_owned());
-    operation.description = Some(description.to_owned());
-    operation.parameters = query_params
-        .iter()
-        .map(|(name, description)| {
-            ReferenceOr::Item(Parameter::Query {
-                parameter_data: ParameterData {
-                    name: (*name).to_owned(),
-                    description: description.map(|value| value.to_owned()),
-                    required: false,
-                    deprecated: None,
-                    format: ParameterSchemaOrContent::Schema(SchemaObject {
-                        json_schema: serde_json::from_value(
-                            serde_json::json!({ "type": "string" }),
-                        )
-                        .expect("query parameter schema should deserialize"),
-                        external_docs: None,
+    let mut operation = Operation {
+        operation_id: Some(operation_id.to_owned()),
+        summary: Some(summary.to_owned()),
+        description: Some(description.to_owned()),
+        parameters: query_params
+            .iter()
+            .map(|(name, description)| {
+                ReferenceOr::Item(Parameter::Query {
+                    parameter_data: ParameterData {
+                        name: (*name).to_owned(),
+                        description: description.map(|value| value.to_owned()),
+                        required: false,
+                        deprecated: None,
+                        format: ParameterSchemaOrContent::Schema(SchemaObject {
+                            json_schema: serde_json::from_value(
+                                serde_json::json!({ "type": "string" }),
+                            )
+                            .expect("query parameter schema should deserialize"),
+                            external_docs: None,
+                            example: None,
+                        }),
                         example: None,
-                    }),
-                    example: None,
-                    examples: Default::default(),
-                    explode: None,
-                    extensions: Default::default(),
-                },
-                allow_reserved: false,
-                style: QueryStyle::default(),
-                allow_empty_value: None,
+                        examples: Default::default(),
+                        explode: None,
+                        extensions: Default::default(),
+                    },
+                    allow_reserved: false,
+                    style: QueryStyle::default(),
+                    allow_empty_value: None,
+                })
             })
-        })
-        .collect();
+            .collect(),
+        ..Default::default()
+    };
     operation
         .responses
         .get_or_insert_with(Default::default)
@@ -284,15 +286,14 @@ fn inline_local_defs(schema: &mut Value) {
 fn inline_local_defs_refs(value: &mut Value, defs: &serde_json::Map<String, Value>) {
     match value {
         Value::Object(map) => {
-            if let Some(reference) = map.get("$ref").and_then(Value::as_str) {
-                if let Some(name) = reference.strip_prefix("#/$defs/") {
-                    if let Some(schema) = defs.get(name) {
-                        *value = schema.clone();
-                        strip_schema_identity_fields(value);
-                        inline_local_defs_refs(value, defs);
-                        return;
-                    }
-                }
+            if let Some(reference) = map.get("$ref").and_then(Value::as_str)
+                && let Some(name) = reference.strip_prefix("#/$defs/")
+                && let Some(schema) = defs.get(name)
+            {
+                *value = schema.clone();
+                strip_schema_identity_fields(value);
+                inline_local_defs_refs(value, defs);
+                return;
             }
 
             if let Some(local_defs) = map

@@ -267,7 +267,7 @@ async fn provider_auth(
     Query(_query): Query<CompatQuery>,
 ) -> Response {
     if let Err(response) = require_bearer_token(&headers) {
-        return response;
+        return response.into_response();
     }
     let payload = server
         .core()
@@ -294,7 +294,7 @@ async fn provider_oauth_authorize(
     Json(_body): Json<ProviderOAuthAuthorizeRequest>,
 ) -> Response {
     if let Err(response) = require_bearer_token(&headers) {
-        return response;
+        return response.into_response();
     }
     Json(ProviderAuthAuthorizationDoc {
         url: format!("https://example.invalid/oauth/{provider_id}"),
@@ -314,7 +314,7 @@ async fn provider_oauth_callback(
     Json(body): Json<ProviderOAuthCallbackRequest>,
 ) -> Response {
     if let Err(response) = require_bearer_token(&headers) {
-        return response;
+        return response.into_response();
     }
     let entry = compat_oauth_entry(
         provider_id.clone(),
@@ -334,7 +334,7 @@ async fn auth_set(
     Json(body): Json<AuthSetRequest>,
 ) -> Response {
     if let Err(response) = require_bearer_token(&headers) {
-        return response;
+        return response.into_response();
     }
     let entry = match body {
         AuthSetRequest::Api(ApiAuthRequest { key, .. }) => {
@@ -370,7 +370,7 @@ async fn auth_remove(
     Path(ProviderIdPath { provider_id }): Path<ProviderIdPath>,
 ) -> Response {
     if let Err(response) = require_bearer_token(&headers) {
-        return response;
+        return response.into_response();
     }
     let _ = server
         .core()

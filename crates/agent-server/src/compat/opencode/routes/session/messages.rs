@@ -110,7 +110,7 @@ async fn session_messages(
 ) -> Response {
     let session_id = match parse_compat_session_id(&session_id) {
         Ok(id) => id,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let mut messages = match server.core().messages(session_id).await {
         Ok(messages) => messages,
@@ -132,11 +132,11 @@ async fn session_message(
 ) -> Response {
     let session_id = match parse_compat_session_id(&session_id) {
         Ok(id) => id,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let message_id = match parse_compat_message_id(&message_id) {
         Ok(id) => id,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     match server.core().messages(session_id).await {
         Ok(messages) => match messages.iter().position(|message| message.id == message_id) {
@@ -161,11 +161,11 @@ async fn session_message_delete(
 ) -> Response {
     let session_id = match parse_compat_session_id(&session_id) {
         Ok(id) => id,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let message_id = match parse_compat_message_id(&message_id) {
         Ok(id) => id,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let messages = match server.core().messages(session_id).await {
         Ok(messages) => messages,

@@ -360,7 +360,7 @@ async fn mcp_auth_start(
     Path(NamedPath { name }): Path<NamedPath>,
 ) -> Response {
     if let Err(response) = require_bearer_token(&headers) {
-        return response;
+        return response.into_response();
     }
     Json(McpAuthStartResponseDoc {
         authorization_url: format!("https://example.invalid/mcp/{name}/oauth"),
@@ -376,7 +376,7 @@ async fn mcp_auth_callback(
     Json(_body): Json<McpAuthCallbackRequest>,
 ) -> Response {
     if let Err(response) = require_bearer_token(&headers) {
-        return response;
+        return response.into_response();
     }
     let status = mcp_connected_status();
     server
@@ -395,7 +395,7 @@ async fn mcp_auth_authenticate(
     Path(NamedPath { name }): Path<NamedPath>,
 ) -> Response {
     if let Err(response) = require_bearer_token(&headers) {
-        return response;
+        return response.into_response();
     }
     let body = McpAuthCallbackRequest {
         code: String::new(),
@@ -417,7 +417,7 @@ async fn mcp_auth_remove(
     Path(NamedPath { name }): Path<NamedPath>,
 ) -> Response {
     if let Err(response) = require_bearer_token(&headers) {
-        return response;
+        return response.into_response();
     }
     server.compat().mcp_servers.write().await.remove(&name);
     Json(SuccessResponseDoc {

@@ -184,7 +184,7 @@ async fn session_create(
 ) -> Response {
     let project = match resolve_current_project(&server, &params).await {
         Ok(project) => project,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let core = server.core();
     let mut session = match core.create_session(project.id).await {
@@ -229,7 +229,7 @@ async fn session_update(
 ) -> Response {
     let session_id = match parse_compat_session_id(&session_id) {
         Ok(id) => id,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let update = SessionUpdate {
         title: body.title.clone(),
@@ -251,10 +251,7 @@ async fn session_update(
             .map(|archived| archived as i64)
             .or(entry.archived_at);
     }
-    let project = match core.project(session.project_id).await {
-        Ok(project) => Some(project),
-        Err(_) => None,
-    };
+    let project = core.project(session.project_id).await.ok();
     let meta = session_meta(&server, session.id).await;
     Json(compat_session(&session, project.as_ref(), &meta)).into_response()
 }
@@ -266,7 +263,7 @@ async fn session_delete(
 ) -> Response {
     let session_id = match parse_compat_session_id(&session_id) {
         Ok(id) => id,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     match server.core().delete_session(session_id).await {
         Ok(()) => {
@@ -290,7 +287,7 @@ async fn session_fork(
 ) -> Response {
     let parent_id = match parse_compat_session_id(&session_id) {
         Ok(id) => id,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let parent = match server.core().session(parent_id).await {
         Ok(session) => session,
@@ -335,7 +332,7 @@ async fn session_abort(
 ) -> Response {
     let session_id = match parse_compat_session_id(&session_id) {
         Ok(id) => id,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let _ = server.core().cancel_turn(session_id).await;
     Json(true).into_response()
@@ -348,7 +345,7 @@ async fn session_share(
 ) -> Response {
     let internal = match parse_compat_session_id(&session_id) {
         Ok(id) => id,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     {
         let compat = server.compat();
@@ -372,7 +369,7 @@ async fn session_unshare(
 ) -> Response {
     let internal = match parse_compat_session_id(&session_id) {
         Ok(id) => id,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     {
         let compat = server.compat();

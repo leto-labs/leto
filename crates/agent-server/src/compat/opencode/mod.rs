@@ -62,6 +62,29 @@ use self::types::tui::{
 use crate::server::AgentServer;
 type AppState = Arc<AgentServer>;
 
+#[derive(Debug, Clone, Copy)]
+enum CompatRequestError {
+    InvalidRequest(&'static str),
+    MissingBearerToken,
+}
+
+impl IntoResponse for CompatRequestError {
+    fn into_response(self) -> Response {
+        match self {
+            Self::InvalidRequest(code) => invalid_request(code),
+            Self::MissingBearerToken => (
+                StatusCode::UNAUTHORIZED,
+                Json(BadRequestErrorDoc {
+                    data: json!({ "code": "unauthorized", "message": "missing bearer token" }),
+                    errors: Vec::new(),
+                    success: false,
+                }),
+            )
+                .into_response(),
+        }
+    }
+}
+
 pub fn router() -> Router<AppState> {
     routes::build_router()
 }
@@ -93,10 +116,10 @@ async fn filtered_sessions(
         if !archived && meta.archived_at.is_some() {
             continue;
         }
-        if let Some(start) = start {
-            if session.updated_at.timestamp_millis() < start {
-                continue;
-            }
+        if let Some(start) = start
+            && session.updated_at.timestamp_millis() < start
+        {
+            continue;
         }
         if let Some(search) = &search {
             let title = session.title.clone().unwrap_or_default().to_lowercase();
@@ -443,7 +466,7 @@ async fn prompt_like(
 ) -> Response {
     let internal = match parse_compat_session_id(session_id) {
         Ok(id) => id,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let input = match kind {
         PromptKind::Message => prompt_input_from_body(&body),
@@ -526,7 +549,7 @@ async fn prompt_command_like(
 async fn prompt_shell_like(server: &AppState, session_id: &str, body: ShellRequest) -> Response {
     let internal = match parse_compat_session_id(session_id) {
         Ok(id) => id,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let input = vec![Message::user_text(format!(
         "Run shell command: {}",
@@ -559,7 +582,7 @@ async fn prompt_shell_like(server: &AppState, session_id: &str, body: ShellReque
 async fn prompt_text_like(server: &AppState, session_id: &str, prompt: String) -> Response {
     let internal = match parse_compat_session_id(session_id) {
         Ok(id) => id,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let input = vec![Message::user_text(prompt)];
     let stream = match server.core().turn(internal, input).await {
@@ -618,15 +641,15 @@ async fn mutate_message_part(
 ) -> Response {
     let session_id = match parse_compat_session_id(session_id) {
         Ok(id) => id,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let message_id = match parse_compat_message_id(message_id) {
         Ok(id) => id,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let part_index = match parse_compat_part_index(message_id, part_id) {
         Ok(index) => index,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let mut messages = match server.core().messages(session_id).await {
         Ok(messages) => messages,
@@ -640,7 +663,7 @@ async fn mutate_message_part(
     }
     match body {
         Some(ref body) => {
-            message.message.content[part_index] = content_block_from_part(&body);
+            message.message.content[part_index] = content_block_from_part(body);
         }
         None => {
             message.message.content.remove(part_index);
@@ -732,42 +755,42 @@ fn compat_session_id(session_id: SessionId) -> String {
     format!("ses{session_id}")
 }
 
-fn parse_compat_session_id(value: &str) -> Result<SessionId, Response> {
+fn parse_compat_session_id(value: &str) -> Result<SessionId, CompatRequestError> {
     value
         .strip_prefix("ses")
         .unwrap_or(value)
         .parse()
-        .map_err(|_| invalid_request("invalid_session_id"))
+        .map_err(|_| CompatRequestError::InvalidRequest("invalid_session_id"))
 }
 
 fn compat_message_id(message_id: Ulid) -> String {
     format!("msg{message_id}")
 }
 
-fn parse_compat_message_id(value: &str) -> Result<Ulid, Response> {
+fn parse_compat_message_id(value: &str) -> Result<Ulid, CompatRequestError> {
     value
         .strip_prefix("msg")
         .unwrap_or(value)
         .parse()
-        .map_err(|_| invalid_request("invalid_message_id"))
+        .map_err(|_| CompatRequestError::InvalidRequest("invalid_message_id"))
 }
 
 fn compat_part_id(message_id: Ulid, index: usize) -> String {
     format!("prt{}_{}", compat_message_id(message_id), index)
 }
 
-fn parse_compat_part_index(message_id: Ulid, value: &str) -> Result<usize, Response> {
+fn parse_compat_part_index(message_id: Ulid, value: &str) -> Result<usize, CompatRequestError> {
     let stripped = value.strip_prefix("prt").unwrap_or(value);
     let Some((message, index)) = stripped.rsplit_once('_') else {
-        return Err(invalid_request("invalid_part_id"));
+        return Err(CompatRequestError::InvalidRequest("invalid_part_id"));
     };
     let parsed_message = parse_compat_message_id(message)?;
     if parsed_message != message_id {
-        return Err(invalid_request("invalid_part_id"));
+        return Err(CompatRequestError::InvalidRequest("invalid_part_id"));
     }
     index
         .parse::<usize>()
-        .map_err(|_| invalid_request("invalid_part_id"))
+        .map_err(|_| CompatRequestError::InvalidRequest("invalid_part_id"))
 }
 
 fn query_directory(directory: Option<&str>) -> PathBuf {
@@ -959,22 +982,14 @@ fn compat_error(code: impl Into<String>, message: impl Into<String>) -> Response
         .into_response()
 }
 
-fn require_bearer_token(headers: &HeaderMap) -> Result<(), Response> {
+fn require_bearer_token(headers: &HeaderMap) -> Result<(), CompatRequestError> {
     match headers
         .get(AUTHORIZATION)
         .and_then(|value| value.to_str().ok())
         .filter(|value| value.starts_with("Bearer "))
     {
         Some(_) => Ok(()),
-        None => Err((
-            StatusCode::UNAUTHORIZED,
-            Json(BadRequestErrorDoc {
-                data: json!({ "code": "unauthorized", "message": "missing bearer token" }),
-                errors: Vec::new(),
-                success: false,
-            }),
-        )
-            .into_response()),
+        None => Err(CompatRequestError::MissingBearerToken),
     }
 }
 

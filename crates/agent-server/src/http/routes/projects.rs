@@ -67,7 +67,7 @@ pub(in crate::http) async fn get_project(
 ) -> Response {
     let project_id = match parse_project_id(&id) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let core = server.core();
     match core.project(project_id).await {
@@ -83,7 +83,7 @@ pub(in crate::http) async fn replace_project(
 ) -> Response {
     let project_id = match parse_project_id(&id) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let core = server.core();
     match core.store().projects().update(project_id, project).await {
@@ -99,7 +99,7 @@ pub(in crate::http) async fn update_project(
 ) -> Response {
     let project_id = match parse_project_id(&id) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let core = server.core();
     let projects = core.store().projects();
@@ -126,7 +126,7 @@ pub(in crate::http) async fn delete_project(
 ) -> Response {
     let project_id = match parse_project_id(&id) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let core = server.core();
     match core.store().projects().delete(project_id).await {
@@ -141,7 +141,7 @@ pub(in crate::http) async fn list_project_sessions(
 ) -> Response {
     let project_id = match parse_project_id(&id) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let core = server.core();
     match core.sessions_for_project(project_id).await {
@@ -157,7 +157,7 @@ pub(in crate::http) async fn create_session(
 ) -> Response {
     let project_id = match parse_project_id(&id) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let core = server.core();
     let session = match core.create_session(project_id).await {

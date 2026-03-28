@@ -95,21 +95,20 @@ fn inline_local_defs(schema: &mut Value) {
 fn inline_local_defs_refs(value: &mut Value, defs: &serde_json::Map<String, Value>) {
     match value {
         Value::Object(map) => {
-            if let Some(reference) = map.get("$ref").and_then(Value::as_str) {
-                if let Some(name) = reference.strip_prefix("#/$defs/") {
-                    if let Some(schema) = defs.get(name) {
-                        if let Some(component_name) = schema.get("title").and_then(Value::as_str) {
-                            *value = serde_json::json!({
-                                "$ref": format!("#/components/schemas/{component_name}")
-                            });
-                            return;
-                        }
-
-                        *value = schema.clone();
-                        inline_local_defs_refs(value, defs);
-                        return;
-                    }
+            if let Some(reference) = map.get("$ref").and_then(Value::as_str)
+                && let Some(name) = reference.strip_prefix("#/$defs/")
+                && let Some(schema) = defs.get(name)
+            {
+                if let Some(component_name) = schema.get("title").and_then(Value::as_str) {
+                    *value = serde_json::json!({
+                        "$ref": format!("#/components/schemas/{component_name}")
+                    });
+                    return;
                 }
+
+                *value = schema.clone();
+                inline_local_defs_refs(value, defs);
+                return;
             }
 
             if let Some(local_defs) = map

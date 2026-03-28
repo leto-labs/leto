@@ -19,6 +19,28 @@ use super::super::AppState;
 use super::super::errors::{core_error_response, store_error_response};
 use crate::types::ErrorResponse;
 
+#[derive(Debug, Clone, Copy)]
+struct ChatCompletionRequestError {
+    code: &'static str,
+    message: &'static str,
+}
+
+impl ChatCompletionRequestError {
+    const fn new(code: &'static str, message: &'static str) -> Self {
+        Self { code, message }
+    }
+}
+
+impl IntoResponse for ChatCompletionRequestError {
+    fn into_response(self) -> Response {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse::new(self.code, self.message)),
+        )
+            .into_response()
+    }
+}
+
 pub(in crate::http) async fn create_chat_completion(
     State(server): State<AppState>,
     Json(body): Json<ChatCompletionRequest>,
@@ -41,7 +63,7 @@ pub(in crate::http) async fn create_chat_completion(
 
     let input = match chat_completion_messages_to_input(&body.messages) {
         Ok(messages) => messages,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
 
     let core = server.core();
@@ -144,7 +166,7 @@ async fn cleanup_chat_completion_session(
 
 fn chat_completion_messages_to_input(
     messages: &[ChatCompletionMessage],
-) -> Result<Vec<Message>, Response> {
+) -> Result<Vec<Message>, ChatCompletionRequestError> {
     messages
         .iter()
         .map(chat_completion_message_to_input_message)
@@ -153,7 +175,7 @@ fn chat_completion_messages_to_input(
 
 fn chat_completion_message_to_input_message(
     message: &ChatCompletionMessage,
-) -> Result<Message, Response> {
+) -> Result<Message, ChatCompletionRequestError> {
     let role = match message.role {
         ChatCompletionRole::System => MessageRole::System,
         ChatCompletionRole::Developer => MessageRole::Developer,
@@ -165,14 +187,10 @@ fn chat_completion_message_to_input_message(
     let mut content = chat_completion_content_to_blocks(message.content.as_ref())?;
     for tool_call in &message.tool_calls {
         let input = serde_json::from_str(&tool_call.function.arguments).map_err(|_| {
-            (
-                StatusCode::BAD_REQUEST,
-                Json(ErrorResponse::new(
-                    "invalid_tool_arguments",
-                    "tool call arguments must be valid JSON",
-                )),
+            ChatCompletionRequestError::new(
+                "invalid_tool_arguments",
+                "tool call arguments must be valid JSON",
             )
-                .into_response()
         })?;
         content.push(ContentBlock::tool_call(
             tool_call.id.clone(),
@@ -183,14 +201,10 @@ fn chat_completion_message_to_input_message(
 
     if matches!(message.role, ChatCompletionRole::Tool) {
         let call_id = message.tool_call_id.clone().ok_or_else(|| {
-            (
-                StatusCode::BAD_REQUEST,
-                Json(ErrorResponse::new(
-                    "missing_tool_call_id",
-                    "tool messages must include tool_call_id",
-                )),
+            ChatCompletionRequestError::new(
+                "missing_tool_call_id",
+                "tool messages must include tool_call_id",
             )
-                .into_response()
         })?;
         let output = serde_json::Value::String(chat_message_text_lossy(message));
         content.push(ContentBlock::tool_result(call_id, output));
@@ -201,7 +215,7 @@ fn chat_completion_message_to_input_message(
 
 fn chat_completion_content_to_blocks(
     content: Option<&ChatCompletionMessageContent>,
-) -> Result<Vec<ContentBlock>, Response> {
+) -> Result<Vec<ContentBlock>, ChatCompletionRequestError> {
     let Some(content) = content else {
         return Ok(Vec::new());
     };

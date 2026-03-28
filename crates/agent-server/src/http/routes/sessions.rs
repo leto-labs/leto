@@ -33,7 +33,7 @@ pub(in crate::http) async fn get_session(
 ) -> Response {
     let session_id = match parse_session_id(&id) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let core = server.core();
     match core.session(session_id).await {
@@ -49,7 +49,7 @@ pub(in crate::http) async fn replace_session(
 ) -> Response {
     let session_id = match parse_session_id(&id) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let core = server.core();
     match core.store().sessions().update(session_id, session).await {
@@ -65,7 +65,7 @@ pub(in crate::http) async fn update_session(
 ) -> Response {
     let session_id = match parse_session_id(&id) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let core = server.core();
     match core.update_session(session_id, update).await {
@@ -80,7 +80,7 @@ pub(in crate::http) async fn delete_session(
 ) -> Response {
     let session_id = match parse_session_id(&id) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let core = server.core();
     match core.delete_session(session_id).await {
@@ -95,7 +95,7 @@ pub(in crate::http) async fn list_messages(
 ) -> Response {
     let session_id = match parse_session_id(&id) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let core = server.core();
     match core.messages(session_id).await {
@@ -111,7 +111,7 @@ pub(in crate::http) async fn replace_messages(
 ) -> Response {
     let session_id = match parse_session_id(&id) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let core = server.core();
     match core
@@ -131,7 +131,7 @@ pub(in crate::http) async fn delete_messages(
 ) -> Response {
     let session_id = match parse_session_id(&id) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let core = server.core();
     match core.store().messages().delete_for_session(session_id).await {
@@ -146,7 +146,7 @@ pub(in crate::http) async fn get_trajectory(
 ) -> Response {
     let session_id = match parse_session_id(&id) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let core = server.core();
     match core.trajectory(session_id).await {
@@ -162,7 +162,7 @@ pub(in crate::http) async fn upsert_trajectory(
 ) -> Response {
     let session_id = match parse_session_id(&id) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let core = server.core();
     match core.upsert_trajectory(session_id, trajectory).await {
@@ -177,7 +177,7 @@ pub(in crate::http) async fn delete_trajectory(
 ) -> Response {
     let session_id = match parse_session_id(&id) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let core = server.core();
     match core.store().trajectories().delete(session_id).await {
@@ -209,7 +209,7 @@ pub(in crate::http) async fn get_runtime_view(
 ) -> Response {
     let session_id = match parse_session_id(&id) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let core = server.core();
     let config = match core.effective_runtime_config(session_id).await {

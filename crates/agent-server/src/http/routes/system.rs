@@ -47,7 +47,7 @@ pub(in crate::http) async fn session_events(
 ) -> Response {
     let session_id = match parse_session_id(&id) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let core = server.core();
     let stream = core.subscribe().filter_map(move |event| {

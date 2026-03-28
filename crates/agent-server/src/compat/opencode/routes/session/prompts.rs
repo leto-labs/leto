@@ -128,7 +128,7 @@ async fn session_prompt_async(
 ) -> Response {
     let internal = match parse_compat_session_id(&session_id) {
         Ok(id) => id,
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let input = prompt_input_from_body(&body);
     let core = server.core();
