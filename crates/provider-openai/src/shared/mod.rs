@@ -26,7 +26,18 @@ pub(crate) async fn ensure_success(
     } else {
         let status = response.status();
         let text = response.text().await.unwrap_or_default();
-        Err(Error::Inference(format!("{status}: {text}")))
+        let detail = serde_json::from_str::<Value>(&text)
+            .ok()
+            .and_then(|value| {
+                value
+                    .get("error")
+                    .and_then(|error| error.get("message"))
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+            })
+            .filter(|message| !message.is_empty())
+            .unwrap_or(text);
+        Err(Error::Inference(format!("{status}: {detail}")))
     }
 }
 

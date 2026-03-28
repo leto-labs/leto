@@ -1,5 +1,6 @@
 use provider_openai::{
-    Client, Config, ResponseInputContentPart, ResponseInputItem, ResponseInputRole, ResponseRequest,
+    Client, Config, Error, ResponseInputContentPart, ResponseInputItem, ResponseInputRole,
+    ResponseRequest,
 };
 use serde_json::Value;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -49,9 +50,13 @@ async fn read_http_request(socket: &mut tokio::net::TcpStream) -> CapturedReques
     CapturedRequest { head, body }
 }
 
-async fn spawn_json_server(response_body: String) -> (String, oneshot::Receiver<CapturedRequest>) {
+async fn spawn_json_server(
+    status_line: &str,
+    response_body: String,
+) -> (String, oneshot::Receiver<CapturedRequest>) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
+    let status_line = status_line.to_owned();
     let (tx, rx) = oneshot::channel();
 
     tokio::spawn(async move {
@@ -60,7 +65,7 @@ async fn spawn_json_server(response_body: String) -> (String, oneshot::Receiver<
         let _ = tx.send(request);
 
         let response = format!(
-            "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+            "HTTP/1.1 {status_line}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
             response_body.len(),
             response_body
         );
@@ -86,7 +91,7 @@ async fn create_response_sends_expected_headers_and_defaults() {
     })
     .to_string();
 
-    let (base_url, request_rx) = spawn_json_server(response_body).await;
+    let (base_url, request_rx) = spawn_json_server("200 OK", response_body).await;
     let client = Client::new(
         Config::new("sk-test")
             .with_base_url(base_url)
@@ -145,4 +150,45 @@ async fn create_response_sends_expected_headers_and_defaults() {
     assert_eq!(response.id.as_deref(), Some("resp_test"));
     assert_eq!(response.status.as_deref(), Some("completed"));
     assert_eq!(response.usage.as_ref().map(|usage| usage.total), Some(5));
+}
+
+#[tokio::test]
+async fn create_response_surfaces_structured_api_errors() {
+    let response_body = serde_json::json!({
+        "error": {
+            "message": "rate limit exceeded",
+            "type": "rate_limit_error"
+        }
+    })
+    .to_string();
+
+    let (base_url, request_rx) = spawn_json_server("429 Too Many Requests", response_body).await;
+    let client = Client::new(
+        Config::new("sk-test")
+            .with_base_url(base_url)
+            .with_model("gpt-test"),
+    );
+
+    let err = client
+        .responses()
+        .create(&ResponseRequest {
+            input: vec![ResponseInputItem::message(
+                ResponseInputRole::User,
+                vec![ResponseInputContentPart::input_text("hello from test")],
+            )],
+            ..ResponseRequest::default()
+        })
+        .await
+        .unwrap_err();
+
+    let request = request_rx.await.unwrap();
+    let request_head = request.head.to_lowercase();
+    assert!(request_head.contains("post /v1/responses http/1.1"));
+
+    match err {
+        Error::Inference(message) => {
+            assert_eq!(message, "429 Too Many Requests: rate limit exceeded");
+        }
+        other => panic!("expected inference error, got {other:?}"),
+    }
 }
