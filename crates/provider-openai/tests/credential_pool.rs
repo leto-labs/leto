@@ -341,3 +341,45 @@ async fn openai_provider_picks_up_reloaded_pool_credentials() {
         Some("Bearer sk-new")
     );
 }
+
+#[tokio::test]
+async fn openai_provider_warms_session_binding_on_first_success() {
+    let pool = Arc::new(CredentialPool::new(Arc::new(StickyRoundRobin::new())));
+    pool.insert("openai", CredentialEntry::bearer("cred-1", "sk-one"))
+        .await;
+    pool.insert("openai", CredentialEntry::bearer("cred-2", "sk-two"))
+        .await;
+
+    let (base_url, requests_rx) = spawn_two_request_sse_server(completed_sse_body()).await;
+    let provider = OpenAiProvider::from_pool(
+        Config::new("placeholder").with_base_url(base_url),
+        pool.clone(),
+    );
+
+    let mut request = Request::user_text("warm the session");
+    request.options.metadata.insert(
+        "session_id".into(),
+        serde_json::Value::String("session-warmup".into()),
+    );
+
+    drain_to_terminal(&provider, &request).await.unwrap();
+    drain_to_terminal(&provider, &request).await.unwrap();
+
+    let requests = requests_rx.await.unwrap();
+    assert_eq!(requests.len(), 2);
+    assert!(
+        requests[0]
+            .to_lowercase()
+            .contains("authorization: bearer sk-one")
+    );
+    assert!(
+        requests[1]
+            .to_lowercase()
+            .contains("authorization: bearer sk-one")
+    );
+    assert!(
+        !requests[1]
+            .to_lowercase()
+            .contains("authorization: bearer sk-two")
+    );
+}
