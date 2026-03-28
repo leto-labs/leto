@@ -7,7 +7,7 @@ use std::time::Duration;
 use agent_core::{AgentCore, AgentCoreNative, CoreEvent};
 use agent_core_remote::CredentialHealthRecord;
 use agent_runtime::RuntimeEvent;
-use agent_server::{AgentServer, build_router};
+use agent_server::{AgentServer, SessionRuntimeView, build_router};
 use agent_store::{CredentialEntry, Project, ProjectConfig, Session, Store, StoredMessage};
 use futures::StreamExt;
 use provider::{
@@ -105,6 +105,27 @@ async fn create_project_with_config(
         .post(format!("{base}/v1/projects"))
         .json(&serde_json::json!({
             "name": "agent-server-turn-test",
+            "config": config,
+        }))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap()
+}
+
+async fn update_project_config(
+    client: &reqwest::Client,
+    base: &str,
+    project: &Project,
+    config: ProjectConfig,
+) -> Project {
+    client
+        .patch(format!("{base}/v1/projects/{}", project.id))
+        .json(&serde_json::json!({
             "config": config,
         }))
         .send()
@@ -683,6 +704,88 @@ async fn post_turns_fall_back_to_project_default_provider_when_session_provider_
     assert_eq!(
         messages[1].message.plain_text_lossy(),
         "fallback: hello fallback"
+    );
+}
+
+#[tokio::test]
+async fn post_turns_pick_up_hot_reloaded_project_runtime_defaults_for_existing_session() {
+    let base = start_server_with_providers(
+        vec![
+            ("primary", Arc::new(TaggedProvider::new("primary"))),
+            ("fallback", Arc::new(TaggedProvider::new("fallback"))),
+        ],
+        "primary",
+    )
+    .await;
+    let client = reqwest::Client::new();
+    let project = create_project(&client, &base).await;
+    let session = create_session(&client, &base, &project).await;
+
+    let initial_runtime: SessionRuntimeView = client
+        .get(format!("{base}/v1/sessions/{}/runtime", session.id))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(initial_runtime.config.max_retries, 0);
+    assert_eq!(initial_runtime.current_model_id, None);
+
+    let mut reloaded_config = ProjectConfig::default();
+    reloaded_config.default_provider = Some("fallback".into());
+    reloaded_config.default_model = Some("fallback-echo".into());
+    reloaded_config.runtime.max_retries = 2;
+    reloaded_config.runtime.retry_backoff_ms = 0;
+    let updated_project = update_project_config(&client, &base, &project, reloaded_config).await;
+    assert_eq!(
+        updated_project.config.default_provider.as_deref(),
+        Some("fallback")
+    );
+    assert_eq!(
+        updated_project.config.default_model.as_deref(),
+        Some("fallback-echo")
+    );
+    assert_eq!(updated_project.config.runtime.max_retries, 2);
+
+    let reloaded_runtime: SessionRuntimeView = client
+        .get(format!("{base}/v1/sessions/{}/runtime", session.id))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(reloaded_runtime.config.max_retries, 2);
+    assert_eq!(
+        reloaded_runtime.current_model_id.as_deref(),
+        Some("fallback-echo")
+    );
+
+    let response = post_turn(&client, &base, &session, "hello after reload").await;
+    assert_eq!(response.status(), reqwest::StatusCode::OK);
+
+    let messages: Vec<StoredMessage> = client
+        .get(format!("{base}/v1/sessions/{}/messages", session.id))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(messages.len(), 2);
+    assert_eq!(messages[0].message.role, MessageRole::User);
+    assert_eq!(messages[1].message.role, MessageRole::Assistant);
+    assert_eq!(
+        messages[1].message.plain_text_lossy(),
+        "fallback: hello after reload"
     );
 }
 
