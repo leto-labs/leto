@@ -38,9 +38,8 @@ fn message_updates(message: &StoredMessage) -> Vec<acp::SessionUpdate> {
                 Some(prefix) => format!("{prefix}{text}"),
                 None => text,
             };
-            let chunk = acp::ContentChunk::new(acp::ContentBlock::Text(acp::TextContent::new(
-                text,
-            )));
+            let chunk =
+                acp::ContentChunk::new(acp::ContentBlock::Text(acp::TextContent::new(text)));
             Some(match message.message.role {
                 MessageRole::User => acp::SessionUpdate::UserMessageChunk(chunk),
                 MessageRole::Assistant | MessageRole::System | MessageRole::Developer => {

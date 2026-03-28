@@ -10,7 +10,9 @@ pub const CONFIG_LOOP: &str = "loop";
 /// Builds the initialize response with agent capabilities.
 pub fn initialize_response(protocol_version: acp::ProtocolVersion) -> acp::InitializeResponse {
     acp::InitializeResponse::new(protocol_version)
-        .agent_info(acp::Implementation::new("agent-acp", env!("CARGO_PKG_VERSION")).title("Agent ACP"))
+        .agent_info(
+            acp::Implementation::new("agent-acp", env!("CARGO_PKG_VERSION")).title("Agent ACP"),
+        )
         .agent_capabilities(
             acp::AgentCapabilities::new()
                 .load_session(true)

@@ -4,7 +4,9 @@ use std::collections::HashMap;
 
 use agent_client_protocol as acp;
 use agent_core::CoreEvent;
-use agent_runtime::{BlockDelta, Message, MessageRole, RuntimeEvent, ToolCall, ToolExecutionResult};
+use agent_runtime::{
+    BlockDelta, Message, MessageRole, RuntimeEvent, ToolCall, ToolExecutionResult,
+};
 use provider::ContentBlock;
 
 pub enum MappedEvent {
@@ -30,7 +32,10 @@ impl EventMapper {
     pub fn map(&mut self, event: CoreEvent) -> MappedEvent {
         match event {
             CoreEvent::Store { event: _ } => MappedEvent::Updates(vec![]),
-            CoreEvent::Turn { session_id: _, event } => self.map_runtime_event(event),
+            CoreEvent::Turn {
+                session_id: _,
+                event,
+            } => self.map_runtime_event(event),
             CoreEvent::TurnCancelled { .. } => MappedEvent::Cancelled,
         }
     }
@@ -41,7 +46,8 @@ impl EventMapper {
             RuntimeEvent::MessageCommitted { message } => self.map_message_committed(message),
             RuntimeEvent::ToolCallPending { call } => {
                 let presentation = tool_presentation(&call);
-                self.tool_calls.insert(call.id.clone(), presentation.clone());
+                self.tool_calls
+                    .insert(call.id.clone(), presentation.clone());
                 MappedEvent::Updates(vec![acp::SessionUpdate::ToolCall(
                     acp::ToolCall::new(call.id, presentation.title)
                         .kind(presentation.kind)
@@ -51,7 +57,8 @@ impl EventMapper {
             }
             RuntimeEvent::ToolCallStarted { call } => {
                 let presentation = tool_presentation(&call);
-                self.tool_calls.insert(call.id.clone(), presentation.clone());
+                self.tool_calls
+                    .insert(call.id.clone(), presentation.clone());
                 MappedEvent::Updates(vec![acp::SessionUpdate::ToolCall(
                     acp::ToolCall::new(call.id, presentation.title)
                         .kind(presentation.kind)
@@ -79,7 +86,9 @@ impl EventMapper {
                     ),
                 )])
             }
-            RuntimeEvent::TurnFinished { .. } => MappedEvent::TurnComplete(acp::StopReason::EndTurn),
+            RuntimeEvent::TurnFinished { .. } => {
+                MappedEvent::TurnComplete(acp::StopReason::EndTurn)
+            }
             RuntimeEvent::Error { message, .. } => MappedEvent::Failed(message),
             RuntimeEvent::InputQueued { .. }
             | RuntimeEvent::ControlQueued { .. }
@@ -136,11 +145,11 @@ impl EventMapper {
                     acp::ContentChunk::new(acp::ContentBlock::Text(acp::TextContent::new(text))),
                 )])
             }
-            BlockDelta::Reasoning { text } => MappedEvent::Updates(vec![
-                acp::SessionUpdate::AgentThoughtChunk(acp::ContentChunk::new(
-                    acp::ContentBlock::Text(acp::TextContent::new(text)),
-                )),
-            ]),
+            BlockDelta::Reasoning { text } => {
+                MappedEvent::Updates(vec![acp::SessionUpdate::AgentThoughtChunk(
+                    acp::ContentChunk::new(acp::ContentBlock::Text(acp::TextContent::new(text))),
+                )])
+            }
             BlockDelta::Json { .. } | BlockDelta::Signature { .. } | BlockDelta::Unknown { .. } => {
                 MappedEvent::Updates(vec![])
             }
@@ -157,9 +166,11 @@ impl EventMapper {
                         ContentBlock::Text { text } | ContentBlock::Refusal { text }
                             if !self.streamed_assistant_text =>
                         {
-                            Some(acp::SessionUpdate::AgentMessageChunk(acp::ContentChunk::new(
-                                acp::ContentBlock::Text(acp::TextContent::new(text.clone())),
-                            )))
+                            Some(acp::SessionUpdate::AgentMessageChunk(
+                                acp::ContentChunk::new(acp::ContentBlock::Text(
+                                    acp::TextContent::new(text.clone()),
+                                )),
+                            ))
                         }
                         ContentBlock::Reasoning { text } => Some(
                             acp::SessionUpdate::AgentThoughtChunk(acp::ContentChunk::new(
@@ -241,8 +252,8 @@ fn default_tool_title(name: &str) -> &'static str {
 }
 
 fn render_tool_result(result: &ToolExecutionResult) -> String {
-    let body = serde_json::to_string_pretty(&result.output)
-        .unwrap_or_else(|_| result.output.to_string());
+    let body =
+        serde_json::to_string_pretty(&result.output).unwrap_or_else(|_| result.output.to_string());
     if result.is_error {
         format!("[error]\n{body}")
     } else {
@@ -257,11 +268,13 @@ fn content_block_to_user_update(block: &ContentBlock) -> Option<acp::SessionUpda
         | ContentBlock::Refusal { text } => text.clone(),
         ContentBlock::ImageUrl { url } => format!("[image:{url}]"),
         ContentBlock::ToolCall { name, .. } => format!("[tool_call:{name}]"),
-        ContentBlock::ToolResult { call_id, output, .. } => {
+        ContentBlock::ToolResult {
+            call_id, output, ..
+        } => {
             format!("[tool_result:{call_id}] {}", output)
         }
     };
-    Some(acp::SessionUpdate::UserMessageChunk(acp::ContentChunk::new(
-        acp::ContentBlock::Text(acp::TextContent::new(text)),
-    )))
+    Some(acp::SessionUpdate::UserMessageChunk(
+        acp::ContentChunk::new(acp::ContentBlock::Text(acp::TextContent::new(text))),
+    ))
 }
