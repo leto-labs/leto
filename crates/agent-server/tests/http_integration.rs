@@ -57,6 +57,38 @@ async fn create_session(client: &reqwest::Client, base: &str, project: &Project)
         .unwrap()
 }
 
+fn sample_trajectory(session: &Session) -> atif::Trajectory {
+    atif::Trajectory {
+        schema_version: atif::SchemaVersion::default(),
+        session_id: session.id.to_string(),
+        agent: atif::Agent {
+            name: "brain".into(),
+            version: "0.1.0".into(),
+            model_name: Some("mock-echo".into()),
+            tool_definitions: None,
+            extra: None,
+        },
+        steps: vec![atif::Step {
+            step_id: 1,
+            timestamp: None,
+            source: atif::StepSource::User,
+            model_name: None,
+            reasoning_effort: None,
+            message: "hello trajectory".into(),
+            reasoning_content: None,
+            tool_calls: None,
+            observation: None,
+            metrics: None,
+            is_copied_context: None,
+            extra: None,
+        }],
+        notes: Some("integration test".into()),
+        final_metrics: None,
+        continued_trajectory_ref: None,
+        extra: None,
+    }
+}
+
 #[tokio::test]
 async fn canonical_health_and_status_are_available() {
     let base = start_server().await;
@@ -229,6 +261,53 @@ async fn canonical_session_management_routes_cover_project_and_session_reads() {
         .unwrap();
     assert_eq!(fetched_session.id, first_session.id);
     assert_eq!(fetched_session.project_id, project.id);
+}
+
+#[tokio::test]
+async fn canonical_trajectory_route_round_trips() {
+    let base = start_server().await;
+    let client = reqwest::Client::new();
+
+    let project = create_project(&client, &base).await;
+    let session = create_session(&client, &base, &project).await;
+    let trajectory = sample_trajectory(&session);
+
+    let missing: Option<atif::Trajectory> = client
+        .get(format!("{base}/v1/sessions/{}/trajectory", session.id))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(missing, None);
+
+    let stored: atif::Trajectory = client
+        .put(format!("{base}/v1/sessions/{}/trajectory", session.id))
+        .json(&trajectory)
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(stored, trajectory);
+
+    let fetched: Option<atif::Trajectory> = client
+        .get(format!("{base}/v1/sessions/{}/trajectory", session.id))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(fetched, Some(trajectory));
 }
 
 #[tokio::test]
