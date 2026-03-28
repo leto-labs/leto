@@ -7,6 +7,7 @@ use serde_json::Value;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
+use tokio::time::Duration;
 
 struct CapturedRequest {
     head: String,
@@ -123,6 +124,62 @@ async fn spawn_concurrent_http_server() -> (String, oneshot::Receiver<Vec<Captur
             requests.push(task.await.unwrap());
         }
         let _ = tx.send(requests);
+    });
+
+    (format!("http://{addr}/v1"), rx)
+}
+
+async fn spawn_connection_reuse_http_server() -> (String, oneshot::Receiver<Vec<CapturedRequest>>) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let (tx, rx) = oneshot::channel();
+
+    tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        drop(listener);
+
+        let first_request = read_http_request(&mut socket).await;
+        let first_response_body = serde_json::json!({
+            "id": "resp_first",
+            "object": "response",
+            "status": "completed",
+            "output": [],
+            "usage": {
+                "input_tokens": 1,
+                "output_tokens": 1,
+                "total_tokens": 2
+            }
+        })
+        .to_string();
+        let first_response = format!(
+            "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: keep-alive\r\n\r\n{}",
+            first_response_body.len(),
+            first_response_body
+        );
+        let _ = socket.write_all(first_response.as_bytes()).await;
+
+        let second_request = read_http_request(&mut socket).await;
+        let second_response_body = serde_json::json!({
+            "id": "resp_second",
+            "object": "response",
+            "status": "completed",
+            "output": [],
+            "usage": {
+                "input_tokens": 1,
+                "output_tokens": 1,
+                "total_tokens": 2
+            }
+        })
+        .to_string();
+        let second_response = format!(
+            "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+            second_response_body.len(),
+            second_response_body
+        );
+        let _ = socket.write_all(second_response.as_bytes()).await;
+        let _ = socket.shutdown().await;
+
+        let _ = tx.send(vec![first_request, second_request]);
     });
 
     (format!("http://{addr}/v1"), rx)
@@ -449,6 +506,69 @@ async fn create_response_supports_concurrent_requests() {
 
     assert_eq!(request_texts, vec!["first", "second"]);
     assert_eq!(response_ids, vec!["resp_first", "resp_second"]);
+}
+
+#[tokio::test]
+async fn create_response_reuses_http_connection() {
+    let (base_url, requests_rx) = spawn_connection_reuse_http_server().await;
+    let http_client = reqwest::Client::builder()
+        .timeout(Duration::from_millis(250))
+        .pool_max_idle_per_host(1)
+        .build()
+        .unwrap();
+    let client = Client::with_http_client(
+        Config::new("sk-test")
+            .with_base_url(base_url)
+            .with_model("gpt-test"),
+        http_client,
+    );
+
+    let first_response = client
+        .responses()
+        .create(&ResponseRequest {
+            input: vec![ResponseInputItem::message(
+                ResponseInputRole::User,
+                vec![ResponseInputContentPart::input_text("first")],
+            )],
+            ..ResponseRequest::default()
+        })
+        .await
+        .unwrap();
+    let second_response = client
+        .responses()
+        .create(&ResponseRequest {
+            input: vec![ResponseInputItem::message(
+                ResponseInputRole::User,
+                vec![ResponseInputContentPart::input_text("second")],
+            )],
+            ..ResponseRequest::default()
+        })
+        .await
+        .unwrap();
+
+    let requests = requests_rx.await.unwrap();
+    assert_eq!(requests.len(), 2);
+    assert_eq!(first_response.id.as_deref(), Some("resp_first"));
+    assert_eq!(second_response.id.as_deref(), Some("resp_second"));
+
+    let request_heads = requests
+        .iter()
+        .map(|request| request.head.to_lowercase())
+        .collect::<Vec<_>>();
+    assert!(request_heads[0].contains("post /v1/responses http/1.1"));
+    assert!(request_heads[1].contains("post /v1/responses http/1.1"));
+
+    let request_texts = requests
+        .iter()
+        .map(|request| {
+            request
+                .body
+                .pointer("/input/0/content/0/text")
+                .and_then(Value::as_str)
+                .unwrap()
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(request_texts, vec!["first", "second"]);
 }
 
 #[tokio::test]
