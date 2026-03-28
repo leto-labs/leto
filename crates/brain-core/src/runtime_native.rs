@@ -225,11 +225,7 @@ impl BrainRuntime for BrainRuntimeNative {
             }
 
             let project = store.projects().get(session.project_id).await?;
-            Ok(project
-                .config
-                .agent
-                .loop_name
-                .or(Some(default_loop_name)))
+            Ok(project.config.agent.loop_name.or(Some(default_loop_name)))
         })
     }
 

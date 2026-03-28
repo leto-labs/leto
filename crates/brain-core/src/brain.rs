@@ -6,7 +6,9 @@ use futures::StreamExt;
 use tokio_util::sync::CancellationToken;
 use ulid::Ulid;
 
-use crate::atif_events::{TurnSummary, complete_turn, completion_events, started_event};
+use crate::atif_events::{
+    CompleteTurnInput, TurnSummary, complete_turn, completion_events, started_event,
+};
 use brain_types::*;
 
 pub struct Brain {
@@ -266,17 +268,17 @@ pub(crate) async fn run_turn_with_config(
         && let Some(turn_summary) = turn_summary
     {
         let finished_at = Utc::now();
-        let completed = complete_turn(
+        let completed = complete_turn(CompleteTurnInput {
             session_id,
             existing_trajectory,
-            &config,
-            provider.as_ref(),
-            &tools,
-            &new_messages,
+            config: &config,
+            provider: provider.as_ref(),
+            tools: &tools,
+            new_messages: &new_messages,
             started_at,
             finished_at,
             turn_summary,
-        )?;
+        })?;
         if store
             .trajectories()
             .get_for_session(session_id)

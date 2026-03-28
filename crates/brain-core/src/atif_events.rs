@@ -34,6 +34,18 @@ pub(crate) struct CompletedTrajectory {
     pub final_metrics: AtifFinalMetrics,
 }
 
+pub(crate) struct CompleteTurnInput<'a> {
+    pub session_id: Ulid,
+    pub existing_trajectory: Option<AtifTrajectory>,
+    pub config: &'a AgentConfig,
+    pub provider: &'a dyn Provider,
+    pub tools: &'a [Arc<dyn Tool>],
+    pub new_messages: &'a [Message],
+    pub started_at: DateTime<Utc>,
+    pub finished_at: DateTime<Utc>,
+    pub turn_summary: TurnSummary,
+}
+
 impl TurnSummary {
     pub(crate) fn final_metrics(&self) -> AtifFinalMetrics {
         AtifFinalMetrics {
@@ -72,16 +84,20 @@ pub(crate) fn started_event(
 }
 
 pub(crate) fn complete_turn(
-    session_id: Ulid,
-    existing_trajectory: Option<AtifTrajectory>,
-    config: &AgentConfig,
-    provider: &dyn Provider,
-    tools: &[Arc<dyn Tool>],
-    new_messages: &[Message],
-    started_at: DateTime<Utc>,
-    finished_at: DateTime<Utc>,
-    turn_summary: TurnSummary,
+    input: CompleteTurnInput<'_>,
 ) -> Result<CompletedTrajectory, BrainError> {
+    let CompleteTurnInput {
+        session_id,
+        existing_trajectory,
+        config,
+        provider,
+        tools,
+        new_messages,
+        started_at,
+        finished_at,
+        turn_summary,
+    } = input;
+
     let mut trajectory = existing_trajectory.unwrap_or_else(|| AtifTrajectory {
         schema_version: config.atif.schema_version,
         session_id: session_id.to_string(),
