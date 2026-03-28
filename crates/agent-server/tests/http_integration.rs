@@ -20,8 +20,8 @@ use provider::{
     ProviderCapabilities, ProviderInfo, Request, StreamGranularity,
 };
 use provider_openai::{
-    AuditLogPage, ChatCompletionObject, Client, Config, EmbeddingInput, EmbeddingRequest,
-    VectorStoreCreateRequest, VideoCreateRequest,
+    AuditLogListParams, AuditLogPage, ChatCompletionObject, Client, Config, EmbeddingInput,
+    EmbeddingRequest, VectorStoreCreateRequest, VideoCreateRequest,
 };
 
 fn make_server() -> Arc<AgentServer> {
@@ -1272,6 +1272,28 @@ async fn canonical_audit_logs_route_returns_openai_style_payload() {
         Some("agent@example.com")
     );
     assert!(page.data[0].extra.contains_key("api_key.created"));
+}
+
+#[tokio::test]
+async fn canonical_audit_logs_route_supports_pagination_limit() {
+    let base = start_server().await;
+    let client = Client::new(Config::new("sk-test").with_base_url(format!("{base}/v1")));
+
+    let page: AuditLogPage = client
+        .audit_logs()
+        .list_with_params(&AuditLogListParams {
+            after: None,
+            before: None,
+            limit: Some(1),
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(page.object, "list");
+    assert!(page.has_more);
+    assert_eq!(page.data.len(), 1);
+    assert_eq!(page.data[0].id, "req_agent_server_20240301");
+    assert_eq!(page.data[0].event_type, "api_key.created");
 }
 
 #[tokio::test]
