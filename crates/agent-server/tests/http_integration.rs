@@ -3324,6 +3324,26 @@ async fn compat_lsp_route_returns_empty_diagnostics_list() {
 }
 
 #[tokio::test]
+async fn compat_lsp_route_accepts_workspace_query_and_returns_empty_diagnostics_list() {
+    let base = start_server().await;
+    let client = reqwest::Client::new();
+
+    let lsp: serde_json::Value = client
+        .get(format!("{base}/v1/compat/opencode/lsp"))
+        .query(&[("workspace", "default")])
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(lsp, serde_json::json!([]));
+}
+
+#[tokio::test]
 async fn compat_provider_oauth_callback_persists_oauth_credential() {
     let base = start_server().await;
     let client = reqwest::Client::new();
