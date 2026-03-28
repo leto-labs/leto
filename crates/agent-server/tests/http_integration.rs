@@ -1058,6 +1058,44 @@ async fn canonical_embeddings_route_returns_embedding_vectors() {
 }
 
 #[tokio::test]
+async fn canonical_image_generation_route_returns_base64_images() {
+    let base = start_server().await;
+    let client = reqwest::Client::new();
+
+    let response: serde_json::Value = client
+        .post(format!("{base}/v1/images/generations"))
+        .json(&serde_json::json!({
+            "model": "mock-echo",
+            "prompt": "  hello   image  world ",
+            "n": 2,
+            "response_format": "b64_json"
+        }))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert!(
+        response["created"]
+            .as_i64()
+            .is_some_and(|created| created > 0)
+    );
+
+    let data = response["data"].as_array().unwrap();
+    assert_eq!(data.len(), 2);
+    assert!(data.iter().all(|item| {
+        item["b64_json"]
+            .as_str()
+            .is_some_and(|image| !image.trim().is_empty())
+            && item["revised_prompt"].as_str() == Some("hello image world")
+    }));
+}
+
+#[tokio::test]
 async fn canonical_and_compat_event_endpoints_are_sse() {
     let base = start_server().await;
     let client = reqwest::Client::new();

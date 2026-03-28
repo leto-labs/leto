@@ -109,6 +109,10 @@ fn canonical_router() -> Router<AppState> {
             routing::post(routes::embeddings::create_embeddings),
         )
         .route(
+            "/images/generations",
+            routing::post(routes::images::create_image_generation),
+        )
+        .route(
             "/sessions",
             routing::get(routes::sessions::list_sessions)
                 .post(routes::sessions::create_session_record),
