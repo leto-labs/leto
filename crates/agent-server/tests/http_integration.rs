@@ -10,7 +10,9 @@ use agent_core_remote::{
 };
 use agent_runtime::RuntimeEvent;
 use agent_server::{AgentInfoRecord, AgentServer, AgentServerStatus, build_router};
-use agent_store::{CredentialEntry, CredentialHealth, Project, Session, StoredMessage};
+use agent_store::{
+    CredentialEntry, CredentialHealth, Project, ProviderCredential, Session, StoredMessage,
+};
 use futures::StreamExt;
 use provider::{ContentBlock, FinishReason, Message, MessageRole, MockProvider};
 use provider_openai::{
@@ -1429,6 +1431,54 @@ async fn compat_config_provider_and_prompt_routes_are_real() {
         .await
         .unwrap();
     assert_eq!(prompt_async.status(), reqwest::StatusCode::NO_CONTENT);
+}
+
+#[tokio::test]
+async fn compat_provider_oauth_callback_persists_oauth_credential() {
+    let base = start_server().await;
+    let client = reqwest::Client::new();
+
+    let callback = client
+        .post(format!(
+            "{base}/v1/compat/opencode/provider/mock/oauth/callback"
+        ))
+        .header(reqwest::header::AUTHORIZATION, "Bearer test-token")
+        .json(&serde_json::json!({
+            "method": 0,
+            "code": "oauth-code"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(callback.status(), reqwest::StatusCode::OK);
+    assert_eq!(callback.json::<bool>().await.unwrap(), true);
+
+    let credential: CredentialEntry = client
+        .get(format!("{base}/v1/credentials/mock/default"))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(credential.id, "default");
+    assert_eq!(credential.label, "mock");
+    assert!(credential.enabled);
+    match credential.credential {
+        ProviderCredential::OAuth(oauth) => {
+            assert_eq!(oauth.access_token, "oauth-code");
+            assert_eq!(oauth.refresh_token, "compat-refresh");
+            assert_eq!(oauth.client_id, "compat-client");
+            assert_eq!(oauth.token_endpoint, "https://example.invalid/oauth/token");
+            assert_eq!(oauth.token_type.as_deref(), Some("bearer"));
+            assert_eq!(oauth.account_id, None);
+            assert!(oauth.expires_at > chrono::Utc::now());
+        }
+        other => panic!("expected oauth credential, got {other:?}"),
+    }
 }
 
 #[tokio::test]
