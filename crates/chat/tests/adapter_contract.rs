@@ -69,6 +69,21 @@ async fn default_edit_returns_explicit_unsupported_error() {
 }
 
 #[tokio::test]
+async fn default_delete_returns_explicit_unsupported_error() {
+    let adapter = DummyAdapter;
+    let message = MessageRef::new(ConversationRef::new("dummy", "conv-1"), "msg-1");
+
+    let error = adapter.delete(message).await.unwrap_err();
+    assert_eq!(
+        error,
+        Error::UnsupportedCapability {
+            adapter: "dummy".into(),
+            capability: "message_deletes",
+        }
+    );
+}
+
+#[tokio::test]
 async fn adapter_subscribe_returns_normalized_chat_event() {
     let adapter = DummyAdapter;
     let mut stream = adapter.subscribe().unwrap();
@@ -81,4 +96,20 @@ async fn adapter_subscribe_returns_normalized_chat_event() {
     assert_eq!(message.message.message_id, "msg-1");
     assert_eq!(message.sender.id, "user-1");
     assert_eq!(message.text, "hello");
+}
+
+#[tokio::test]
+async fn adapter_info_and_health_check_expose_declared_capabilities() {
+    let adapter = DummyAdapter;
+    let info = adapter.info();
+
+    assert_eq!(info.id, "dummy");
+    assert_eq!(info.display_name, "Dummy");
+    assert!(info.capabilities.receive_messages);
+    assert!(info.capabilities.send_messages);
+    assert!(info.capabilities.health_checks);
+    assert!(!info.capabilities.message_edits);
+
+    let healthy = adapter.health_check().await.unwrap();
+    assert!(healthy);
 }
