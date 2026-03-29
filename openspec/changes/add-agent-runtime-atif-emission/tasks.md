@@ -1,5 +1,5 @@
-- [ ] Add ATIF emission configuration and event variants to `agent-runtime`.
-- [ ] Port ATIF trajectory construction into `agent-runtime` and emit ATIF
+- [x] Add ATIF emission configuration and event variants to `agent-runtime`.
+- [x] Port ATIF trajectory construction into `agent-runtime` and emit ATIF
       lifecycle events during turns.
 - [x] Persist completed trajectories from `agent-core` using the emitted runtime
       events.
