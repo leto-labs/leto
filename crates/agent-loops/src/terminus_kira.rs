@@ -45,12 +45,14 @@ async fn decide_terminus_kira(ctx: LoopContext) -> Result<LoopDecision, RuntimeE
             runtime_state.ptys.values().cloned(),
             TerminusVariant::TerminusKira,
         ) else {
-            let mut request = OpenPtyRequest::default();
-            request.label = Some(format!(
-                "{}:{}",
-                TerminusVariant::TerminusKira.label_prefix(),
-                runtime_state.session_id
-            ));
+            let request = OpenPtyRequest {
+                label: Some(format!(
+                    "{}:{}",
+                    TerminusVariant::TerminusKira.label_prefix(),
+                    runtime_state.session_id
+                )),
+                ..OpenPtyRequest::default()
+            };
             return Ok(LoopDecision::OpenPty { request });
         };
 
@@ -371,7 +373,7 @@ async fn decide_terminus_kira(ctx: LoopContext) -> Result<LoopDecision, RuntimeE
                 });
             }
 
-            return Ok(LoopDecision::ExecutePtyBatch {
+            Ok(LoopDecision::ExecutePtyBatch {
                 request: PtyExecRequest {
                     pty_id: loop_state.pty_id,
                     steps: vec![format!(
@@ -381,7 +383,7 @@ async fn decide_terminus_kira(ctx: LoopContext) -> Result<LoopDecision, RuntimeE
                     wait_ms: Some(250),
                     background: false,
                 },
-            });
+            })
         }
         TerminusPhase::PendingObservation {
             sequence,

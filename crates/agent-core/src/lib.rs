@@ -7,6 +7,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 use std::pin::Pin;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use agent_loops::{RobustLoop, SimpleLoop, Terminus2Loop, TerminusKiraLoop};
 use agent_runtime::{
@@ -93,6 +94,12 @@ struct CredentialActivation {
     store: Arc<dyn Store>,
     pool: Arc<SharedCredentialPool>,
     client: reqwest::Client,
+}
+
+#[derive(Clone)]
+struct ActiveTurn {
+    id: u64,
+    cancel: CancellationToken,
 }
 
 impl CredentialActivation {
@@ -201,6 +208,20 @@ fn store_entry_to_provider_entry(
     resolved.enabled = entry.enabled;
     resolved.health = store_health_to_provider_health(&entry.health);
     resolved
+}
+
+async fn release_active_turn(
+    active_turns: &Mutex<HashMap<SessionId, ActiveTurn>>,
+    session_id: SessionId,
+    active_turn_id: u64,
+) {
+    let mut active_turns = active_turns.lock().await;
+    if active_turns
+        .get(&session_id)
+        .is_some_and(|active_turn| active_turn.id == active_turn_id)
+    {
+        active_turns.remove(&session_id);
+    }
 }
 
 fn store_health_to_provider_health(
@@ -474,6 +495,7 @@ impl AgentCoreNativeBuilder {
             default_loop_name: self.default_loop_name.ok_or(CoreError::NoLoopsRegistered)?,
             credential_activation,
             active_turns: Arc::new(Mutex::new(HashMap::new())),
+            next_active_turn_id: Arc::new(AtomicU64::new(1)),
             events,
         };
         runtime.spawn_store_forwarder();
@@ -491,7 +513,8 @@ pub struct AgentCoreNative {
     default_provider_name: String,
     default_loop_name: String,
     credential_activation: Option<Arc<CredentialActivation>>,
-    active_turns: Arc<Mutex<HashMap<SessionId, CancellationToken>>>,
+    active_turns: Arc<Mutex<HashMap<SessionId, ActiveTurn>>>,
+    next_active_turn_id: Arc<AtomicU64>,
     events: broadcast::Sender<CoreEvent>,
 }
 
@@ -666,8 +689,8 @@ impl AgentCoreNative {
         let project = self.store.projects().get(session.project_id).await?;
         Ok(session
             .model
-            .or_else(|| project.config.default_model)
-            .or_else(|| project.config.runtime.model))
+            .or(project.config.default_model)
+            .or(project.config.runtime.model))
     }
 
     /// Lists all registered models across all providers.
@@ -701,13 +724,25 @@ impl AgentCoreNative {
         session_id: SessionId,
         input: Vec<Message>,
     ) -> Result<CoreEventStream, CoreError> {
+        let active_turn_id = self.next_active_turn_id.fetch_add(1, Ordering::Relaxed);
         let cancel = CancellationToken::new();
         {
             let mut active_turns = self.active_turns.lock().await;
+            if let Some(active_turn) = active_turns.get(&session_id) {
+                if active_turn.cancel.is_cancelled() {
+                    active_turns.remove(&session_id);
+                }
+            }
             if active_turns.contains_key(&session_id) {
                 return Err(CoreError::TurnActive(session_id));
             }
-            active_turns.insert(session_id, cancel.clone());
+            active_turns.insert(
+                session_id,
+                ActiveTurn {
+                    id: active_turn_id,
+                    cancel: cancel.clone(),
+                },
+            );
         }
 
         let session = self.store.sessions().get(session_id).await?;
@@ -759,6 +794,7 @@ impl AgentCoreNative {
                     _ = cancel.cancelled() => {
                         core.emit(CoreEvent::TurnCancelled { session_id });
                         let _ = turn_tx.send(CoreEvent::TurnCancelled { session_id }).await;
+                        release_active_turn(&core.active_turns, session_id, active_turn_id).await;
                         core.persist_engine_snapshot(session_id, &engine).await;
                         let _ = engine.submit(SessionCommand::Shutdown).await;
                         break;
@@ -769,6 +805,7 @@ impl AgentCoreNative {
                             Err(broadcast::error::RecvError::Lagged(_)) => continue,
                             Err(broadcast::error::RecvError::Closed) => break,
                         };
+                        core.persist_completed_trajectory(session_id, &event).await;
                         let is_terminal = matches!(
                             event,
                             RuntimeEvent::TurnFinished { .. }
@@ -788,6 +825,8 @@ impl AgentCoreNative {
                             if turn_tx.send(core_event).await.is_err() {
                                 break;
                             }
+                            release_active_turn(&core.active_turns, session_id, active_turn_id)
+                                .await;
                             let _ = engine.submit(SessionCommand::Shutdown).await;
                             break;
                         } else {
@@ -811,7 +850,7 @@ impl AgentCoreNative {
 
             core.persist_provider_health(session_id, &provider_name)
                 .await;
-            core.active_turns.lock().await.remove(&session_id);
+            release_active_turn(&core.active_turns, session_id, active_turn_id).await;
         });
 
         Ok(Box::pin(ReceiverStream::new(turn_rx)))
@@ -819,12 +858,19 @@ impl AgentCoreNative {
 
     /// Cancels a currently active turn for a session.
     pub async fn cancel_turn(&self, session_id: SessionId) -> Result<(), CoreError> {
-        if let Some(cancel) = self.active_turns.lock().await.get(&session_id).cloned() {
+        if let Some(cancel) = self
+            .active_turns
+            .lock()
+            .await
+            .get(&session_id)
+            .map(|active_turn| active_turn.cancel.clone())
+        {
             cancel.cancel();
         }
         Ok(())
     }
 
+    #[allow(clippy::result_large_err)]
     fn resolve_session_runtime(
         &self,
         project: &Project,
@@ -905,6 +951,21 @@ impl AgentCoreNative {
                 session_id,
                 event: RuntimeEvent::Error {
                     message: format!("failed to update session timestamp: {error}"),
+                    recoverable: false,
+                },
+            });
+        }
+    }
+
+    async fn persist_completed_trajectory(&self, session_id: SessionId, event: &RuntimeEvent) {
+        let RuntimeEvent::AtifTrajectoryCompleted { trajectory } = event else {
+            return;
+        };
+        if let Err(error) = self.upsert_trajectory(session_id, trajectory.clone()).await {
+            self.emit(CoreEvent::Turn {
+                session_id,
+                event: RuntimeEvent::Error {
+                    message: format!("failed to persist trajectory: {error}"),
                     recoverable: false,
                 },
             });
@@ -1849,6 +1910,63 @@ max_tokens = 512
 
         let loaded = core.trajectory(session.id).await.unwrap().unwrap();
         assert_eq!(loaded.session_id, trajectory.session_id);
+    }
+
+    #[tokio::test]
+    async fn completed_trajectory_event_persists_through_core() {
+        let store = Arc::new(InMemoryStore::new());
+        let core = AgentCoreNative::builder(store.clone())
+            .with_provider("mock", Arc::new(MockProvider::new()))
+            .build()
+            .await
+            .unwrap();
+        let project = core
+            .resolve_or_create_project("/tmp/trajectory-event-core")
+            .await
+            .unwrap();
+        let session = core.create_session(project.id).await.unwrap();
+        let trajectory = sample_trajectory(session.id);
+
+        core.persist_completed_trajectory(
+            session.id,
+            &RuntimeEvent::AtifTrajectoryCompleted {
+                trajectory: trajectory.clone(),
+            },
+        )
+        .await;
+
+        let loaded = core.trajectory(session.id).await.unwrap().unwrap();
+        assert_eq!(loaded, trajectory);
+    }
+
+    #[tokio::test]
+    async fn persist_completed_trajectory_ignores_non_trajectory_events() {
+        let store = Arc::new(InMemoryStore::new());
+        let core = AgentCoreNative::builder(store.clone())
+            .with_provider("mock", Arc::new(MockProvider::new()))
+            .build()
+            .await
+            .unwrap();
+        let project = core
+            .resolve_or_create_project("/tmp/trajectory-persist-core")
+            .await
+            .unwrap();
+        let session = core.create_session(project.id).await.unwrap();
+        let trajectory = sample_trajectory(session.id);
+
+        core.upsert_trajectory(session.id, trajectory.clone())
+            .await
+            .unwrap();
+
+        let event = RuntimeEvent::TurnFinished {
+            session_id: session.id,
+            turn_index: 0,
+            finish_reason: Some(FinishReason::Stop),
+        };
+        core.persist_completed_trajectory(session.id, &event).await;
+
+        let loaded = core.trajectory(session.id).await.unwrap().unwrap();
+        assert_eq!(loaded, trajectory);
     }
 
     #[tokio::test]

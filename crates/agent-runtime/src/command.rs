@@ -558,17 +558,12 @@ pub enum PtyCommand {
 }
 
 /// How broadly the runtime should expose agent listing results.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AgentListScope {
     /// Direct child runtimes of the current runtime only.
+    #[default]
     DirectChildren,
-}
-
-impl Default for AgentListScope {
-    fn default() -> Self {
-        Self::DirectChildren
-    }
 }
 
 /// Semantic child-to-parent report that may later be injected into provider context.
@@ -820,6 +815,7 @@ pub enum EnvelopeKind {
 }
 
 /// Agent-oriented commands accepted by a runtime.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum AgentCommand {
     /// Spawn a child runtime using the registry.
@@ -882,6 +878,7 @@ pub enum AgentCommand {
 }
 
 /// Command surface for the bidirectional session engine.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone)]
 pub enum SessionCommand {
     /// Queue transcript input for a session.

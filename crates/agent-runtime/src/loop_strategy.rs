@@ -48,6 +48,7 @@ impl LoopContext {
 }
 
 /// Strategy decision returned to the runtime engine.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum LoopDecision {
     /// Run another provider step using the current transcript.

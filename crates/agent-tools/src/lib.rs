@@ -46,7 +46,7 @@ pub fn native_tools() -> RegistryToolExecutor {
     registry.register(Arc::new(ShellTool::new(NativeShellDriver)));
     registry.register(Arc::new(ListDirectoryTool::new(NativeListDirectoryDriver)));
     registry.register(Arc::new(GlobSearchTool::new(NativeGlobSearchDriver)));
-    registry.register(Arc::new(GrepTool::new(AutoGrepDriver::default())));
+    registry.register(Arc::new(GrepTool::new(AutoGrepDriver)));
     registry
 }
 

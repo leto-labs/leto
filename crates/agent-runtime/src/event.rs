@@ -1,3 +1,4 @@
+use atif::{Agent as AtifAgent, FinalMetrics as AtifFinalMetrics, Step as AtifStep, Trajectory};
 use provider::{Block, BlockDelta, FinishReason, Message, Usage};
 use serde::{Deserialize, Serialize};
 use ulid::Ulid;
@@ -35,6 +36,30 @@ pub enum RuntimeEvent {
         session_id: Ulid,
         /// Monotonic turn index.
         turn_index: u64,
+    },
+    /// Native ATIF trajectory metadata for the active turn.
+    AtifTrajectoryStarted {
+        /// ATIF schema version used by the emitted trajectory.
+        schema_version: atif::SchemaVersion,
+        /// Stable session identifier.
+        session_id: String,
+        /// Agent metadata for the trajectory.
+        agent: AtifAgent,
+    },
+    /// A completed ATIF step derived from the active turn transcript.
+    AtifStepCompleted {
+        /// Completed ATIF step.
+        step: AtifStep,
+    },
+    /// Aggregate ATIF metrics for the completed turn.
+    AtifFinalMetrics {
+        /// Final ATIF metrics payload.
+        metrics: AtifFinalMetrics,
+    },
+    /// Full ATIF trajectory after appending the completed turn.
+    AtifTrajectoryCompleted {
+        /// Completed ATIF trajectory.
+        trajectory: Trajectory,
     },
     /// The session phase changed.
     PhaseChanged {

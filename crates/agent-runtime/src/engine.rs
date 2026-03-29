@@ -106,6 +106,7 @@ struct RuntimeRegistryInner {
     state: StdMutex<RuntimeRegistryState>,
 }
 
+#[allow(clippy::large_enum_variant)]
 enum EngineCommand {
     External(SessionCommand),
     ProviderFinished(Result<InferenceStep, RuntimeError>),
@@ -1024,10 +1025,10 @@ impl EngineRuntime {
                     let mut state = self.state.lock().await;
                     state.pending_interrupt = Some(mode);
                 }
-                if matches!(mode, InterruptMode::ImmediateCancel) {
-                    if let Some(cancel) = &self.active_provider_cancel {
-                        cancel.cancel();
-                    }
+                if matches!(mode, InterruptMode::ImmediateCancel)
+                    && let Some(cancel) = &self.active_provider_cancel
+                {
+                    cancel.cancel();
                 }
             }
             ControlEvent::Steer { message, when } => {
@@ -1169,19 +1170,18 @@ impl EngineRuntime {
             | EnvelopeKind::Progress
             | EnvelopeKind::Result
             | EnvelopeKind::Mail => {
-                if matches!(envelope.kind, EnvelopeKind::Mail) {
-                    if let Ok(message) =
+                if matches!(envelope.kind, EnvelopeKind::Mail)
+                    && let Ok(message) =
                         serde_json::from_value::<AgentMessage>(envelope.payload.clone())
+                {
                     {
-                        {
-                            let mut state = self.state.lock().await;
-                            state.mailbox.push_back(message.clone());
-                            if message.delivery_mode == AgentMessageDelivery::Direct {
-                                state.pending_direct_messages.push(message.clone());
-                            }
+                        let mut state = self.state.lock().await;
+                        state.mailbox.push_back(message.clone());
+                        if message.delivery_mode == AgentMessageDelivery::Direct {
+                            state.pending_direct_messages.push(message.clone());
                         }
-                        self.emit(RuntimeEvent::AgentMessageDelivered { message });
                     }
+                    self.emit(RuntimeEvent::AgentMessageDelivered { message });
                 }
                 if let Some(report) = self.build_child_report_from_envelope(&envelope).await? {
                     {
@@ -1201,10 +1201,10 @@ impl EngineRuntime {
             ChildUpdate::Status { child_id, status } => {
                 {
                     let mut state = self.state.lock().await;
-                    if let Some(child) = state.children.get_mut(&child_id) {
-                        if !child.status.is_terminal() {
-                            child.status = status;
-                        }
+                    if let Some(child) = state.children.get_mut(&child_id)
+                        && !child.status.is_terminal()
+                    {
+                        child.status = status;
                     }
                 }
                 self.emit(RuntimeEvent::ChildStatusChanged {
@@ -3918,39 +3918,39 @@ async fn wait_for_runtime_targets(
             return Ok(WaitResult { outcome, targets });
         }
 
-        if let Some(deadline) = deadline {
-            if tokio::time::Instant::now() >= deadline {
-                if wait.on_timeout == WaitTimeoutAction::InterruptChild {
-                    for runtime_id in &ids {
-                        engine
-                            .submit(SessionCommand::Agent(AgentCommand::InterruptAgent {
-                                runtime_id: *runtime_id,
-                                mode: InterruptMode::ImmediateCancel,
-                            }))
-                            .await?;
-                    }
-                    return Ok(WaitResult {
-                        outcome: WaitOutcome::Interrupted,
-                        targets: ids
-                            .into_iter()
-                            .map(|runtime_id| WaitTargetOutcome {
-                                runtime_id,
-                                outcome: WaitOutcome::Interrupted,
-                            })
-                            .collect(),
-                    });
+        if let Some(deadline) = deadline
+            && tokio::time::Instant::now() >= deadline
+        {
+            if wait.on_timeout == WaitTimeoutAction::InterruptChild {
+                for runtime_id in &ids {
+                    engine
+                        .submit(SessionCommand::Agent(AgentCommand::InterruptAgent {
+                            runtime_id: *runtime_id,
+                            mode: InterruptMode::ImmediateCancel,
+                        }))
+                        .await?;
                 }
                 return Ok(WaitResult {
-                    outcome: WaitOutcome::TimedOut,
+                    outcome: WaitOutcome::Interrupted,
                     targets: ids
                         .into_iter()
                         .map(|runtime_id| WaitTargetOutcome {
                             runtime_id,
-                            outcome: WaitOutcome::TimedOut,
+                            outcome: WaitOutcome::Interrupted,
                         })
                         .collect(),
                 });
             }
+            return Ok(WaitResult {
+                outcome: WaitOutcome::TimedOut,
+                targets: ids
+                    .into_iter()
+                    .map(|runtime_id| WaitTargetOutcome {
+                        runtime_id,
+                        outcome: WaitOutcome::TimedOut,
+                    })
+                    .collect(),
+            });
         }
 
         sleep(Duration::from_millis(25)).await;
