@@ -1,0 +1,3 @@
+- [x] Add a `brain-server` spec delta for the `/v1/models` compatibility route
+- [x] Implement `GET /v1/models` in the legacy `brain-server` router
+- [x] Add HTTP integration coverage for the new route

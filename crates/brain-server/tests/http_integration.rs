@@ -3,7 +3,7 @@ use std::sync::Arc;
 use brain_core::Brain;
 use brain_loops::SimpleLoop;
 use brain_providers::MockProvider;
-use brain_server::{BrainServer, ServerEvent, ServerStatus, build_router};
+use brain_server::{BrainServer, HealthResponse, ServerEvent, build_router};
 use brain_stores::InMemoryStore;
 use brain_types::*;
 use futures::StreamExt;
@@ -237,6 +237,18 @@ async fn send_message_returns_202() {
 // -- Status --
 
 #[tokio::test]
+async fn health_returns_200() {
+    let base = start_server().await;
+    let client = reqwest::Client::new();
+
+    let resp = client.get(format!("{base}/health")).send().await.unwrap();
+    assert_eq!(resp.status(), 200);
+
+    let health: HealthResponse = resp.json().await.unwrap();
+    assert_eq!(health.status, "ok");
+}
+
+#[tokio::test]
 async fn status_returns_200() {
     let base = start_server().await;
     let client = reqwest::Client::new();
@@ -244,9 +256,9 @@ async fn status_returns_200() {
     let resp = client.get(format!("{base}/status")).send().await.unwrap();
     assert_eq!(resp.status(), 200);
 
-    let status: ServerStatus = resp.json().await.unwrap();
-    assert_eq!(status.active_sessions, 0);
-    assert!(status.active_turns.is_empty());
+    let status: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(status["active_sessions"], 0);
+    assert_eq!(status["active_turns"].as_array().map(Vec::len), Some(0));
 }
 
 // -- Error cases --
@@ -502,9 +514,26 @@ async fn list_providers_returns_200() {
         .unwrap();
     assert_eq!(resp.status(), 200);
 
-    let providers: Vec<brain_types::ProviderInfo> = resp.json().await.unwrap();
-    assert_eq!(providers.len(), 1);
-    assert_eq!(providers[0].name, "mock");
+    let providers: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(providers.as_array().map(Vec::len), Some(1));
+    assert_eq!(providers[0]["name"], "mock");
+}
+
+#[tokio::test]
+async fn list_v1_models_returns_provider_inventory() {
+    let base = start_server().await;
+    let client = reqwest::Client::new();
+
+    let resp = client
+        .get(format!("{base}/v1/models"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+
+    let providers: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(providers.as_array().map(Vec::len), Some(1));
+    assert_eq!(providers[0]["name"], "mock");
 }
 
 // -- Credentials --
@@ -597,7 +626,8 @@ async fn status_includes_providers() {
     let resp = client.get(format!("{base}/status")).send().await.unwrap();
     assert_eq!(resp.status(), 200);
 
-    let status: brain_server::ServerStatus = resp.json().await.unwrap();
-    assert_eq!(status.providers.len(), 1);
-    assert_eq!(status.providers[0].name, "mock");
+    let status: serde_json::Value = resp.json().await.unwrap();
+    let providers = status["providers"].as_array().expect("providers array");
+    assert_eq!(providers.len(), 1);
+    assert_eq!(providers[0]["name"], "mock");
 }

@@ -20,12 +20,13 @@ use brain_types::{
 
 use crate::api::BrainApi;
 use crate::server::BrainServer;
-use crate::types::{CreateProjectRequest, SendMessageRequest};
+use crate::types::{CreateProjectRequest, HealthResponse, SendMessageRequest};
 
 type AppState = Arc<BrainServer>;
 
 pub fn build_router(server: Arc<BrainServer>) -> Router {
     Router::new()
+        .route("/health", routing::get(health))
         // Project CRUD
         .route(
             "/projects",
@@ -60,6 +61,7 @@ pub fn build_router(server: Arc<BrainServer>) -> Router {
         .route("/sessions/{id}/cancel", routing::post(cancel_turn))
         // Providers & credentials
         .route("/providers", routing::get(list_providers))
+        .route("/v1/models", routing::get(list_models))
         .route("/credentials", routing::get(list_credentials))
         .route(
             "/credentials/{name}",
@@ -87,6 +89,10 @@ pub async fn serve(
 }
 
 // -- Project handlers --
+
+async fn health() -> impl IntoResponse {
+    Json(HealthResponse::current())
+}
 
 async fn create_project(
     State(server): State<AppState>,
@@ -285,6 +291,13 @@ async fn list_providers(State(server): State<AppState>) -> Response {
     }
 }
 
+async fn list_models(State(server): State<AppState>) -> Response {
+    match server.list_providers().await {
+        Ok(providers) => Json(providers).into_response(),
+        Err(e) => error_response(e),
+    }
+}
+
 async fn list_credentials(State(server): State<AppState>) -> Response {
     match server.list_credentials().await {
         Ok(creds) => {
@@ -355,6 +368,7 @@ async fn status(State(server): State<AppState>) -> Response {
 
 // -- Helpers --
 
+#[allow(clippy::result_large_err)]
 fn parse_ulid(s: &str) -> Result<Ulid, Response> {
     s.parse::<Ulid>().map_err(|_| {
         (
@@ -365,6 +379,7 @@ fn parse_ulid(s: &str) -> Result<Ulid, Response> {
     })
 }
 
+#[allow(clippy::result_large_err)]
 fn parse_project_id(s: &str) -> Result<ProjectId, Response> {
     s.parse::<Ulid>().map_err(|_| {
         (
