@@ -327,10 +327,7 @@ async fn send_message_stream_returns_events() {
     let project = make_project(&server).await;
     let session = server.create_session(project.id).await.unwrap();
 
-    let mut stream = server
-        .send_message_stream(session.id, "hello")
-        .await
-        .unwrap();
+    let mut stream = server.send_message_stream(session.id, "hello").await.unwrap();
 
     let mut saw_token = false;
     let mut saw_done = false;
@@ -357,10 +354,7 @@ async fn send_message_stream_also_publishes_to_bus() {
     let session = server.create_session(project.id).await.unwrap();
 
     let mut bus_rx = server.subscribe();
-    let mut stream = server
-        .send_message_stream(session.id, "hello")
-        .await
-        .unwrap();
+    let mut stream = server.send_message_stream(session.id, "hello").await.unwrap();
 
     while futures::StreamExt::next(&mut stream).await.is_some() {}
 

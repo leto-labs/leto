@@ -92,7 +92,10 @@ impl BrainServer {
         })
     }
 
-    pub(super) fn get_session_api(&self, id: Ulid) -> BoxFuture<'_, Result<Session, BrainError>> {
+    pub(super) fn get_session_api(
+        &self,
+        id: Ulid,
+    ) -> BoxFuture<'_, Result<Session, BrainError>> {
         Box::pin(async move { self.inner.brain.store.sessions().get(id).await })
     }
 

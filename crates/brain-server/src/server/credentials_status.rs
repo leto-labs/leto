@@ -114,12 +114,7 @@ impl BrainServer {
 
             let mut total_sessions = 0usize;
             for project in &projects {
-                let sessions = inner
-                    .brain
-                    .store
-                    .sessions()
-                    .list_for_project(project.id)
-                    .await?;
+                let sessions = inner.brain.store.sessions().list_for_project(project.id).await?;
                 total_sessions += sessions.len();
             }
 
