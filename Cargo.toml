@@ -15,6 +15,8 @@ members = [
     "crates/agent-core",
     "crates/agent-core-remote",
     "crates/agent-server",
+    "crates/agent-acp",
+    "crates/agent-cli",
     "crates/provider-anthropic",
     "crates/provider-llamacpp",
     "crates/provider-mistralrs",
@@ -24,6 +26,7 @@ members = [
     "crates/brain-loops",
     "crates/brain-tools",
     "crates/brain-transports",
+    "crates/brain-server",
     "crates/brain-core",
     "crates/brain-acp",
     "crates/brain-cli",
@@ -37,7 +40,7 @@ version = "0.1.0"
 
 [workspace.dependencies]
 # Async
-tokio = { version = "1", default-features = false }
+tokio = { version = "1", default-features = false, features = ["macros", "rt", "sync", "time"] }
 tokio-util = "0.7"
 tokio-stream = "0.1"
 futures = "0.3"
@@ -114,6 +117,8 @@ agent-store = { path = "crates/agent-store" }
 agent-core = { path = "crates/agent-core" }
 agent-core-remote = { path = "crates/agent-core-remote" }
 agent-server = { path = "crates/agent-server" }
+agent-acp = { path = "crates/agent-acp" }
+agent-cli = { path = "crates/agent-cli" }
 provider-anthropic = { path = "crates/provider-anthropic" }
 provider-llamacpp = { path = "crates/provider-llamacpp" }
 provider-mistralrs = { path = "crates/provider-mistralrs" }
@@ -123,6 +128,7 @@ brain-stores = { path = "crates/brain-stores" }
 brain-loops = { path = "crates/brain-loops" }
 brain-transports = { path = "crates/brain-transports" }
 brain-tools = { path = "crates/brain-tools" }
+brain-server = { path = "crates/brain-server" }
 brain-core = { path = "crates/brain-core" }
 brain-acp = { path = "crates/brain-acp" }
 brain-config = { path = "crates/brain-config" }

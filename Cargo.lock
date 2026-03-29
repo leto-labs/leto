@@ -19,6 +19,46 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
+name = "agent-acp"
+version = "0.1.0"
+dependencies = [
+ "agent-client-protocol",
+ "agent-core",
+ "agent-runtime",
+ "agent-store",
+ "async-trait",
+ "futures",
+ "provider",
+ "serde_json",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "ulid",
+]
+
+[[package]]
+name = "agent-cli"
+version = "0.1.0"
+dependencies = [
+ "agent-acp",
+ "agent-core",
+ "agent-runtime",
+ "agent-store",
+ "anyhow",
+ "atif",
+ "clap",
+ "futures",
+ "provider",
+ "provider-openai",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "ulid",
+]
+
+[[package]]
 name = "agent-client-protocol"
 version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -71,7 +111,6 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tokio-util",
- "toml 0.8.23",
 ]
 
 [[package]]
@@ -120,6 +159,8 @@ name = "agent-runtime"
 version = "0.1.0"
 dependencies = [
  "async-stream",
+ "atif",
+ "chrono",
  "futures",
  "portable-pty",
  "provider",
@@ -148,14 +189,17 @@ dependencies = [
  "dirs",
  "futures",
  "provider",
+ "provider-openai",
  "reqwest 0.12.28",
  "schemars 1.2.1",
  "serde",
  "serde_json",
  "tokio",
  "tokio-stream",
+ "tokio-util",
  "tower-http",
  "tracing",
+ "tracing-subscriber",
  "ulid",
 ]
 
@@ -166,6 +210,7 @@ dependencies = [
  "agent-runtime",
  "atif",
  "chrono",
+ "dirs",
  "futures",
  "provider",
  "serde",
@@ -174,6 +219,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tokio-stream",
+ "toml 0.8.23",
  "ulid",
 ]
 
@@ -569,6 +615,7 @@ dependencies = [
  "matchit",
  "memchr",
  "mime",
+ "multer",
  "percent-encoding",
  "pin-project-lite",
  "serde_core",
@@ -833,6 +880,28 @@ dependencies = [
  "serde_json",
  "sha2",
  "tokio",
+ "tracing",
+ "ulid",
+]
+
+[[package]]
+name = "brain-server"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "brain-core",
+ "brain-loops",
+ "brain-providers",
+ "brain-stores",
+ "brain-types",
+ "chrono",
+ "futures",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-stream",
+ "tokio-util",
  "tracing",
  "ulid",
 ]
@@ -3594,6 +3663,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "multer"
+version = "3.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "83e87776546dc87511aa5ee218730c92b666d7264ab6ed41f9d215af9cd5224b"
+dependencies = [
+ "bytes",
+ "encoding_rs",
+ "futures-util",
+ "http",
+ "httparse",
+ "memchr",
+ "mime",
+ "spin",
+ "version_check",
+]
+
+[[package]]
 name = "nalgebra"
 version = "0.33.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5454,6 +5540,12 @@ dependencies = [
  "packedvec",
  "vob",
 ]
+
+[[package]]
+name = "spin"
+version = "0.9.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6980e8d7511241f8acf4aebddbb1ff938df5eebe98691418c4468d0b72a96a67"
 
 [[package]]
 name = "spm_precompiled"
