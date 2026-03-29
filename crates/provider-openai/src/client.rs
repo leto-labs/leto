@@ -7,9 +7,16 @@
 use reqwest::Url;
 
 use crate::Error;
+use crate::assistants::AssistantsClient;
+use crate::audit_logs::AuditLogsClient;
 use crate::chat_completions::ChatCompletionsClient;
 use crate::config::Config;
+use crate::embeddings::EmbeddingsClient;
+use crate::fine_tuning::FineTuningClient;
+use crate::rate_limits::RateLimitsClient;
 use crate::responses::ResponsesClient;
+use crate::vector_stores::VectorStoresClient;
+use crate::videos::VideosClient;
 
 /// Top-level OpenAI wire client that exposes explicit modern API surfaces.
 #[derive(Debug, Clone)]
@@ -48,12 +55,68 @@ impl Client {
         ResponsesClient::new(self)
     }
 
+    /// Returns the Audit Logs API surface.
+    ///
+    /// Official reference:
+    /// <https://platform.openai.com/docs/api-reference/audit-logs>
+    pub fn audit_logs(&self) -> AuditLogsClient<'_> {
+        AuditLogsClient::new(self)
+    }
+
+    /// Returns the Assistants API surface.
+    ///
+    /// Official reference:
+    /// <https://platform.openai.com/docs/api-reference/assistants>
+    pub fn assistants(&self) -> AssistantsClient<'_> {
+        AssistantsClient::new(self)
+    }
+
     /// Returns the Chat Completions API surface.
     ///
     /// Official reference:
     /// <https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create>
     pub fn chat_completions(&self) -> ChatCompletionsClient<'_> {
         ChatCompletionsClient::new(self)
+    }
+
+    /// Returns the Fine-Tuning API surface.
+    ///
+    /// Official reference:
+    /// <https://platform.openai.com/docs/api-reference/fine-tuning>
+    pub fn fine_tuning(&self) -> FineTuningClient<'_> {
+        FineTuningClient::new(self)
+    }
+
+    /// Returns the Rate Limits API surface.
+    ///
+    /// Official reference:
+    /// <https://platform.openai.com/docs/api-reference/project-rate-limits>
+    pub fn rate_limits(&self) -> RateLimitsClient<'_> {
+        RateLimitsClient::new(self)
+    }
+
+    /// Returns the Embeddings API surface.
+    ///
+    /// Official reference:
+    /// <https://platform.openai.com/docs/api-reference/embeddings>
+    pub fn embeddings(&self) -> EmbeddingsClient<'_> {
+        EmbeddingsClient::new(self)
+    }
+
+    /// Returns the Vector Stores API surface.
+    ///
+    /// Official reference:
+    /// <https://platform.openai.com/docs/api-reference/vector-stores>
+    pub fn vector_stores(&self) -> VectorStoresClient<'_> {
+        VectorStoresClient::new(self)
+    }
+
+    /// Returns the Videos API surface.
+    ///
+    /// Official reference:
+    /// <https://platform.openai.com/docs/api-reference/videos>
+    pub fn videos(&self) -> VideosClient<'_> {
+        VideosClient::new(self)
     }
 
     pub(crate) fn http(&self) -> &reqwest::Client {
@@ -92,7 +155,7 @@ impl Client {
 
     pub(crate) fn endpoint_joined_url(&self, segments: &[&str]) -> Result<Url, Error> {
         let base = self.config.base_url.trim_end_matches('/');
-        let mut url = Url::parse(&base).map_err(|e| Error::Internal(e.to_string()))?;
+        let mut url = Url::parse(base).map_err(|e| Error::Internal(e.to_string()))?;
         let mut path_segments = url
             .path_segments_mut()
             .map_err(|_| Error::Internal("base URL does not support path segments".into()))?;

@@ -86,42 +86,40 @@ async fn wait_for_callback(
     expected_state: &str,
 ) -> Result<String, Error> {
     let deadline = tokio::time::Instant::now() + timeout;
-    loop {
-        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
-        if remaining.is_zero() {
-            return Err(Error::Auth("OAuth callback timed out".into()));
-        }
-        let (mut stream, _) = tokio::time::timeout(remaining, listener.accept())
-            .await
-            .map_err(|_| Error::Auth("OAuth callback timed out".into()))?
-            .map_err(|e| Error::Auth(format!("callback accept failed: {e}")))?;
-
-        let mut buf = vec![0u8; 4096];
-        let n = stream
-            .read(&mut buf)
-            .await
-            .map_err(|e| Error::Auth(format!("callback read failed: {e}")))?;
-        let request = String::from_utf8_lossy(&buf[..n]);
-        let path = request
-            .lines()
-            .next()
-            .and_then(|line| line.split_whitespace().nth(1))
-            .unwrap_or("");
-        let query = path.split_once('?').map(|(_, value)| value).unwrap_or("");
-        let state = extract_param(query, "state");
-        if state.as_deref() != Some(expected_state) {
-            let _ = stream
-                .write_all(b"HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\nstate mismatch")
-                .await;
-            return Err(Error::Auth("OAuth state mismatch".into()));
-        }
-        let code = extract_param(query, "code")
-            .ok_or_else(|| Error::Auth("missing callback code".into()))?;
-        let _ = stream
-            .write_all(b"HTTP/1.1 200 OK\r\nConnection: close\r\n\r\nok")
-            .await;
-        return Ok(code);
+    let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+    if remaining.is_zero() {
+        return Err(Error::Auth("OAuth callback timed out".into()));
     }
+    let (mut stream, _) = tokio::time::timeout(remaining, listener.accept())
+        .await
+        .map_err(|_| Error::Auth("OAuth callback timed out".into()))?
+        .map_err(|e| Error::Auth(format!("callback accept failed: {e}")))?;
+
+    let mut buf = vec![0u8; 4096];
+    let n = stream
+        .read(&mut buf)
+        .await
+        .map_err(|e| Error::Auth(format!("callback read failed: {e}")))?;
+    let request = String::from_utf8_lossy(&buf[..n]);
+    let path = request
+        .lines()
+        .next()
+        .and_then(|line| line.split_whitespace().nth(1))
+        .unwrap_or("");
+    let query = path.split_once('?').map(|(_, value)| value).unwrap_or("");
+    let state = extract_param(query, "state");
+    if state.as_deref() != Some(expected_state) {
+        let _ = stream
+            .write_all(b"HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\nstate mismatch")
+            .await;
+        return Err(Error::Auth("OAuth state mismatch".into()));
+    }
+    let code =
+        extract_param(query, "code").ok_or_else(|| Error::Auth("missing callback code".into()))?;
+    let _ = stream
+        .write_all(b"HTTP/1.1 200 OK\r\nConnection: close\r\n\r\nok")
+        .await;
+    Ok(code)
 }
 
 fn extract_param(query: &str, name: &str) -> Option<String> {

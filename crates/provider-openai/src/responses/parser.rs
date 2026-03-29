@@ -564,4 +564,139 @@ mod tests {
             other => panic!("unexpected event: {other:?}"),
         }
     }
+
+    #[test]
+    fn parses_response_prompt_version_and_variables() {
+        let raw = serde_json::json!({
+            "id": "resp_prompt",
+            "object": "response",
+            "status": "completed",
+            "output": [],
+            "prompt": {
+                "id": "pmpt_123",
+                "version": "v42",
+                "variables": {
+                    "topic": "testing",
+                    "count": 2
+                }
+            }
+        });
+
+        let parsed = parse_response_object_value(raw);
+        let prompt = parsed.prompt.expect("prompt should parse");
+
+        assert_eq!(prompt.id, "pmpt_123");
+        assert_eq!(prompt.version.as_deref(), Some("v42"));
+        assert_eq!(
+            prompt.variables.get("topic").and_then(Value::as_str),
+            Some("testing")
+        );
+        assert_eq!(
+            prompt.variables.get("count").and_then(Value::as_i64),
+            Some(2)
+        );
+    }
+
+    #[test]
+    fn parses_token_tracking_from_prompt_and_completion_aliases() {
+        let raw = serde_json::json!({
+            "id": "resp_usage_aliases",
+            "object": "response",
+            "status": "completed",
+            "output": [],
+            "usage": {
+                "prompt_tokens": 13,
+                "completion_tokens": 8,
+                "total_tokens": 21,
+                "prompt_tokens_details": {
+                    "cached_tokens": 5,
+                    "cache_creation_tokens": 3
+                },
+                "completion_tokens_details": {
+                    "reasoning_tokens": 6
+                }
+            }
+        });
+
+        let parsed = parse_response_object_value(raw);
+        let usage = parsed.usage.expect("usage should parse");
+
+        assert_eq!(usage.prompt, 13);
+        assert_eq!(usage.completion, 8);
+        assert_eq!(usage.total, 21);
+        assert_eq!(usage.cache_read, Some(5));
+        assert_eq!(usage.cache_write, Some(3));
+        assert_eq!(usage.reasoning, Some(6));
+    }
+
+    #[test]
+    fn preserves_raw_response_payload_for_debug_dumping() {
+        let raw = serde_json::json!({
+            "id": "resp_debug",
+            "object": "response",
+            "status": "completed",
+            "service_tier": "priority",
+            "debug_dump": {
+                "trace_id": "trace-debug-123",
+                "node": "edge-a"
+            },
+            "output": [{
+                "type": "message",
+                "id": "msg_debug",
+                "role": "assistant",
+                "status": "completed",
+                "content": [{
+                    "type": "output_text",
+                    "text": "hello",
+                    "annotations": []
+                }],
+                "debug_part": {
+                    "segment": 7
+                }
+            }]
+        });
+
+        let parsed = parse_response_object_value(raw);
+
+        assert_eq!(parsed.service_tier.as_deref(), Some("priority"));
+        assert_eq!(
+            parsed
+                .raw
+                .pointer("/debug_dump/trace_id")
+                .and_then(Value::as_str),
+            Some("trace-debug-123")
+        );
+
+        match &parsed.output[0] {
+            ResponseOutputItem::Message(message) => {
+                assert_eq!(
+                    message
+                        .raw
+                        .pointer("/debug_part/segment")
+                        .and_then(Value::as_i64),
+                    Some(7)
+                );
+            }
+            other => panic!("expected message output item, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn reports_diagnostic_error_for_stream_event_without_type() {
+        let raw = serde_json::json!({
+            "sequence_number": 9,
+            "response": {
+                "id": "resp_broken"
+            }
+        });
+
+        let err = parse_response_stream_event(raw).unwrap_err();
+
+        match err {
+            Error::Inference(message) => {
+                assert_eq!(message, "responses event missing type");
+            }
+            other => panic!("expected inference error, got {other:?}"),
+        }
+    }
 }

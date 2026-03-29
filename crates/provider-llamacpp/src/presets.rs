@@ -188,6 +188,14 @@ mod tests {
     }
 
     #[test]
+    fn preset_lookup_is_case_insensitive() {
+        let preset = LlamaCppModelPreset::by_name("QwEn3.5-0.8B")
+            .expect("preset lookup should ignore ASCII case");
+
+        assert_eq!(preset.id(), "qwen3.5-0.8b");
+    }
+
+    #[test]
     fn into_config_preserves_model_metadata() {
         let config = LlamaCppModelPreset::QWEN35_0_8B.into_config();
         let model_info = config
