@@ -457,6 +457,11 @@ pub enum AssistantMessageRoleDoc {
     Assistant,
 }
 
+// Keep this untagged shape stable because the compat OpenAPI output is pinned.
+#[expect(
+    clippy::large_enum_variant,
+    reason = "compat untagged schema shape must stay inline for pinned OpenAPI parity"
+)]
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[schemars(rename = "Message")]
 #[serde(untagged)]

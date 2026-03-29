@@ -83,13 +83,14 @@ fn project_update_route() -> ApiRouter<AppState> {
 
 async fn projects(State(server): State<AppState>, Query(_query): Query<CompatQuery>) -> Response {
     match server.core().store().projects().list().await {
-        Ok(projects) => Json(
-            projects
-                .iter()
-                .map(|project| compat_project(project, &server.compat()))
-                .collect::<Vec<_>>(),
-        )
-        .into_response(),
+        Ok(projects) => {
+            let mut docs = Vec::with_capacity(projects.len());
+            let compat = server.compat();
+            for project in &projects {
+                docs.push(compat_project(project, &compat).await);
+            }
+            Json(docs).into_response()
+        }
         Err(error) => compat_error("store_error", error.to_string()),
     }
 }
@@ -99,7 +100,7 @@ async fn project_current(
     Query(params): Query<CompatQuery>,
 ) -> Response {
     match resolve_current_project(&server, &params).await {
-        Ok(project) => Json(compat_project(&project, &server.compat())).into_response(),
+        Ok(project) => Json(compat_project(&project, &server.compat()).await).into_response(),
         Err(response) => response,
     }
 }
@@ -115,7 +116,7 @@ async fn project_git_init(
     if let Some(root) = &project.root {
         let _ = Command::new("git").arg("-C").arg(root).arg("init").output();
     }
-    Json(compat_project(&project, &server.compat())).into_response()
+    Json(compat_project(&project, &server.compat()).await).into_response()
 }
 
 async fn project_update(
@@ -138,7 +139,7 @@ async fn project_update(
         project.name = Some(name);
     }
     match projects.update(project_id, project.clone()).await {
-        Ok(project) => Json(compat_project(&project, &server.compat())).into_response(),
+        Ok(project) => Json(compat_project(&project, &server.compat()).await).into_response(),
         Err(error) => compat_error("store_error", error.to_string()),
     }
 }

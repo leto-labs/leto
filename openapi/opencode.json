@@ -4676,7 +4676,7 @@
                   "level": {
                     "description": "Log level",
                     "type": "string",
-                    "enum": ["debug", "info", "error", "warn"]
+                    "enum": ["trace", "debug", "info", "error", "warn"]
                   },
                   "message": { "description": "Log message", "type": "string" },
                   "extra": {
