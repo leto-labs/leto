@@ -1,4 +1,4 @@
-# brain-loops Specification
+# agent-loops Specification
 
 ## Purpose
 Agent reasoning strategies. Defines the `AgentLoop` trait, `AgentConfig`, the typed `Event` stream, and the default `SimpleLoop` implementation (provider call, tool execution, re-inference loop).
@@ -6,14 +6,18 @@ Agent reasoning strategies. Defines the `AgentLoop` trait, `AgentConfig`, the ty
 ### Requirement: AgentLoop Trait
 The system SHALL define an `AgentLoop` trait with a single `run` method that accepts a Provider, a slice of Tools, a Vec of Messages, an AgentConfig, and a CancellationToken. It SHALL return a `Stream<Item = Event>`. Different implementations encode different agent strategies (simple tool loop, plan-then-act, multi-agent delegation, etc.).
 
-The `AgentLoop` trait remains unchanged. However, callers SHOULD prefer invoking it through `Brain.turn()` rather than calling `run()` directly. `Brain.turn()` handles message history loading, user message construction, and post-turn persistence, whereas calling `AgentLoop.run()` directly requires the caller to manage all of this.
+The `AgentLoop` trait remains unchanged. However, callers SHOULD prefer
+invoking it through the higher-level `agent-core` / `agent-runtime` turn flow
+rather than calling `run()` directly. That turn path handles message history
+loading, user message construction, and post-turn persistence, whereas calling
+`AgentLoop.run()` directly requires the caller to manage all of this.
 
 #### Scenario: Trait is object-safe and swappable
 - **WHEN** a caller has a `&dyn AgentLoop`
 - **THEN** it SHALL be able to call `run()` without knowing the concrete implementation
 
-#### Scenario: Brain dispatches via AgentLoop
-- **WHEN** `Brain.turn()` is called
+#### Scenario: Core dispatches via AgentLoop
+- **WHEN** a higher-level core/runtime turn entrypoint is called
 - **THEN** it SHALL delegate to the configured `AgentLoop.run()` with the loaded message history, provider, tools, config, and cancellation token
 
 ### Requirement: SimpleLoop Implementation
@@ -64,9 +68,9 @@ The Event enum SHALL be marked `#[non_exhaustive]` to allow future additions wit
 - **AND** execution SHALL proceed without waiting for transport input
 
 #### Scenario: Session lifecycle events
-- **WHEN** `Brain.run()` creates a new session
+- **WHEN** the higher-level runtime flow creates a new session
 - **THEN** it SHALL emit `SessionStart` before the first turn
-- **WHEN** `Brain.run()` resumes an existing session
+- **WHEN** the higher-level runtime flow resumes an existing session
 - **THEN** it SHALL emit `SessionResume` before the first turn
 
 #### Scenario: Robust loop emits hardening events
@@ -260,4 +264,3 @@ before ending the turn.
 - **WHEN** the provider requests `task_complete` while completion is already
   pending
 - **THEN** the loop SHALL emit `TurnDone` and terminate successfully
-

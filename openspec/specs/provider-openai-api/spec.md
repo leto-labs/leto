@@ -1,4 +1,4 @@
-# brain-providers-openai-api Specification
+# provider-openai-api Specification
 
 ## Purpose
 OpenAI-compatible API providers, provider presets, and request/streaming behavior for provider backends that call remote HTTP services.
@@ -39,7 +39,7 @@ The system SHALL implement the `Provider` trait for `OpenAiProvider`. It SHALL s
 The `OpenAiProvider` SHALL be gated behind the `openai` feature flag (enabled by default). Building with `--no-default-features` SHALL not compile any HTTP dependencies.
 
 #### Scenario: Feature disabled
-- **WHEN** `brain-providers` is compiled with `--no-default-features`
+- **WHEN** `provider-openai` is compiled with the relevant feature disabled
 - **THEN** `OpenAiProvider` and `OpenAiConfig` SHALL not be available and no HTTP dependencies SHALL be linked
 
 ### Requirement: OpenAiConfigPreset
@@ -78,7 +78,7 @@ The system SHALL provide a workspace Rust generator that emits the checked-in `O
 #### Scenario: Generate preset modules from models.dev
 - **WHEN** the preset generator is run
 - **THEN** it SHALL read the configured provider allowlist from the local models.dev checkout
-- **AND** it SHALL write per-provider preset Rust modules under `crates/brain-providers/src/openai/presets/`
+- **AND** it SHALL write per-provider preset Rust modules under `crates/provider-openai/src/presets/`
 - **AND** those generated modules SHALL expose the same built-in preset constants through `OpenAiConfigPreset`
 
 #### Scenario: Verify generated preset modules are current
@@ -119,4 +119,3 @@ At minimum, supported structured parts SHALL include:
   containing text and image URL parts
 - **THEN** it SHALL serialize the request using the API's structured input
   message format
-

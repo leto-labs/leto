@@ -1,12 +1,14 @@
-# brain-providers-openai-oauth Specification
+# provider-openai-oauth Specification
 
 ## Purpose
-OAuth credential lifecycle and OpenAI Codex-compatible provider integration in `brain-providers`.
+OAuth credential lifecycle and OpenAI Codex-compatible provider integration in
+the current `provider-openai` + `agent-store` stack.
 
 ## Requirements
 
 ### Requirement: ProviderCredential
-The system SHALL define a `ProviderCredential` enum in `brain-types/credential.rs` as a tagged union:
+The system SHALL define a `ProviderCredential` enum in the shared store
+credential model as a tagged union:
 - `ApiKey { api_key: String }` — static API key
 - `OAuth(OAuthCredentials)` — OAuth 2.0 tokens
 
@@ -21,7 +23,8 @@ It SHALL be serializable (Serialize + Deserialize) with `#[serde(tag = "type")]`
 - **THEN** the result SHALL match the original, with JSON containing `"type":"o_auth"`
 
 ### Requirement: OAuthCredentials
-The system SHALL define an `OAuthCredentials` struct in `brain-types/credential.rs` with:
+The system SHALL define an `OAuthCredentials` struct in the shared store
+credential model with:
 - `access_token: String` — current access token
 - `refresh_token: String` — token used to obtain new access tokens
 - `expires_at: DateTime<Utc>` — when the access token expires
@@ -44,7 +47,8 @@ It SHALL be serializable (Serialize + Deserialize) for persistence.
 - **THEN** `needs_refresh()` SHALL return true
 
 ### Requirement: CredentialStore
-The system SHALL define a `CredentialStore` trait in `brain-types/traits.rs` for persisting and loading provider credentials:
+The system SHALL define a `CredentialStore` trait in `agent-store` for
+persisting and loading provider credentials:
 - `credential_save(provider_name: &str, entry: &CredentialEntry) -> BoxFuture<Result<()>>`
 - `credential_load(provider_name: &str, credential_id: &str) -> BoxFuture<Result<Option<CredentialEntry>>>`
 - `credential_load_all(provider_name: &str) -> BoxFuture<Result<Vec<CredentialEntry>>>`
@@ -57,7 +61,10 @@ The `Store` supertrait SHALL include `CredentialStore` in its blanket impl:
 trait Store: ProjectStore + SessionStore + MessageStore + CredentialStore {}
 ```
 
-Both `InMemoryStore` and `FileStore` in `brain-stores` SHALL implement `CredentialStore`. `FileStore` SHALL persist credentials as JSON files under `{root}/credentials/{provider_name}/{credential_id}.json` with restricted permissions (mode 0600 on Unix).
+Both `InMemoryStore` and `FileStore` in `agent-store` SHALL implement
+`CredentialStore`. `FileStore` SHALL persist credentials as JSON files under
+`{root}/credentials/{provider_name}/{credential_id}.json` with restricted
+permissions (mode 0600 on Unix).
 
 #### Scenario: Persist and reload
 - **WHEN** credentials are saved via `credential_save("openai", entry)`
@@ -72,7 +79,9 @@ Both `InMemoryStore` and `FileStore` in `brain-stores` SHALL implement `Credenti
 - **THEN** `credential_list()` SHALL return all (name, credential) pairs
 
 ### Requirement: ModelInfo
-The system SHALL define `ModelInfo`, `ModelCost`, and `ModelLimit` structs in `brain-types/model.rs` closely mirroring the [models.dev](https://models.dev) schema.
+The system SHALL define `ModelInfo`, `ModelCost`, and `ModelLimit` structs in
+the shared `provider` crate, closely mirroring the
+[models.dev](https://models.dev) schema.
 
 `ModelInfo` SHALL include:
 - `id`, `name`, `family` — identification fields
@@ -201,7 +210,10 @@ The system SHALL provide a `codex_sse` module for parsing OpenAI's Responses API
 - **THEN** it SHALL be converted to `ChatChunk::Done` with token usage
 
 ### Requirement: OpenAiOAuthProvider
-The system SHALL provide an `OpenAiOAuthProvider` struct in `brain-providers` that implements the `Provider` trait. It is a separate provider from `OpenAiProvider`, purpose-built for OpenAI subscription/OAuth access via the Responses API.
+The system SHALL provide an `OpenAiOAuthProvider` struct in `provider-openai`
+that implements the shared provider trait. It is a separate provider from
+`OpenAiProvider`, purpose-built for OpenAI subscription/OAuth access via the
+Responses API.
 
 It SHALL hold:
 - `OAuthCredentials` (behind `Arc<tokio::sync::Mutex<_>>` for interior mutability during refresh)
@@ -269,5 +281,5 @@ The system SHALL provide convenience methods on `OpenAiOAuthProvider` for the lo
 The `OpenAiOAuthProvider`, `codex_sse`, and all OAuth plumbing SHALL be gated behind the `openai-oauth` feature flag (off by default). Building without the feature SHALL not compile any OAuth dependencies.
 
 #### Scenario: Feature disabled
-- **WHEN** `brain-providers` is compiled without the `openai-oauth` feature
+- **WHEN** `provider-openai` is compiled without the `openai-oauth` feature
 - **THEN** `OpenAiOAuthProvider`, OAuth utilities, and related types SHALL not be available

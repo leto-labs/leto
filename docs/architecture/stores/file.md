@@ -6,7 +6,7 @@
 
 | Concern | Current behavior |
 | --- | --- |
-| Root location | uses `brain_home()` by default |
+| Root location | uses `agent_home()` by default |
 | Persistence | durable local filesystem state |
 | Domains | projects, sessions, messages, credentials, and trajectories |
 | Eventing | publishes lifecycle events for all major store domains |

@@ -23,5 +23,6 @@
 ## Why It Matters
 
 This tool is what makes the Terminus-family loops possible without teaching
-`brain-core` about a special terminal runtime. It is the clearest example of a
+`agent-core` or `agent-runtime` about a special terminal runtime in their
+public API. It is the clearest example of a
 tool becoming a long-lived execution surface rather than a one-shot function.

@@ -1,4 +1,4 @@
-# brain-acp-integration Specification
+# agent-acp-integration Specification
 
 ## Purpose
 Describe how this repository develops and validates ACP client integration work
@@ -76,7 +76,7 @@ The planned first implementation SHALL:
 
 - support select-style ACP session config options
 - use option metadata supplied by the ACP agent
-- avoid hardcoding `brain`-specific option identifiers
+- avoid hardcoding agent-specific option identifiers
 - use a dedicated `/session-config` surface instead of changing `/model` or
   reusing `/config`
 
@@ -84,7 +84,7 @@ The planned first implementation SHALL:
 
 - **WHEN** a future Nori ACP session exposes select-style config options
 - **THEN** the planned client surface SHALL render those options generically
-- **AND** it SHALL not depend on `brain`-specific config IDs
+- **AND** it SHALL not depend on agent-specific config IDs
 
 #### Scenario: Existing Nori commands are preserved in first branch scope
 

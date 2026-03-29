@@ -1,9 +1,9 @@
 # Tools
 
-`brain-tools` packages the runtime capabilities that loops can invoke. The
-crate uses a driver-and-adapter pattern so the tool contract stays stable while
-execution moves between native Rust implementations and ACP-backed client-owned
-operations.
+`agent-tools` packages the runtime capabilities that loops can invoke. The
+crate uses typed request/response contracts plus an erased runtime-facing tool
+executor so the public tool surface stays stable while execution moves between
+native Rust implementations and ACP-backed client-owned operations.
 
 ## Table Of Contents
 
@@ -66,11 +66,11 @@ flowchart TD
 | --- | --- |
 | Stable schemas | Providers and loops can continue to refer to one tool name even if the execution backend changes |
 | ACP compatibility | File reads and writes can be routed into client-managed workspaces instead of only the backend host filesystem |
-| Persistent terminal state | `terminal_session` enables Terminus-style loops without hardcoding shell state into `brain-core` |
+| Persistent terminal state | `terminal_session` enables Terminus-style loops without hardcoding shell state into `agent-core` or `agent-runtime` |
 | Native editing | `apply_patch` and edit/file tools give the direct runtime a real local mutation surface |
 
 ## Runtime Default Surface
 
 `native_tools()` is the preset that registers the common local tool suite for
-the CLI and native runtime bootstrap. That gives `brain-cli` and direct Harbor
+the CLI and native core bootstrap. That gives `agent-cli` and direct Harbor
 runs one consistent baseline tool inventory.
