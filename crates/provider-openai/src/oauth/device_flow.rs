@@ -6,6 +6,7 @@ use crate::Error;
 use super::jwt::extract_account_id;
 use super::refresh::OpenAiOAuthCredentials;
 
+/// Configuration for the OAuth device-code flow endpoints and client identity.
 pub struct DeviceFlowConfig {
     pub device_code_url: String,
     pub device_token_url: String,
@@ -15,6 +16,7 @@ pub struct DeviceFlowConfig {
 }
 
 #[derive(Debug, Clone)]
+/// User-facing prompt details returned after the device code is created.
 pub struct DeviceUserPrompt {
     pub user_code: String,
     pub verification_url: String,
@@ -44,6 +46,7 @@ struct TokenResponse {
     scope: Option<String>,
 }
 
+/// Runs the OpenAI OAuth device flow and returns a persisted credential payload.
 pub async fn run_device_flow<F>(
     client: &reqwest::Client,
     config: &DeviceFlowConfig,

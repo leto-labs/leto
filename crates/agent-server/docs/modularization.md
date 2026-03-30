@@ -30,8 +30,8 @@ clear concern boundaries and strong integration coverage. This change extracts:
 - `src/http/routes/turns.rs`
 - `src/http/routes/credentials.rs`
 
-That reduces `src/http.rs` from 1384 lines in the baseline inventory to 184
-lines while keeping route registration in one place.
+That reduces `src/http.rs` substantially from the 1384-line baseline while
+keeping route registration in one place.
 
 ## Recommended next steps
 

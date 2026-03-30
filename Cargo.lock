@@ -47,6 +47,7 @@ dependencies = [
  "anyhow",
  "atif",
  "clap",
+ "dirs",
  "futures",
  "provider",
  "provider-openai",

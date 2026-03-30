@@ -1,3 +1,5 @@
+//! ACP adapter surface backed by the shared `AgentCore` boundary.
+
 pub mod adapter;
 pub mod capabilities;
 pub mod errors;

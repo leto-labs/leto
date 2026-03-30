@@ -15,6 +15,7 @@ agent-store = { workspace = true }
 anyhow = { workspace = true }
 atif = { workspace = true }
 clap = { workspace = true }
+dirs = { workspace = true }
 futures = { workspace = true }
 provider = { workspace = true }
 provider-openai = { workspace = true }

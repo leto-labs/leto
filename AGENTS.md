@@ -57,7 +57,7 @@ incremental migration work.
 - `provider-mistralrs` — standalone mistral.rs local v2 provider crate (feature `mistralrs`, off by default)
 - `provider-llamacpp` — standalone llama.cpp local v2 provider crate (feature `llamacpp`, off by default)
 - `agent-runtime` — live session engine, runtime events, loop/runtime boundary, PTY and child-agent control
-- `agent-store` — durable project/session/message/credential/trajectory storage, including `FileStore` and `agent_home()`
+- `agent-store` — durable project/session/message/credential/trajectory storage, including `FileStore` and project bootstrap config helpers
 - `agent-tools` — typed v2 tool implementations and the erased runtime-facing tool executor:
   - `echo.rs` — EchoTool (platform-independent, no driver)
   - `file_read/` — FileReadDriver, FileReadTool\<T\>, FileReadDriverNative (feature `native`)
