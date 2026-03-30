@@ -20,10 +20,16 @@ The parity baseline comes from the combined behavior of:
 - legacy credential-pool strategy and health behavior
 - legacy advanced loops (`robust`, `terminus2`, `terminus-kira`)
 - legacy terminal-session tool behavior
-- legacy user-facing composition surfaces
+- legacy ACP, CLI, and server surfaces that actually existed in code
 
 For parity purposes, "full parity" means user-visible and integration-visible
 behavior, not literal type or module duplication.
+
+The baseline explicitly excludes:
+
+- OpenCode compatibility routes, because legacy `brain-server` never
+  implemented them
+- MCP, because legacy `brain-*` crates never implemented it
 
 ## Subsystem Mapping
 
@@ -50,28 +56,23 @@ Terminal-session parity for those loops should be delivered through
 `agent-runtime` PTY/session surfaces and loop-private orchestration rather than
 through a duplicate public terminal tool wrapper.
 
-### Hosted compatibility
-
-`agent-server` must stop treating compat auth and PTY flows as placeholders.
-Compatibility routes may adapt to refactored internals, but they must resolve
-to real behaviors backed by the shared core/runtime stack.
-
 ## Sequencing
 
 Implementation should proceed in dependency order:
 
 1. advanced loop parity
 2. runtime-native terminal-session parity
-3. hosted compat-route parity
 
-This order minimizes rework because the later user-facing surfaces depend on the
-earlier runtime and tooling layers.
+This order minimizes rework because the later loop behaviors depend on the
+earlier runtime and tooling layers. Hosted compatibility work is a separate
+track and not part of this legacy-parity change.
 
 ## Tradeoffs
 
 - Do not reintroduce a monolithic legacy-style catch-all crate to achieve
   parity; extend the existing v2 boundaries instead.
 - Do not declare parity complete based only on internal runtime capability.
-  The higher-level assembly and compat surfaces must also match legacy behavior.
-- Do not preserve placeholder compat routes once their operations are part of
-  the documented contract.
+  The higher-level assembly and the legacy user-facing surfaces that actually
+  existed in code must also match legacy behavior.
+- Do not treat current `agent-server` OpenCode compatibility work as a proxy
+  for legacy parity when that surface never existed in `brain-server`.

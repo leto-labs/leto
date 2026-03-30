@@ -6,14 +6,14 @@
       `robust`, `terminus2`, and `terminus-kira`.
 - [x] Extend the parity requirements to cover runtime-native terminal-session
       behavior on the PTY/session surface.
-- [ ] Extend `agent-server` requirements so documented compat auth and PTY
-      routes require real implementations rather than placeholders.
+- [x] Remove the stale `agent-server` compatibility requirements from this
+      change because legacy `brain-server` never shipped that surface.
 - [x] Implement advanced loop parity in `agent-loops`.
 - [x] Implement terminal-session parity through runtime-native PTY/session
       orchestration and wire the advanced loops through the default core
       assembly.
-- [ ] Replace placeholder compat auth and PTY behavior in `agent-server` with
-      real core/runtime-backed implementations.
 - [x] Validate the change with `openspec validate
       reach-agent-stack-legacy-parity --strict`.
 - [x] Run `cargo test --workspace` once implementation is complete.
+- [x] Archive the cleaned-up loop/runtime parity tranche so the remaining
+      legacy migration follow-up can move to ACP-specific tracking.
