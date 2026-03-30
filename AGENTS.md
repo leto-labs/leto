@@ -17,14 +17,20 @@ skills add <owner/repo> --agent claude-code cursor -y
 
 ## Project: brain
 
-Rust workspace (edition 2024). Platform-agnostic AI agent engine. A `Brain` struct
-orchestrates five traits (Provider, Tool, Store, AgentLoop, Transport) into a
-session-aware reasoning engine.
+Rust workspace (edition 2024). Platform-agnostic AI agent engine. The current
+application-facing stack centers on `agent-core`, `agent-runtime`,
+`agent-store`, `agent-tools`, `agent-loops`, and the standalone `provider-*`
+crates. Legacy `brain-*` crates remain in the repo for compatibility and
+incremental migration work.
 
 ### Conventions
 - Traits as interfaces, not class hierarchies
 - Five core traits: Provider, Tool, Store, AgentLoop, Transport
-- `Brain` in brain-core orchestrates all traits into a session-aware engine
+- `AgentCore` / `AgentCoreNative` in `agent-core` are the preferred
+  application boundary
+- `SessionEngine` in `agent-runtime` owns live per-session execution mechanics
+- `Brain` in `brain-core` remains legacy engine infrastructure, not the primary
+  product boundary
 - `thiserror` for library errors, `anyhow` for application code only
 - `tracing` for logging, never `println!` in library code
 - Library code never reads env vars — config is passed as data
@@ -45,19 +51,14 @@ session-aware reasoning engine.
   a quick text summary (requires `cargo-llvm-cov`)
 
 ### Crate Map
-- `brain-types` — data structs + 5 traits (Provider, Tool, Store, AgentLoop, Transport)
-- `brain-providers` — provider backends, each feature-gated in its own folder:
-  - `mock` — MockProvider (always available)
-  - `openai/` — OpenAiProvider, OpenAiConfig, OpenAiConfigPreset (feature `openai`, on by default)
-  - `mistralrs/` — MistralRsProvider, MistralRsConfig, MistralRsModelPreset (feature `mistralrs`, off by default)
-  - `llamacpp/` — LlamaCppProvider, LlamaCppConfig, LlamaCppModelPreset (feature `llamacpp`, off by default)
 - `provider` — shared v2 Provider SDK (request/event/capability/model metadata)
 - `provider-openai` — standalone OpenAI-compatible v2 provider crate
 - `provider-anthropic` — standalone Anthropic v2 provider crate
 - `provider-mistralrs` — standalone mistral.rs local v2 provider crate (feature `mistralrs`, off by default)
 - `provider-llamacpp` — standalone llama.cpp local v2 provider crate (feature `llamacpp`, off by default)
-- `brain-stores` — InMemoryStore, FileStore (session CRUD + message persistence)
-- `brain-tools` — tool implementations using driver trait + adapter pattern:
+- `agent-runtime` — live session engine, runtime events, loop/runtime boundary, PTY and child-agent control
+- `agent-store` — durable project/session/message/credential/trajectory storage, including `FileStore` and project bootstrap config helpers
+- `agent-tools` — typed v2 tool implementations and the erased runtime-facing tool executor:
   - `echo.rs` — EchoTool (platform-independent, no driver)
   - `file_read/` — FileReadDriver, FileReadTool\<T\>, FileReadDriverNative (feature `native`)
   - `file_write/` — FileWriteDriver, FileWriteTool\<T\>, FileWriteDriverNative
@@ -66,11 +67,14 @@ session-aware reasoning engine.
   - `glob_search/` — GlobDriver, GlobTool\<T\>, GlobDriverNative
   - `grep/` — GrepDriver, GrepTool\<T\>, GrepDriverNative
   - `native_tools()` — preset returning all native-backed tools
-- `brain-loops` — SimpleLoop (agent loop orchestration)
-- `brain-transports` — CliTransport (stdin/stdout)
-- `brain-core` — Brain orchestration engine, ProviderRouter + re-exports all crates above
-- `cli-echo` — example CLI using Brain + CliTransport + OpenAI-compatible providers
-- `cli-local` — example CLI using Brain + CliTransport + MistralRsProvider (in-process GGUF)
+- `agent-loops` — current loop strategies such as `SimpleLoop`, `RobustLoop`, `Terminus2Loop`, and `TerminusKiraLoop`
+- `agent-core` — shared product-facing core boundary (`AgentCore`, `AgentCoreNative`) over stores, providers, tools, and loops
+- `agent-core-remote` — remote `AgentCore` client over the canonical hosted protocol
+- `agent-server` — hosted server over the shared `AgentCore` boundary
+- `agent-acp` — ACP adapter surface over `AgentCore`
+- `agent-cli` — local CLI binary crate exposing the `agent` command
+- `atif` — Harbor-compatible trajectory/export schema crate
+- Legacy compatibility crates still present: `brain-types`, `brain-providers`, `brain-stores`, `brain-loops`, `brain-tools`, `brain-transports`, `brain-core`, `brain-acp`, `brain-cli`, `brain-config`, `brain-server`
 
 ### Specs
 Canonical specs live in `openspec/specs/`. Check `openspec/changes/` for pending

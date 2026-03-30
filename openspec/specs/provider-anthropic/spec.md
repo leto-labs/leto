@@ -2,7 +2,8 @@
 
 ## Purpose
 Standalone Anthropic wire client for the Messages API, including typed request,
-response, and stream event models, without depending on `brain-*` crates.
+response, and stream event models, without depending on application `agent-*`
+crates or legacy `brain-*` crates.
 ## Requirements
 ### Requirement: Provider-Anthropic Owns The Messages Client
 
@@ -10,7 +11,8 @@ The system SHALL provide a standalone `provider-anthropic` crate that owns the
 Anthropic Messages request/response/event model and the concrete client used to
 call the Anthropic Messages API.
 
-The crate SHALL NOT depend on `brain-types` or any other `brain-*` crate.
+The crate SHALL NOT depend on `agent-*` application crates or legacy
+`brain-*` crates.
 It MAY depend on the standalone shared `provider` crate to implement the shared
 provider SDK trait.
 
@@ -18,7 +20,8 @@ provider SDK trait.
 
 - **WHEN** a caller depends on `provider-anthropic`
 - **THEN** it SHALL be able to construct a concrete client from that crate
-- **AND** call the Anthropic Messages API without importing `brain-types`
+- **AND** call the Anthropic Messages API without importing application-layer
+  runtime/store crates
 
 ### Requirement: Provider-Anthropic Exposes An Explicit Messages Surface
 
@@ -90,4 +93,3 @@ shared `provider::Provider` trait while preserving its protocol-native client.
 - **THEN** it SHALL accept shared provider requests
 - **AND** stream shared provider events translated from Anthropic Messages SSE
   events
-

@@ -1,7 +1,6 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use dirs::home_dir;
 use provider::ReasoningConfig;
 use serde::Deserialize;
 use toml::Value;
@@ -62,22 +61,6 @@ struct RawAgentConfig {
     inference: Option<RawInferenceConfig>,
     #[serde(flatten)]
     _unknown: BTreeMap<String, Value>,
-}
-
-/// Returns the global filesystem root used for persisted local CLI state.
-///
-/// Uses `AGENT_HOME` when present, then `BRAIN_HOME` for compatibility, and
-/// otherwise falls back to `~/.brain`.
-pub fn agent_home() -> PathBuf {
-    if let Some(path) = std::env::var_os("AGENT_HOME") {
-        return PathBuf::from(path);
-    }
-    if let Some(path) = std::env::var_os("BRAIN_HOME") {
-        return PathBuf::from(path);
-    }
-    home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".brain")
 }
 
 /// Resolves project-local bootstrap configuration from `.agents/config.toml`

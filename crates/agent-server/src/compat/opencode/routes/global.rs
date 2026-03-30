@@ -17,8 +17,8 @@ use super::super::types::events::{
     EventDoc, EventServerConnectedDoc, EventServerConnectedTypeDoc, GlobalEventDoc,
 };
 use super::super::types::global::{
-    AppLogRequestDoc, CompatConfigDoc, EmptyPropertiesDoc, HealthDoc, UpgradeRequestDoc,
-    UpgradeResultDoc,
+    AppLogLevelDoc, AppLogRequestDoc, CompatConfigDoc, EmptyPropertiesDoc, HealthDoc,
+    UpgradeRequestDoc, UpgradeResultDoc,
 };
 use super::super::types::provider::TrueConstDoc;
 use super::super::*;
@@ -192,38 +192,40 @@ fn sse_doc<T: JsonSchema>(
 ) -> ApiMethodDocs {
     // `aide` does not infer `Sse<_>` response docs like it does for `Json<T>`,
     // so SSE routes still need a small manual doc shim.
-    let mut operation = Operation::default();
-    operation.operation_id = Some(operation_id.to_owned());
-    operation.summary = Some(summary.to_owned());
-    operation.description = Some(description.to_owned());
-    operation.parameters = query_params
-        .iter()
-        .map(|(name, description)| {
-            ReferenceOr::Item(Parameter::Query {
-                parameter_data: ParameterData {
-                    name: (*name).to_owned(),
-                    description: description.map(|value| value.to_owned()),
-                    required: false,
-                    deprecated: None,
-                    format: ParameterSchemaOrContent::Schema(SchemaObject {
-                        json_schema: serde_json::from_value(
-                            serde_json::json!({ "type": "string" }),
-                        )
-                        .expect("query parameter schema should deserialize"),
-                        external_docs: None,
+    let mut operation = Operation {
+        operation_id: Some(operation_id.to_owned()),
+        summary: Some(summary.to_owned()),
+        description: Some(description.to_owned()),
+        parameters: query_params
+            .iter()
+            .map(|(name, description)| {
+                ReferenceOr::Item(Parameter::Query {
+                    parameter_data: ParameterData {
+                        name: (*name).to_owned(),
+                        description: description.map(|value| value.to_owned()),
+                        required: false,
+                        deprecated: None,
+                        format: ParameterSchemaOrContent::Schema(SchemaObject {
+                            json_schema: serde_json::from_value(
+                                serde_json::json!({ "type": "string" }),
+                            )
+                            .expect("query parameter schema should deserialize"),
+                            external_docs: None,
+                            example: None,
+                        }),
                         example: None,
-                    }),
-                    example: None,
-                    examples: Default::default(),
-                    explode: None,
-                    extensions: Default::default(),
-                },
-                allow_reserved: false,
-                style: QueryStyle::default(),
-                allow_empty_value: None,
+                        examples: Default::default(),
+                        explode: None,
+                        extensions: Default::default(),
+                    },
+                    allow_reserved: false,
+                    style: QueryStyle::default(),
+                    allow_empty_value: None,
+                })
             })
-        })
-        .collect();
+            .collect(),
+        ..Default::default()
+    };
     operation
         .responses
         .get_or_insert_with(Default::default)
@@ -284,15 +286,14 @@ fn inline_local_defs(schema: &mut Value) {
 fn inline_local_defs_refs(value: &mut Value, defs: &serde_json::Map<String, Value>) {
     match value {
         Value::Object(map) => {
-            if let Some(reference) = map.get("$ref").and_then(Value::as_str) {
-                if let Some(name) = reference.strip_prefix("#/$defs/") {
-                    if let Some(schema) = defs.get(name) {
-                        *value = schema.clone();
-                        strip_schema_identity_fields(value);
-                        inline_local_defs_refs(value, defs);
-                        return;
-                    }
-                }
+            if let Some(reference) = map.get("$ref").and_then(Value::as_str)
+                && let Some(name) = reference.strip_prefix("#/$defs/")
+                && let Some(schema) = defs.get(name)
+            {
+                *value = schema.clone();
+                strip_schema_identity_fields(value);
+                inline_local_defs_refs(value, defs);
+                return;
             }
 
             if let Some(local_defs) = map
@@ -395,14 +396,48 @@ async fn app_log(
     Query(_query): Query<CompatQuery>,
     Json(body): Json<AppLogRequestDoc>,
 ) -> Response {
-    tracing::info!(
-        target: "agent_server::compat",
-        service = %body.service,
-        level = ?body.level,
-        message = %body.message,
-        extra = ?body.extra,
-        "compat log"
-    );
+    match body.level {
+        AppLogLevelDoc::Trace => tracing::trace!(
+            target: "agent_server::compat",
+            service = %body.service,
+            level = ?body.level,
+            message = %body.message,
+            extra = ?body.extra,
+            "compat log"
+        ),
+        AppLogLevelDoc::Debug => tracing::debug!(
+            target: "agent_server::compat",
+            service = %body.service,
+            level = ?body.level,
+            message = %body.message,
+            extra = ?body.extra,
+            "compat log"
+        ),
+        AppLogLevelDoc::Info => tracing::info!(
+            target: "agent_server::compat",
+            service = %body.service,
+            level = ?body.level,
+            message = %body.message,
+            extra = ?body.extra,
+            "compat log"
+        ),
+        AppLogLevelDoc::Warn => tracing::warn!(
+            target: "agent_server::compat",
+            service = %body.service,
+            level = ?body.level,
+            message = %body.message,
+            extra = ?body.extra,
+            "compat log"
+        ),
+        AppLogLevelDoc::Error => tracing::error!(
+            target: "agent_server::compat",
+            service = %body.service,
+            level = ?body.level,
+            message = %body.message,
+            extra = ?body.extra,
+            "compat log"
+        ),
+    }
     Json(true).into_response()
 }
 
@@ -416,13 +451,43 @@ async fn instance_dispose(
 
 #[cfg(test)]
 mod tests {
+    use std::io::{self, Write};
+    use std::sync::{Arc, Mutex};
+
     use crate::{
         compat::opencode::test_utils::{
             normalize_generated_opencode_route_doc, normalize_opencode_route_doc,
             opencode_openapi_options, pinned_opencode_openapi,
         },
+        compat::opencode::types::{
+            common::CompatQuery,
+            global::{AppLogLevelDoc, AppLogRequestDoc},
+        },
         utils::openapi::{generate_from_router, subset_for_operations},
     };
+    use axum::Json;
+    use axum::extract::Query;
+    use tracing::subscriber::with_default;
+
+    #[derive(Clone, Default)]
+    struct SharedLogBuffer(Arc<Mutex<Vec<u8>>>);
+
+    impl SharedLogBuffer {
+        fn contents(&self) -> String {
+            String::from_utf8(self.0.lock().unwrap().clone()).unwrap()
+        }
+    }
+
+    impl Write for SharedLogBuffer {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
 
     #[test]
     fn global_health_route_openapi_matches_pinned_subset() {
@@ -534,6 +599,117 @@ mod tests {
                 &[("/log", "post")],
             ))
         );
+    }
+
+    #[test]
+    fn app_log_should_emit_compat_log_fields() {
+        let log_buffer = SharedLogBuffer::default();
+        let subscriber = tracing_subscriber::fmt()
+            .with_ansi(false)
+            .without_time()
+            .with_max_level(tracing::Level::INFO)
+            .with_writer({
+                let log_buffer = log_buffer.clone();
+                move || log_buffer.clone()
+            })
+            .finish();
+
+        let response = with_default(subscriber, || {
+            futures::executor::block_on(super::app_log(
+                Query(CompatQuery::default()),
+                Json(AppLogRequestDoc {
+                    service: "desktop".into(),
+                    level: AppLogLevelDoc::Warn,
+                    message: "user initiated refresh".into(),
+                    extra: Some(std::collections::BTreeMap::from([
+                        ("request_id".into(), serde_json::json!("req_123")),
+                        ("attempt".into(), serde_json::json!(2)),
+                    ])),
+                }),
+            ))
+        });
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+
+        let logs = log_buffer.contents();
+        assert!(logs.contains("compat log"), "logs were: {logs}");
+        assert!(logs.contains("agent_server::compat"), "logs were: {logs}");
+        assert!(logs.contains("service=desktop"), "logs were: {logs}");
+        assert!(logs.contains("level=Warn"), "logs were: {logs}");
+        assert!(logs.contains("user initiated refresh"), "logs were: {logs}");
+        assert!(logs.contains("request_id"), "logs were: {logs}");
+        assert!(logs.contains("req_123"), "logs were: {logs}");
+        assert!(logs.contains("attempt"), "logs were: {logs}");
+    }
+
+    #[test]
+    fn app_log_should_honor_trace_level_filtering() {
+        let suppressed_log_buffer = SharedLogBuffer::default();
+        let suppressed_subscriber = tracing_subscriber::fmt()
+            .with_ansi(false)
+            .without_time()
+            .with_max_level(tracing::Level::INFO)
+            .with_writer({
+                let log_buffer = suppressed_log_buffer.clone();
+                move || log_buffer.clone()
+            })
+            .finish();
+
+        let response = with_default(suppressed_subscriber, || {
+            futures::executor::block_on(super::app_log(
+                Query(CompatQuery::default()),
+                Json(AppLogRequestDoc {
+                    service: "desktop".into(),
+                    level: AppLogLevelDoc::Trace,
+                    message: "trace refresh".into(),
+                    extra: Some(std::collections::BTreeMap::from([(
+                        "trace_id".into(),
+                        serde_json::json!("trace-123"),
+                    )])),
+                }),
+            ))
+        });
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        assert!(
+            suppressed_log_buffer.contents().trim().is_empty(),
+            "trace log should be filtered at INFO: {}",
+            suppressed_log_buffer.contents()
+        );
+
+        let trace_log_buffer = SharedLogBuffer::default();
+        let trace_subscriber = tracing_subscriber::fmt()
+            .with_ansi(false)
+            .without_time()
+            .with_max_level(tracing::Level::TRACE)
+            .with_writer({
+                let log_buffer = trace_log_buffer.clone();
+                move || log_buffer.clone()
+            })
+            .finish();
+
+        let response = with_default(trace_subscriber, || {
+            futures::executor::block_on(super::app_log(
+                Query(CompatQuery::default()),
+                Json(AppLogRequestDoc {
+                    service: "desktop".into(),
+                    level: AppLogLevelDoc::Trace,
+                    message: "trace refresh".into(),
+                    extra: Some(std::collections::BTreeMap::from([(
+                        "trace_id".into(),
+                        serde_json::json!("trace-123"),
+                    )])),
+                }),
+            ))
+        });
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+
+        let logs = trace_log_buffer.contents();
+        assert!(logs.contains("TRACE"), "logs were: {logs}");
+        assert!(logs.contains("compat log"), "logs were: {logs}");
+        assert!(logs.contains("agent_server::compat"), "logs were: {logs}");
+        assert!(logs.contains("level=Trace"), "logs were: {logs}");
+        assert!(logs.contains("trace refresh"), "logs were: {logs}");
+        assert!(logs.contains("trace_id"), "logs were: {logs}");
+        assert!(logs.contains("trace-123"), "logs were: {logs}");
     }
 
     #[test]

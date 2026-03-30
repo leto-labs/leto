@@ -16,25 +16,41 @@
 //! [`OpenAiProvider`] is an optional adapter that exposes the shared
 //! [`provider::Provider`] trait on top of the resolved supported API surface.
 
+pub mod assistants;
+pub mod audit_logs;
 pub mod chat_completions;
 pub mod client;
 pub mod config;
+pub mod embeddings;
 pub mod error;
+pub mod fine_tuning;
 pub mod oauth;
 pub mod presets;
 pub mod provider_impl;
+pub mod rate_limits;
 pub mod responses;
 mod shared;
+pub mod vector_stores;
+pub mod videos;
+pub mod webhooks;
 
+pub use assistants::*;
+pub use audit_logs::*;
 pub use chat_completions::*;
 pub use client::Client;
 pub use config::{Config, OpenAiApiMode, OpenAiApiSurface};
+pub use embeddings::*;
 pub use error::Error;
+pub use fine_tuning::*;
 pub use oauth::{
     BrowserFlowPrompt, DeviceUserPrompt, OAuthFlow, OpenAiOAuthCredentials, OpenAiOAuthPreset,
     OpenAiOAuthProvider, refresh_access_token,
 };
 pub use presets::OpenAiConfigPreset;
 pub use provider_impl::OpenAiProvider;
+pub use rate_limits::*;
 pub use responses::*;
 pub use shared::TokenUsage;
+pub use vector_stores::*;
+pub use videos::*;
+pub use webhooks::*;

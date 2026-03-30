@@ -2,8 +2,8 @@
 
 ## Purpose
 Standalone OpenAI-compatible wire client for modern OpenAI API surfaces,
-including Responses and Chat Completions, without depending on `brain-*`
-crates.
+including Responses and Chat Completions, without depending on application
+`agent-*` crates or legacy `brain-*` crates.
 ## Requirements
 ### Requirement: Provider-OpenAI Owns The Responses Client
 
@@ -11,7 +11,8 @@ The system SHALL provide a standalone `provider-openai` crate that owns the
 OpenAI Responses request/response/event model and the concrete client used to
 call the OpenAI Responses API.
 
-The crate SHALL NOT depend on `brain-types` or any other `brain-*` crate.
+The crate SHALL NOT depend on `agent-*` application crates or legacy
+`brain-*` crates.
 It MAY depend on the standalone shared `provider` crate to implement the shared
 provider SDK trait and publish shared model catalog metadata.
 
@@ -19,14 +20,15 @@ provider SDK trait and publish shared model catalog metadata.
 
 - **WHEN** a caller depends on `provider-openai`
 - **THEN** it SHALL be able to construct a concrete client from that crate
-- **AND** call the OpenAI Responses API without importing `brain-types`
+- **AND** call the OpenAI Responses API without importing application-layer
+  runtime/store crates
 
 #### Scenario: Standalone crate owns Responses types
 
 - **WHEN** a caller needs request, response, or stream event types for the OpenAI
   Responses API
 - **THEN** those types SHALL be provided by `provider-openai`
-- **AND** they SHALL not be re-exported from `brain-types`
+- **AND** they SHALL not be re-exported from application-layer runtime/store crates
 
 ### Requirement: Provider-OpenAI Supports Full Responses Resource Operations
 
@@ -134,7 +136,7 @@ Each preset SHALL preserve:
 - supported API surfaces
 - rich shared model catalog metadata
 
-#### Scenario: Preset builds a config without `brain-*` types
+#### Scenario: Preset builds a config without application-layer types
 
 - **WHEN** a caller selects a built-in OpenAI-compatible preset
 - **THEN** it SHALL be able to build a `provider_openai::Config` using only
@@ -286,4 +288,3 @@ their direct standalone constructors.
 - **THEN** each request SHALL resolve bearer authentication and account
   metadata from that pool
 - **AND** terminal success or failure SHALL be reported back to the pool
-

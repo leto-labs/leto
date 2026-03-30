@@ -1315,6 +1315,230 @@ mod tests {
     }
 
     #[test]
+    fn responses_request_preserves_multi_turn_memory() {
+        let request = Request {
+            messages: vec![
+                Message::system_text("Follow repo policy."),
+                Message::developer_text("Answer with concise diffs."),
+                Message::user_text("Original bug report"),
+                Message::assistant_text("Investigating the issue."),
+                Message::new(
+                    MessageRole::User,
+                    vec![
+                        provider::ContentBlock::text("Latest follow-up"),
+                        provider::ContentBlock::image_url("https://example.com/screenshot.png"),
+                    ],
+                ),
+            ],
+            ..Request::default()
+        };
+
+        let mapped = OpenAiProvider::map_responses_request(&request, false).unwrap();
+
+        assert_eq!(
+            mapped.instructions.as_deref(),
+            Some("Follow repo policy.\n\nAnswer with concise diffs.")
+        );
+        assert_eq!(mapped.input.len(), 3);
+        assert_eq!(
+            mapped.last_user_input_text_lossy().as_deref(),
+            Some("Latest follow-up")
+        );
+
+        match &mapped.input[0] {
+            ResponseInputItem::Message { role, content } => {
+                assert_eq!(*role, ResponseInputRole::User);
+                assert_eq!(content.len(), 1);
+            }
+            other => panic!("expected first input message, got {other:?}"),
+        }
+
+        match &mapped.input[1] {
+            ResponseInputItem::Message { role, content } => {
+                assert_eq!(*role, ResponseInputRole::Assistant);
+                assert_eq!(content.len(), 1);
+            }
+            other => panic!("expected assistant memory message, got {other:?}"),
+        }
+
+        match &mapped.input[2] {
+            ResponseInputItem::Message { role, content } => {
+                assert_eq!(*role, ResponseInputRole::User);
+                assert_eq!(content.len(), 2);
+            }
+            other => panic!("expected latest user memory message, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn responses_request_maps_reasoning_profile_and_metadata() {
+        let mut request = Request {
+            messages: vec![Message::user_text("Profile this request.")],
+            options: provider::RequestOptions {
+                max_output_tokens: Some(512),
+                temperature: Some(0.2),
+                top_p: Some(0.9),
+                reasoning: Some(provider::ReasoningConfig {
+                    effort: Some("high".into()),
+                    summary: Some("detailed".into()),
+                    budget_tokens: Some(256),
+                }),
+                ..provider::RequestOptions::default()
+            },
+            ..Request::default()
+        };
+        request.options.metadata.insert(
+            "trace_id".into(),
+            serde_json::Value::String("trace-123".into()),
+        );
+
+        let mapped = OpenAiProvider::map_responses_request(&request, false).unwrap();
+        let reasoning = mapped.reasoning.expect("reasoning should be mapped");
+
+        assert_eq!(reasoning.effort.as_deref(), Some("high"));
+        assert_eq!(reasoning.summary.as_deref(), Some("detailed"));
+        assert_eq!(mapped.max_output_tokens, Some(512));
+        assert_eq!(mapped.temperature, Some(0.2));
+        assert_eq!(mapped.top_p, Some(0.9));
+        assert_eq!(
+            mapped
+                .metadata
+                .get("trace_id")
+                .and_then(serde_json::Value::as_str),
+            Some("trace-123")
+        );
+    }
+
+    #[test]
+    fn exports_openai_usage_as_provider_metrics() {
+        let usage = map_openai_usage(Some(&crate::TokenUsage {
+            prompt: 21,
+            completion: 13,
+            total: 34,
+            cache_read: Some(8),
+            cache_write: Some(5),
+            reasoning: Some(3),
+        }))
+        .expect("usage should map");
+
+        assert_eq!(usage.input_tokens, Some(21));
+        assert_eq!(usage.output_tokens, Some(13));
+        assert_eq!(usage.total_tokens, Some(34));
+        assert_eq!(usage.cache_read_tokens, Some(8));
+        assert_eq!(usage.cache_write_tokens, Some(5));
+        assert_eq!(usage.reasoning_tokens, Some(3));
+    }
+
+    #[test]
+    fn provider_new_initializes_default_transport_and_model_state() {
+        let provider = OpenAiProvider::new(
+            Config::new("test")
+                .with_base_url("http://localhost:11434/v1")
+                .with_model("gpt-init"),
+        );
+
+        assert_eq!(provider.transport, ResponseStreamTransport::Sse);
+        assert!(provider.credential_pool.is_none());
+        assert_eq!(
+            provider.info().default_model_id.as_deref(),
+            Some("gpt-init")
+        );
+        assert_eq!(
+            provider.client.config().base_url,
+            "http://localhost:11434/v1"
+        );
+    }
+
+    #[test]
+    fn info_falls_back_to_first_supported_surface_when_mode_is_unsupported() {
+        let provider = OpenAiProvider::new(
+            crate::OpenAiConfigPreset::GEMINI
+                .into_config("test")
+                .with_api_surface_mode(crate::OpenAiApiMode::Responses),
+        );
+
+        let info = provider.info();
+
+        assert!(!info.capabilities.reasoning_blocks);
+        assert!(info.capabilities.tool_call_argument_deltas);
+    }
+
+    #[test]
+    fn info_reports_model_catalog_and_default_model() {
+        let provider = OpenAiProvider::new(crate::OpenAiConfigPreset::OPENAI.into_config("test"));
+        let info = provider.info();
+
+        assert_eq!(info.name, "openai");
+        assert_eq!(info.default_model_id.as_deref(), Some("gpt-4o-mini"));
+        assert_eq!(
+            info.default_model().map(|model| model.id.as_ref()),
+            Some("gpt-4o-mini")
+        );
+
+        let gpt_54 = info
+            .models
+            .iter()
+            .find(|model| model.id == "gpt-5.4")
+            .expect("gpt-5.4 should be listed");
+        assert_eq!(gpt_54.name.as_ref(), "GPT-5.4");
+        assert!(gpt_54.supports_reasoning());
+    }
+
+    #[test]
+    fn info_exposes_dashboard_friendly_model_metadata() {
+        let provider = OpenAiProvider::new(crate::OpenAiConfigPreset::OPENAI.into_config("test"));
+        let info = provider.info();
+
+        let model = info
+            .models
+            .iter()
+            .find(|model| model.id == "gpt-5.4")
+            .expect("gpt-5.4 should be listed");
+
+        let cost = model
+            .cost
+            .as_ref()
+            .expect("cost metadata should be present");
+        let limit = model
+            .limit
+            .as_ref()
+            .expect("limit metadata should be present");
+
+        assert_eq!(model.family.as_deref(), Some("gpt"));
+        assert!(model.input_modalities.contains(&"text"));
+        assert!(model.input_modalities.contains(&"image"));
+        assert!(model.input_modalities.contains(&"pdf"));
+        assert_eq!(model.output_modalities.as_ref(), &["text"]);
+        assert_eq!(cost.input, 2.5);
+        assert_eq!(cost.output, 15.0);
+        assert_eq!(cost.cache_read, Some(0.25));
+        assert_eq!(limit.context, 1_050_000);
+        assert_eq!(limit.output, 128_000);
+        assert_eq!(model.structured_output, Some(true));
+        assert_eq!(model.temperature, Some(false));
+    }
+
+    #[test]
+    fn info_preserves_model_status_metadata() {
+        let provider = OpenAiProvider::new(crate::OpenAiConfigPreset::XAI.into_config("test"));
+        let info = provider.info();
+
+        let beta_model = info
+            .models
+            .iter()
+            .find(|model| model.id == "grok-4.20-beta-latest-reasoning")
+            .expect("expected xai beta model to be listed");
+        let stable_model = info
+            .models
+            .iter()
+            .find(|model| model.id == "grok-4-1-fast")
+            .expect("expected xai stable model to be listed");
+
+        assert_eq!(beta_model.status.as_deref(), Some("beta"));
+        assert!(stable_model.status.is_none());
+    }
+
+    #[test]
     fn maps_chat_finish_reason_length_to_max_tokens() {
         assert_eq!(
             map_openai_finish_reason("length".into()),

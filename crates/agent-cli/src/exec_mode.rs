@@ -267,27 +267,18 @@ pub async fn run_exec(command: ExecCommand) -> Result<()> {
         .map_err(|error| anyhow::anyhow!("invalid ATIF trajectory: {error}"))?;
     write_json(&trajectory_path, &trajectory)?;
 
-    let summary = ExecRunSummary {
-        status: if saw_turn_done {
-            "completed"
-        } else {
-            "internal_error"
-        },
-        provider: command.provider.clone(),
-        model: normalized_model,
-        loop_name: command.loop_name.clone(),
-        input_tokens: usage.input_tokens,
-        output_tokens: usage.output_tokens,
-        cache_tokens: usage.cache_read_tokens,
-        cache_write_tokens: usage.cache_write_tokens,
-        reasoning_tokens: usage.reasoning_tokens,
+    let summary = build_exec_run_summary(
+        &command,
+        &normalized_model,
+        &normalized_loop,
+        &usage,
         cost_usd,
         iterations,
-        total_tokens: usage.total_tokens,
-        trajectory_path: trajectory_path.clone(),
-        events_path: events_path.clone(),
-        error_message: error_message.clone(),
-    };
+        &trajectory_path,
+        &events_path,
+        error_message.clone(),
+        saw_turn_done,
+    );
     write_json(&run_path, &summary)?;
 
     if !saw_turn_done {
@@ -381,6 +372,41 @@ fn summarize_usage(usage: Usage) -> ExecUsageSummary {
         total_tokens: usage
             .total_tokens
             .unwrap_or_else(|| usage.input_tokens.unwrap_or(0) + usage.output_tokens.unwrap_or(0)),
+    }
+}
+
+fn build_exec_run_summary(
+    command: &ExecCommand,
+    normalized_model: &str,
+    normalized_loop: &str,
+    usage: &ExecUsageSummary,
+    cost_usd: Option<f64>,
+    iterations: Option<u32>,
+    trajectory_path: &Path,
+    events_path: &Path,
+    error_message: Option<String>,
+    saw_turn_done: bool,
+) -> ExecRunSummary {
+    ExecRunSummary {
+        status: if saw_turn_done {
+            "completed"
+        } else {
+            "internal_error"
+        },
+        provider: command.provider.clone(),
+        model: normalized_model.to_owned(),
+        loop_name: normalized_loop.to_owned(),
+        input_tokens: usage.input_tokens,
+        output_tokens: usage.output_tokens,
+        cache_tokens: usage.cache_read_tokens,
+        cache_write_tokens: usage.cache_write_tokens,
+        reasoning_tokens: usage.reasoning_tokens,
+        cost_usd,
+        iterations,
+        total_tokens: usage.total_tokens,
+        trajectory_path: trajectory_path.to_owned(),
+        events_path: events_path.to_owned(),
+        error_message,
     }
 }
 
@@ -551,6 +577,34 @@ mod tests {
     }
 
     #[test]
+    fn exec_run_summary_uses_normalized_loop_name() {
+        let summary = build_exec_run_summary(
+            &ExecCommand {
+                cwd: PathBuf::from("/tmp/project"),
+                model: "provider/model".into(),
+                loop_name: "terminus-kira".into(),
+                provider: "openai".into(),
+                output_dir: PathBuf::from("/tmp/output"),
+                api_key: None,
+                base_url: None,
+                api_surface: None,
+                instruction: "hello".into(),
+            },
+            "model",
+            &normalize_loop_name("terminus-kira"),
+            &ExecUsageSummary::default(),
+            None,
+            None,
+            Path::new("trajectory.json"),
+            Path::new("events.jsonl"),
+            None,
+            true,
+        );
+
+        assert_eq!(summary.loop_name, "terminus_kira");
+    }
+
+    #[test]
     fn parse_api_surface_mode_accepts_known_values() {
         assert!(matches!(
             parse_api_surface_mode("auto").unwrap(),
@@ -675,11 +729,18 @@ mod tests {
             schema_version: atif::SchemaVersion::V1_6,
             session_id,
             agent: atif::Agent {
-                name: "ignored".into(),
-                version: "ignored".into(),
-                model_name: None,
+                name: "agent".into(),
+                version: env!("CARGO_PKG_VERSION").into(),
+                model_name: Some("mock-model".into()),
                 tool_definitions: None,
-                extra: None,
+                extra: Some(
+                    json!({
+                        "provider": "mock"
+                    })
+                    .as_object()
+                    .expect("expected object")
+                    .clone(),
+                ),
             },
         });
         state.observe(&RuntimeEvent::AtifTrajectoryCompleted {

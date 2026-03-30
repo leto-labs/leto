@@ -225,11 +225,7 @@ impl BrainRuntime for BrainRuntimeNative {
             }
 
             let project = store.projects().get(session.project_id).await?;
-            Ok(project
-                .config
-                .agent
-                .loop_name
-                .or_else(|| Some(default_loop_name)))
+            Ok(project.config.agent.loop_name.or(Some(default_loop_name)))
         })
     }
 
@@ -908,6 +904,80 @@ mod tests {
                 .content
                 .to_string()
                 .contains("loop=override-loop")
+        );
+    }
+
+    #[tokio::test]
+    async fn current_loop_name_prefers_session_then_project_then_runtime_default() {
+        let (runtime, store, project) = make_runtime(
+            "default",
+            "runtime-default",
+            Project::new(
+                Some("test".into()),
+                None,
+                ProjectConfig {
+                    agent: AgentConfig {
+                        max_iterations: 20,
+                        system_prompt: None,
+                        loop_name: Some("project-loop".into()),
+                        inference: InferenceConfig::default(),
+                        ..AgentConfig::default()
+                    },
+                },
+            ),
+        )
+        .await;
+
+        let default_project = Project::with_defaults("default-project");
+        let default_project = store
+            .projects()
+            .create(default_project.id, default_project)
+            .await
+            .unwrap();
+
+        let mut session_override = Session::new(project.id);
+        session_override.loop_name = Some("session-loop".into());
+        let session_override = store
+            .sessions()
+            .create(session_override.id, session_override)
+            .await
+            .unwrap();
+        let project_session = Session::new(project.id);
+        let project_session = store
+            .sessions()
+            .create(project_session.id, project_session)
+            .await
+            .unwrap();
+        let runtime_default_session = Session::new(default_project.id);
+        let runtime_default_session = store
+            .sessions()
+            .create(runtime_default_session.id, runtime_default_session)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            runtime
+                .current_loop_name_for_session(session_override.id)
+                .await
+                .unwrap()
+                .as_deref(),
+            Some("session-loop")
+        );
+        assert_eq!(
+            runtime
+                .current_loop_name_for_session(project_session.id)
+                .await
+                .unwrap()
+                .as_deref(),
+            Some("project-loop")
+        );
+        assert_eq!(
+            runtime
+                .current_loop_name_for_session(runtime_default_session.id)
+                .await
+                .unwrap()
+                .as_deref(),
+            Some("runtime-default")
         );
     }
 

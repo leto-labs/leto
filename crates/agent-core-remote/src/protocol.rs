@@ -34,6 +34,16 @@ pub struct AgentServerStatus {
     pub session_count: usize,
 }
 
+/// Lightweight agent inventory entry exposed by the canonical API.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentInfoRecord {
+    /// Stable agent identifier.
+    pub name: String,
+    /// Human-readable summary when available.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+}
+
 /// Request body for creating a project.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct CreateProjectRequest {
@@ -68,6 +78,29 @@ pub struct UpdateCredentialHealthRequest {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct TurnRequest {
     pub input: Vec<Message>,
+}
+
+/// Request body for starting multiple turns for one session sequentially.
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct BatchTurnRequest {
+    pub turns: Vec<TurnRequest>,
+}
+
+/// One tool-call transcript item to append through the canonical API.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ToolCallRecord {
+    pub id: String,
+    pub name: String,
+    pub input: serde_json::Value,
+    pub output: serde_json::Value,
+    #[serde(default)]
+    pub is_error: bool,
+}
+
+/// Request body for appending tool-call history to one session transcript.
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct ToolCallRequest {
+    pub calls: Vec<ToolCallRecord>,
 }
 
 /// Effective runtime view for one session.
@@ -161,6 +194,14 @@ pub struct CredentialRecord {
     pub provider_name: String,
     pub credential_id: String,
     pub credential: CredentialEntry,
+}
+
+/// Credential health record without credential material.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CredentialHealthRecord {
+    pub provider_name: String,
+    pub credential_id: String,
+    pub health: CredentialHealth,
 }
 
 /// Trajectory record with its associated session identifier.

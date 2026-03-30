@@ -6,7 +6,9 @@ use futures::StreamExt;
 use tokio_util::sync::CancellationToken;
 use ulid::Ulid;
 
-use crate::atif_events::{TurnSummary, complete_turn, completion_events, started_event};
+use crate::atif_events::{
+    CompleteTurnInput, TurnSummary, complete_turn, completion_events, started_event,
+};
 use brain_types::*;
 
 pub struct Brain {
@@ -266,17 +268,17 @@ pub(crate) async fn run_turn_with_config(
         && let Some(turn_summary) = turn_summary
     {
         let finished_at = Utc::now();
-        let completed = complete_turn(
+        let completed = complete_turn(CompleteTurnInput {
             session_id,
             existing_trajectory,
-            &config,
-            provider.as_ref(),
-            &tools,
-            &new_messages,
+            config: &config,
+            provider: provider.as_ref(),
+            tools: &tools,
+            new_messages: &new_messages,
             started_at,
             finished_at,
             turn_summary,
-        )?;
+        })?;
         if store
             .trajectories()
             .get_for_session(session_id)
@@ -647,6 +649,31 @@ system_prompt = "config prompt"
                 "ATIF events should be disabled by default"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn turn_emits_error_event_when_session_is_missing() {
+        let (brain, _project, _store) = make_brain().await;
+        let missing_session = Ulid::new();
+        let mut events = brain.turn(missing_session, "hello world", CancellationToken::new());
+
+        match events.next().await {
+            Some(Event::Error {
+                code,
+                message,
+                recoverable,
+            }) => {
+                assert_eq!(code, BrainErrorCode::StorageFailed);
+                assert!(message.contains(&missing_session.to_string()));
+                assert!(!recoverable);
+            }
+            other => panic!("expected storage error event, got {other:?}"),
+        }
+
+        assert!(
+            events.next().await.is_none(),
+            "error event should terminate stream"
+        );
     }
 
     #[tokio::test]

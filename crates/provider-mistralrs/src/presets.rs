@@ -179,6 +179,14 @@ mod tests {
     use super::MistralRsModelPreset;
 
     #[test]
+    fn preset_lookup_is_case_insensitive() {
+        let preset = MistralRsModelPreset::by_name("QwEn3-0.6B")
+            .expect("mixed-case preset names should resolve");
+
+        assert_eq!(preset.id(), "qwen3-0.6b");
+    }
+
+    #[test]
     fn preset_lookup_works() {
         assert!(MistralRsModelPreset::by_name("qwen3-0.6b").is_some());
         assert!(MistralRsModelPreset::by_name("qwen3-1.7b").is_some());

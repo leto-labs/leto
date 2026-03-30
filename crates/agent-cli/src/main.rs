@@ -1,16 +1,17 @@
 mod commands;
 mod exec_mode;
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use agent_core::{AgentCore, AgentCoreNative, CoreError, CoreEvent};
 use agent_runtime::{BlockDelta, Message, RuntimeEvent};
 use agent_store::{
     CredentialEntry, FileStore, OAuthCredentials, Project, ProjectId, ProviderCredential, Store,
-    agent_home,
 };
 use anyhow::{Context, Result};
 use clap::Parser;
+use dirs::home_dir;
 use futures::StreamExt;
 use provider::MockProvider;
 use provider_openai::{OAuthFlow, OpenAiOAuthPreset};
@@ -34,7 +35,7 @@ async fn main() -> Result<()> {
 
     let cwd = std::env::current_dir().context("failed to get current directory")?;
     let store: Arc<dyn Store> = Arc::new(
-        FileStore::new(agent_home())
+        FileStore::new(cli_agent_home())
             .await
             .context("failed to initialize file store")?,
     );
@@ -81,6 +82,24 @@ async fn main() -> Result<()> {
             unreachable!("exec command is handled before core initialization")
         }
     }
+}
+
+fn cli_agent_home() -> PathBuf {
+    resolve_agent_home(
+        std::env::var_os("AGENT_HOME").map(PathBuf::from),
+        std::env::var_os("BRAIN_HOME").map(PathBuf::from),
+        home_dir(),
+    )
+}
+
+fn resolve_agent_home(
+    agent_home: Option<PathBuf>,
+    brain_home: Option<PathBuf>,
+    home: Option<PathBuf>,
+) -> PathBuf {
+    agent_home
+        .or(brain_home)
+        .unwrap_or_else(|| home.unwrap_or_else(|| PathBuf::from(".")).join(".brain"))
 }
 
 async fn build_core(store: Arc<dyn Store>) -> Result<AgentCoreNative, CoreError> {
@@ -331,4 +350,50 @@ async fn save_credential(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resolve_agent_home;
+    use std::path::PathBuf;
+
+    #[test]
+    fn resolve_agent_home_prefers_agent_home() {
+        assert_eq!(
+            resolve_agent_home(
+                Some(PathBuf::from("/tmp/agent-home")),
+                Some(PathBuf::from("/tmp/brain-home")),
+                Some(PathBuf::from("/tmp/home")),
+            ),
+            PathBuf::from("/tmp/agent-home")
+        );
+    }
+
+    #[test]
+    fn resolve_agent_home_falls_back_to_brain_home() {
+        assert_eq!(
+            resolve_agent_home(
+                None,
+                Some(PathBuf::from("/tmp/brain-home")),
+                Some(PathBuf::from("/tmp/home")),
+            ),
+            PathBuf::from("/tmp/brain-home")
+        );
+    }
+
+    #[test]
+    fn resolve_agent_home_falls_back_to_user_home_directory() {
+        assert_eq!(
+            resolve_agent_home(None, None, Some(PathBuf::from("/tmp/home"))),
+            PathBuf::from("/tmp/home/.brain")
+        );
+    }
+
+    #[test]
+    fn resolve_agent_home_falls_back_to_relative_default_without_home_directory() {
+        assert_eq!(
+            resolve_agent_home(None, None, None),
+            PathBuf::from("./.brain")
+        );
+    }
 }

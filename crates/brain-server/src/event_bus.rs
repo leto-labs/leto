@@ -4,23 +4,23 @@ use crate::types::ServerEvent;
 
 const DEFAULT_CAPACITY: usize = 1024;
 
-pub struct EventBus {
+pub(crate) struct EventBus {
     tx: broadcast::Sender<ServerEvent>,
 }
 
 impl EventBus {
-    pub fn new(capacity: usize) -> Self {
+    pub(crate) fn new(capacity: usize) -> Self {
         let (tx, _) = broadcast::channel(capacity);
         Self { tx }
     }
 
-    pub fn publish(&self, event: ServerEvent) {
+    pub(crate) fn publish(&self, event: ServerEvent) {
         if let Err(e) = self.tx.send(event) {
             tracing::warn!("EventBus: no active subscribers, event dropped ({})", e);
         }
     }
 
-    pub fn subscribe(&self) -> broadcast::Receiver<ServerEvent> {
+    pub(crate) fn subscribe(&self) -> broadcast::Receiver<ServerEvent> {
         self.tx.subscribe()
     }
 }

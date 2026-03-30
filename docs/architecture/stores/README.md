@@ -1,8 +1,8 @@
 # Stores
 
-`brain-stores` owns durable runtime state. It implements the store contracts
-from `brain-types` for both in-memory tests and the real filesystem-backed
-runtime.
+`agent-store` owns durable runtime state. It implements the current project,
+session, message, credential, and trajectory store contracts for both
+in-memory tests and the real filesystem-backed runtime.
 
 ## Table Of Contents
 
@@ -27,7 +27,7 @@ runtime.
 | Store | Use case | Notes |
 | --- | --- | --- |
 | `InMemoryStore` | Tests and transient local flows | Good for unit-style runtime checks |
-| `FileStore` | Real local runtime state under `brain_home()` | Current persistent default |
+| `FileStore` | Real local runtime state under `agent_home()` | Current persistent default |
 
 ## Storage Model
 

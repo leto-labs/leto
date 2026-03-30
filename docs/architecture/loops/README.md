@@ -1,6 +1,6 @@
 # Loops
 
-`brain-loops` is where the repo's biggest experimental pressure now lives. The
+`agent-loops` is where the repo's biggest experimental pressure now lives. The
 crate keeps agent strategy behind the `AgentLoop` trait, but the concrete loops
 now represent meaningfully different execution contracts rather than small
 prompt variations.
@@ -70,7 +70,7 @@ flowchart LR
 
 | Observation | Why it matters |
 | --- | --- |
-| The crate is still successfully isolating loop experimentation from `brain-core` | This is the main reason the recent benchmark-driven work has not forced a deeper runtime rewrite yet |
+| The crate is still successfully isolating loop experimentation from `agent-core` | This is the main reason the recent benchmark-driven work has not forced a deeper runtime rewrite yet |
 | `terminus2` and `terminus-kira` are not just hardened variants of `simple` | They encode different assumptions about planning, terminal feedback, and completion confirmation |
 | The new `agent-runtime` path should absorb runtime-native mechanics, not loop-language control flow | The goal is richer bounded effects and richer runtime state, not `If`/`While`/interpreter creep inside `LoopDecision` |
 | Persistent terminal sessions are now a first-class loop primitive | Tooling and events need to support long-lived execution state rather than only one-shot tools |
