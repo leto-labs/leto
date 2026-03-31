@@ -5,6 +5,8 @@ pub enum RuntimeError {
     Provider(#[from] provider::Error),
     #[error("tool: {0}")]
     Tool(String),
+    #[error("worktree: {0}")]
+    Worktree(String),
     #[error("session closed")]
     Closed,
     #[error("cancelled")]

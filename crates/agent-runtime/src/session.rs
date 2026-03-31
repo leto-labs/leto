@@ -8,7 +8,8 @@ use crate::{
     AgentMessage, ApprovalRequest, ChildReport, Envelope, InterruptMode, LoopDecision,
     PtyCaptureResult, PtyEvent, PtyId, PtySessionState, PtySubscription, ResultMode, RuntimeId,
     RuntimeOperationResult, SessionInputSource, SpawnId, SpawnMode, SteerWhen, SubcallResult,
-    ToolCall, TranscriptAppendResult, TranscriptRewriteResult, WaitRequest,
+    ToolCall, TranscriptAppendResult, TranscriptRewriteResult, WaitRequest, WorktreeId,
+    WorktreeState,
 };
 
 /// Coarse execution phase for an in-memory session engine.
@@ -106,6 +107,9 @@ pub struct ChildRuntimeState {
     pub spawn_mode: SpawnMode,
     /// Result delivery behavior chosen for this child.
     pub result_mode: ResultMode,
+    /// Bound managed worktree for the child runtime, when any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bound_worktree_id: Option<WorktreeId>,
     /// Most recent final result, when available.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_result: Option<ChildResult>,
@@ -239,6 +243,12 @@ pub struct SessionState {
     /// Most recent PTY capture outcome, when any.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_pty_capture: Option<PtyCaptureResult>,
+    /// Worktrees currently known to this runtime.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub worktrees: BTreeMap<WorktreeId, WorktreeState>,
+    /// Managed worktree currently bound to this runtime, when any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bound_worktree_id: Option<WorktreeId>,
     /// Current runtime phase.
     pub phase: SessionPhase,
     /// Current externally visible boundary, when any.
@@ -300,6 +310,8 @@ impl SessionState {
             recent_pty_events: VecDeque::new(),
             pending_promoted_pty_events: Vec::new(),
             last_pty_capture: None,
+            worktrees: BTreeMap::new(),
+            bound_worktree_id: None,
             phase: SessionPhase::Idle,
             boundary: Some(SessionBoundary::AwaitingInput),
             active_turn: false,

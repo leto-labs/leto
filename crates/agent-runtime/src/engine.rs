@@ -1,5 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt::Write as _;
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex as StdMutex};
 
 use futures::StreamExt;
@@ -8,6 +10,7 @@ use provider::{
     ProviderInfo, Request,
 };
 use serde::Deserialize;
+use tokio::process::Command as TokioCommand;
 use tokio::sync::{Mutex, broadcast, mpsc};
 use tokio::time::{Duration, sleep};
 use tokio_util::sync::CancellationToken;
@@ -17,16 +20,18 @@ use crate::{
     ActiveWait, AgentCommand, AgentListScope, AgentMessage, AgentMessageDelivery,
     AgentMessageFilter, AgentMessageKind, ApprovalDecision, ApprovalRequest, ChildReport,
     ChildReportKind, ChildResult, ChildRuntimeState, ChildStatus, ContextPressure, ControlEvent,
-    DeliveredPtyEvent, DoomLoopState, Envelope, EnvelopeKind, HistoryMode, InputDelivery,
-    InterruptMode, LoopContext, LoopDecision, LoopStrategy, OpenPtyRequest, ParentRef,
-    PendingInput, PendingSteering, PtyCaptureMode, PtyCaptureRequest, PtyCaptureResult, PtyCommand,
-    PtyEvent, PtyEventFilter, PtyEventKind, PtyExecRequest, PtyExecResult, PtyHandle, PtyId,
-    PtySessionState, PtySubscription, PtySubscriptionDelivery, ResultMode, RuntimeConfig,
-    RuntimeError, RuntimeEvent, RuntimeId, RuntimeOperationResult, SessionBoundary, SessionCommand,
-    SessionPhase, SessionState, SpawnId, SpawnMode, SpawnRequest, SteerWhen, SubcallRequest,
-    SubcallResult, ToolApproval, ToolCall, ToolExecutionResult, ToolExecutor, TranscriptAppend,
-    TranscriptAppendResult, TranscriptRewrite, TranscriptRewriteResult, WaitOutcome, WaitRequest,
-    WaitResult, WaitTargetOutcome, WaitTimeoutAction,
+    CreateWorktreeRequest, DeliveredPtyEvent, DoomLoopState, Envelope, EnvelopeKind, HistoryMode,
+    InputDelivery, InterruptMode, LoopContext, LoopDecision, LoopStrategy, OpenPtyRequest,
+    ParentRef, PendingInput, PendingSteering, PtyCaptureMode, PtyCaptureRequest, PtyCaptureResult,
+    PtyCommand, PtyEvent, PtyEventFilter, PtyEventKind, PtyExecRequest, PtyExecResult, PtyHandle,
+    PtyId, PtySessionState, PtySubscription, PtySubscriptionDelivery, RemoveWorktreeRequest,
+    ResultMode, RuntimeConfig, RuntimeError, RuntimeEvent, RuntimeId, RuntimeOperationResult,
+    SessionBoundary, SessionCommand, SessionPhase, SessionState, SpawnId, SpawnMode, SpawnRequest,
+    SteerWhen, SubcallRequest, SubcallResult, ToolApproval, ToolCall, ToolExecutionResult,
+    ToolExecutor, TranscriptAppend, TranscriptAppendResult, TranscriptRewrite,
+    TranscriptRewriteResult, UnbindWorktreeRequest, WaitOutcome, WaitRequest, WaitResult,
+    WaitTargetOutcome, WaitTimeoutAction, WorktreeCommand, WorktreeId, WorktreeState,
+    WorktreeStatus,
 };
 
 #[derive(Debug, Clone)]
@@ -100,6 +105,8 @@ struct RuntimeRegistryState {
     child_to_parent: BTreeMap<RuntimeId, ParentRef>,
     profiles: BTreeMap<String, RuntimeProfile>,
     ptys: BTreeMap<PtyId, Arc<PtyHandle>>,
+    worktrees: BTreeMap<WorktreeId, WorktreeState>,
+    runtime_worktrees: BTreeMap<RuntimeId, WorktreeId>,
 }
 
 struct RuntimeRegistryInner {
@@ -267,6 +274,16 @@ impl SessionEngine {
         self.registry.pty(pty_id)?.snapshot_state()
     }
 
+    /// Returns the currently known managed worktrees from the shared registry.
+    pub async fn worktrees(&self) -> Vec<WorktreeState> {
+        self.registry.list_worktrees()
+    }
+
+    /// Returns one managed worktree snapshot by id from the shared registry.
+    pub async fn worktree(&self, worktree_id: WorktreeId) -> Result<WorktreeState, RuntimeError> {
+        self.registry.worktree(worktree_id)
+    }
+
     /// Submits a command into the long-lived session engine.
     pub async fn submit(&self, command: SessionCommand) -> Result<(), RuntimeError> {
         self.command_tx
@@ -391,6 +408,9 @@ impl SessionEngine {
         &self,
         request: OpenPtyRequest,
     ) -> Result<PtySessionState, RuntimeError> {
+        let request =
+            resolve_open_pty_request_with_bound_worktree(&self.state, &self.registry, request)
+                .await?;
         let handle = Arc::new(PtyHandle::open(self.session_id, request)?);
         let pty = handle.snapshot_state()?;
         self.registry.register_pty(handle);
@@ -400,6 +420,136 @@ impl SessionEngine {
         }
         self.emit(RuntimeEvent::PtyOpened { pty: pty.clone() });
         Ok(pty)
+    }
+
+    async fn create_worktree_tool(
+        &self,
+        request: CreateWorktreeRequest,
+    ) -> Result<WorktreeState, RuntimeError> {
+        match self
+            .registry
+            .create_worktree(self.session_id, self.config.as_ref(), request)
+            .await
+        {
+            Ok(worktree) => {
+                {
+                    let mut state = self.state.lock().await;
+                    state
+                        .worktrees
+                        .insert(worktree.worktree_id, worktree.clone());
+                }
+                self.emit(RuntimeEvent::WorktreeCreated {
+                    worktree: worktree.clone(),
+                });
+                Ok(worktree)
+            }
+            Err(error) => {
+                self.emit(RuntimeEvent::WorktreeFailed {
+                    runtime_id: self.session_id,
+                    operation: "create".into(),
+                    worktree_id: None,
+                    message: error.to_string(),
+                });
+                Err(error)
+            }
+        }
+    }
+
+    async fn bind_worktree_tool(
+        &self,
+        request: crate::BindWorktreeRequest,
+    ) -> Result<WorktreeState, RuntimeError> {
+        match self
+            .registry
+            .bind_worktree(self.session_id, request.worktree_id)
+        {
+            Ok(worktree) => {
+                {
+                    let mut state = self.state.lock().await;
+                    state.bound_worktree_id = Some(request.worktree_id);
+                    state
+                        .worktrees
+                        .insert(request.worktree_id, worktree.clone());
+                }
+                self.emit(RuntimeEvent::WorktreeBound {
+                    runtime_id: self.session_id,
+                    worktree_id: request.worktree_id,
+                });
+                Ok(worktree)
+            }
+            Err(error) => {
+                self.emit(RuntimeEvent::WorktreeFailed {
+                    runtime_id: self.session_id,
+                    operation: "bind".into(),
+                    worktree_id: Some(request.worktree_id),
+                    message: error.to_string(),
+                });
+                Err(error)
+            }
+        }
+    }
+
+    async fn unbind_worktree_tool(
+        &self,
+        request: UnbindWorktreeRequest,
+    ) -> Result<WorktreeState, RuntimeError> {
+        match self
+            .registry
+            .unbind_worktree(self.session_id, request.worktree_id)
+        {
+            Ok(worktree) => {
+                {
+                    let mut state = self.state.lock().await;
+                    if state.bound_worktree_id == Some(request.worktree_id) {
+                        state.bound_worktree_id = None;
+                    }
+                    state
+                        .worktrees
+                        .insert(request.worktree_id, worktree.clone());
+                }
+                self.emit(RuntimeEvent::WorktreeUnbound {
+                    runtime_id: self.session_id,
+                    worktree_id: request.worktree_id,
+                });
+                Ok(worktree)
+            }
+            Err(error) => {
+                self.emit(RuntimeEvent::WorktreeFailed {
+                    runtime_id: self.session_id,
+                    operation: "unbind".into(),
+                    worktree_id: Some(request.worktree_id),
+                    message: error.to_string(),
+                });
+                Err(error)
+            }
+        }
+    }
+
+    async fn remove_worktree_tool(
+        &self,
+        request: RemoveWorktreeRequest,
+    ) -> Result<WorktreeState, RuntimeError> {
+        match self.registry.remove_worktree(request.worktree_id).await {
+            Ok(worktree) => {
+                {
+                    let mut state = self.state.lock().await;
+                    state.worktrees.remove(&request.worktree_id);
+                }
+                self.emit(RuntimeEvent::WorktreeRemoved {
+                    worktree: worktree.clone(),
+                });
+                Ok(worktree)
+            }
+            Err(error) => {
+                self.emit(RuntimeEvent::WorktreeFailed {
+                    runtime_id: self.session_id,
+                    operation: "remove".into(),
+                    worktree_id: Some(request.worktree_id),
+                    message: error.to_string(),
+                });
+                Err(error)
+            }
+        }
     }
 
     async fn write_pty_tool(
@@ -603,6 +753,11 @@ impl SessionEngine {
             parent_runtime_id: self.session_id,
             spawn_id,
         });
+        if let Some(worktree_id) = request.worktree_id {
+            let worktree = self.registry.bind_worktree(child_id, worktree_id)?;
+            child_state.bound_worktree_id = Some(worktree_id);
+            child_state.worktrees.insert(worktree_id, worktree);
+        }
 
         let child = SessionEngine::with_registry(
             self.registry.clone(),
@@ -626,6 +781,7 @@ impl SessionEngine {
             },
             spawn_mode: request.spawn_mode,
             result_mode: request.result_mode,
+            bound_worktree_id: request.worktree_id,
             last_result: None,
         };
         {
@@ -658,6 +814,8 @@ impl RuntimeRegistryInner {
                 child_to_parent: BTreeMap::new(),
                 profiles: BTreeMap::new(),
                 ptys: BTreeMap::new(),
+                worktrees: BTreeMap::new(),
+                runtime_worktrees: BTreeMap::new(),
             }),
         }
     }
@@ -681,6 +839,12 @@ impl RuntimeRegistryInner {
     fn unregister_handle(&self, runtime_id: RuntimeId) {
         let mut state = self.state.lock().expect("runtime registry poisoned");
         state.handles.remove(&runtime_id);
+        if let Some(worktree_id) = state.runtime_worktrees.remove(&runtime_id)
+            && let Some(worktree) = state.worktrees.get_mut(&worktree_id)
+        {
+            worktree.bound_runtime_id = None;
+            worktree.last_error = None;
+        }
         if let Some(parent_ref) = state.child_to_parent.remove(&runtime_id)
             && let Some(children) = state
                 .parent_to_children
@@ -742,6 +906,189 @@ impl RuntimeRegistryInner {
             .values()
             .map(|pty| pty.snapshot_state())
             .collect()
+    }
+
+    fn list_worktrees(&self) -> Vec<WorktreeState> {
+        self.state
+            .lock()
+            .expect("runtime registry poisoned")
+            .worktrees
+            .values()
+            .cloned()
+            .collect()
+    }
+
+    fn worktree(&self, worktree_id: WorktreeId) -> Result<WorktreeState, RuntimeError> {
+        self.state
+            .lock()
+            .expect("runtime registry poisoned")
+            .worktrees
+            .get(&worktree_id)
+            .cloned()
+            .ok_or_else(|| RuntimeError::Worktree(format!("unknown worktree id: {worktree_id}")))
+    }
+
+    fn bind_worktree(
+        &self,
+        runtime_id: RuntimeId,
+        worktree_id: WorktreeId,
+    ) -> Result<WorktreeState, RuntimeError> {
+        let mut state = self.state.lock().expect("runtime registry poisoned");
+        if let Some(existing) = state.runtime_worktrees.get(&runtime_id) {
+            return Err(RuntimeError::Worktree(format!(
+                "runtime {runtime_id} is already bound to worktree {existing}"
+            )));
+        }
+        let worktree = state
+            .worktrees
+            .get_mut(&worktree_id)
+            .ok_or_else(|| RuntimeError::Worktree(format!("unknown worktree id: {worktree_id}")))?;
+        if let Some(bound_runtime_id) = worktree.bound_runtime_id {
+            return Err(RuntimeError::Worktree(format!(
+                "worktree {worktree_id} is already bound to runtime {bound_runtime_id}"
+            )));
+        }
+        worktree.bound_runtime_id = Some(runtime_id);
+        worktree.last_error = None;
+        let snapshot = worktree.clone();
+        state.runtime_worktrees.insert(runtime_id, worktree_id);
+        Ok(snapshot)
+    }
+
+    fn unbind_worktree(
+        &self,
+        runtime_id: RuntimeId,
+        worktree_id: WorktreeId,
+    ) -> Result<WorktreeState, RuntimeError> {
+        let mut state = self.state.lock().expect("runtime registry poisoned");
+        match state.runtime_worktrees.get(&runtime_id).copied() {
+            Some(bound_id) if bound_id == worktree_id => {}
+            Some(bound_id) => {
+                return Err(RuntimeError::Worktree(format!(
+                    "runtime {runtime_id} is bound to worktree {bound_id}, not {worktree_id}"
+                )));
+            }
+            None => {
+                return Err(RuntimeError::Worktree(format!(
+                    "runtime {runtime_id} is not bound to a worktree"
+                )));
+            }
+        }
+        let worktree = state
+            .worktrees
+            .get_mut(&worktree_id)
+            .ok_or_else(|| RuntimeError::Worktree(format!("unknown worktree id: {worktree_id}")))?;
+        if worktree.bound_runtime_id != Some(runtime_id) {
+            return Err(RuntimeError::Worktree(format!(
+                "worktree {worktree_id} is not bound to runtime {runtime_id}"
+            )));
+        }
+        worktree.bound_runtime_id = None;
+        worktree.last_error = None;
+        let snapshot = worktree.clone();
+        state.runtime_worktrees.remove(&runtime_id);
+        Ok(snapshot)
+    }
+
+    async fn create_worktree(
+        &self,
+        owner_runtime_id: RuntimeId,
+        config: &RuntimeConfig,
+        request: CreateWorktreeRequest,
+    ) -> Result<WorktreeState, RuntimeError> {
+        let repo_root = resolve_git_repo_root(Path::new(&request.repo_root)).await?;
+        let worktree_id = Ulid::new();
+        let target_path = resolve_worktree_target_path(config, worktree_id, &request)?;
+        if let Some(parent) = target_path.parent() {
+            fs::create_dir_all(parent).map_err(|error| {
+                RuntimeError::Worktree(format!(
+                    "failed to create worktree parent directory {}: {error}",
+                    parent.display()
+                ))
+            })?;
+        }
+
+        let mut command = TokioCommand::new("git");
+        command
+            .arg("-C")
+            .arg(&repo_root)
+            .arg("worktree")
+            .arg("add")
+            .arg("-b")
+            .arg(&request.branch)
+            .arg(&target_path)
+            .arg(request.start_ref.as_deref().unwrap_or("HEAD"));
+        run_git_command(command, "create worktree").await?;
+
+        let worktree = WorktreeState {
+            worktree_id,
+            owner_runtime_id,
+            repo_root: normalize_path_string(&repo_root)?,
+            worktree_path: normalize_path_string(&target_path)?,
+            branch: request.branch,
+            start_ref: request.start_ref,
+            bound_runtime_id: None,
+            status: WorktreeStatus::Ready,
+            last_error: None,
+        };
+
+        self.state
+            .lock()
+            .expect("runtime registry poisoned")
+            .worktrees
+            .insert(worktree_id, worktree.clone());
+        Ok(worktree)
+    }
+
+    async fn remove_worktree(
+        &self,
+        worktree_id: WorktreeId,
+    ) -> Result<WorktreeState, RuntimeError> {
+        let (repo_root, worktree_path) = {
+            let mut state = self.state.lock().expect("runtime registry poisoned");
+            let worktree = state.worktrees.get_mut(&worktree_id).ok_or_else(|| {
+                RuntimeError::Worktree(format!("unknown worktree id: {worktree_id}"))
+            })?;
+            if let Some(bound_runtime_id) = worktree.bound_runtime_id {
+                return Err(RuntimeError::Worktree(format!(
+                    "worktree {worktree_id} is still bound to runtime {bound_runtime_id}"
+                )));
+            }
+            worktree.status = WorktreeStatus::Removing;
+            worktree.last_error = None;
+            (worktree.repo_root.clone(), worktree.worktree_path.clone())
+        };
+
+        let mut command = TokioCommand::new("git");
+        command
+            .arg("-C")
+            .arg(&repo_root)
+            .arg("worktree")
+            .arg("remove")
+            .arg(&worktree_path);
+
+        match run_git_command(command, "remove worktree").await {
+            Ok(()) => {
+                let mut state = self.state.lock().expect("runtime registry poisoned");
+                state
+                    .runtime_worktrees
+                    .retain(|_, value| *value != worktree_id);
+                state.worktrees.remove(&worktree_id).ok_or_else(|| {
+                    RuntimeError::Worktree(format!(
+                        "worktree {worktree_id} disappeared during removal"
+                    ))
+                })
+            }
+            Err(error) => {
+                let message = error.to_string();
+                let mut state = self.state.lock().expect("runtime registry poisoned");
+                if let Some(worktree) = state.worktrees.get_mut(&worktree_id) {
+                    worktree.status = WorktreeStatus::Ready;
+                    worktree.last_error = Some(message);
+                }
+                Err(error)
+            }
+        }
     }
 
     fn link_child(&self, parent_id: RuntimeId, child_id: RuntimeId, spawn_id: SpawnId) {
@@ -851,6 +1198,14 @@ impl EngineRuntime {
                     self.queue_runtime_action(decision).await;
                 } else {
                     self.handle_agent_command(command).await?;
+                }
+                self.drive().await
+            }
+            SessionCommand::Worktree(command) => {
+                if let Some(decision) = loop_decision_from_worktree_command(&command) {
+                    self.queue_runtime_action(decision).await;
+                } else {
+                    self.handle_worktree_command(command).await?;
                 }
                 self.drive().await
             }
@@ -1013,6 +1368,122 @@ impl EngineRuntime {
             }
             PtyCommand::ReadPtyEvents { filter } => {
                 let _ = self.read_pty_events(filter).await;
+            }
+        }
+        Ok(())
+    }
+
+    async fn handle_worktree_command(
+        &mut self,
+        command: WorktreeCommand,
+    ) -> Result<(), RuntimeError> {
+        match command {
+            WorktreeCommand::CreateWorktree { request } => {
+                let worktree = self
+                    .registry
+                    .create_worktree(self.runtime_id, self.config.as_ref(), request)
+                    .await
+                    .map_err(|error| {
+                        self.emit(RuntimeEvent::WorktreeFailed {
+                            runtime_id: self.runtime_id,
+                            operation: "create".into(),
+                            worktree_id: None,
+                            message: error.to_string(),
+                        });
+                        error
+                    })?;
+                {
+                    let mut state = self.state.lock().await;
+                    state
+                        .worktrees
+                        .insert(worktree.worktree_id, worktree.clone());
+                }
+                self.emit(RuntimeEvent::WorktreeCreated { worktree });
+            }
+            WorktreeCommand::ListWorktrees => {
+                let worktrees = self.registry.list_worktrees();
+                let mut state = self.state.lock().await;
+                state.worktrees = worktrees
+                    .into_iter()
+                    .map(|worktree| (worktree.worktree_id, worktree))
+                    .collect();
+            }
+            WorktreeCommand::GetWorktree { worktree_id } => {
+                let worktree = self.registry.worktree(worktree_id)?;
+                let mut state = self.state.lock().await;
+                state.worktrees.insert(worktree_id, worktree);
+            }
+            WorktreeCommand::RemoveWorktree { request } => {
+                let worktree = self
+                    .registry
+                    .remove_worktree(request.worktree_id)
+                    .await
+                    .map_err(|error| {
+                        self.emit(RuntimeEvent::WorktreeFailed {
+                            runtime_id: self.runtime_id,
+                            operation: "remove".into(),
+                            worktree_id: Some(request.worktree_id),
+                            message: error.to_string(),
+                        });
+                        error
+                    })?;
+                {
+                    let mut state = self.state.lock().await;
+                    state.worktrees.remove(&request.worktree_id);
+                }
+                self.emit(RuntimeEvent::WorktreeRemoved { worktree });
+            }
+            WorktreeCommand::BindWorktree { request } => {
+                let worktree = self
+                    .registry
+                    .bind_worktree(self.runtime_id, request.worktree_id)
+                    .map_err(|error| {
+                        self.emit(RuntimeEvent::WorktreeFailed {
+                            runtime_id: self.runtime_id,
+                            operation: "bind".into(),
+                            worktree_id: Some(request.worktree_id),
+                            message: error.to_string(),
+                        });
+                        error
+                    })?;
+                {
+                    let mut state = self.state.lock().await;
+                    state.bound_worktree_id = Some(request.worktree_id);
+                    state
+                        .worktrees
+                        .insert(request.worktree_id, worktree.clone());
+                }
+                self.emit(RuntimeEvent::WorktreeBound {
+                    runtime_id: self.runtime_id,
+                    worktree_id: request.worktree_id,
+                });
+            }
+            WorktreeCommand::UnbindWorktree { request } => {
+                let worktree = self
+                    .registry
+                    .unbind_worktree(self.runtime_id, request.worktree_id)
+                    .map_err(|error| {
+                        self.emit(RuntimeEvent::WorktreeFailed {
+                            runtime_id: self.runtime_id,
+                            operation: "unbind".into(),
+                            worktree_id: Some(request.worktree_id),
+                            message: error.to_string(),
+                        });
+                        error
+                    })?;
+                {
+                    let mut state = self.state.lock().await;
+                    if state.bound_worktree_id == Some(request.worktree_id) {
+                        state.bound_worktree_id = None;
+                    }
+                    state
+                        .worktrees
+                        .insert(request.worktree_id, worktree.clone());
+                }
+                self.emit(RuntimeEvent::WorktreeUnbound {
+                    runtime_id: self.runtime_id,
+                    worktree_id: request.worktree_id,
+                });
             }
         }
         Ok(())
@@ -1592,6 +2063,38 @@ impl EngineRuntime {
                     self.queue_local_steering(message, when).await?;
                     continue;
                 }
+                LoopDecision::CreateWorktree { request } => {
+                    if should_consume_pending_decision {
+                        self.consume_pending_runtime_action().await;
+                    }
+                    self.handle_worktree_command(WorktreeCommand::CreateWorktree { request })
+                        .await?;
+                    continue;
+                }
+                LoopDecision::RemoveWorktree { request } => {
+                    if should_consume_pending_decision {
+                        self.consume_pending_runtime_action().await;
+                    }
+                    self.handle_worktree_command(WorktreeCommand::RemoveWorktree { request })
+                        .await?;
+                    continue;
+                }
+                LoopDecision::BindWorktree { request } => {
+                    if should_consume_pending_decision {
+                        self.consume_pending_runtime_action().await;
+                    }
+                    self.handle_worktree_command(WorktreeCommand::BindWorktree { request })
+                        .await?;
+                    continue;
+                }
+                LoopDecision::UnbindWorktree { request } => {
+                    if should_consume_pending_decision {
+                        self.consume_pending_runtime_action().await;
+                    }
+                    self.handle_worktree_command(WorktreeCommand::UnbindWorktree { request })
+                        .await?;
+                    continue;
+                }
                 LoopDecision::OpenPty { request } => {
                     if should_consume_pending_decision {
                         self.consume_pending_runtime_action().await;
@@ -1960,6 +2463,9 @@ impl EngineRuntime {
     }
 
     async fn open_pty(&mut self, request: OpenPtyRequest) -> Result<PtySessionState, RuntimeError> {
+        let request =
+            resolve_open_pty_request_with_bound_worktree(&self.state, &self.registry, request)
+                .await?;
         let handle = Arc::new(PtyHandle::open(self.runtime_id, request)?);
         let state = handle.snapshot_state()?;
         self.registry.register_pty(handle);
@@ -3035,6 +3541,12 @@ const READ_AGENT_MAIL_TOOL: &str = "read_agent_mail";
 const INTERRUPT_AGENT_TOOL: &str = "interrupt_agent";
 const LIST_AGENTS_TOOL: &str = "list_agents";
 const WAIT_AGENT_TOOL: &str = "wait_agent";
+const CREATE_WORKTREE_TOOL: &str = "create_worktree";
+const LIST_WORKTREES_TOOL: &str = "list_worktrees";
+const GET_WORKTREE_TOOL: &str = "get_worktree";
+const REMOVE_WORKTREE_TOOL: &str = "remove_worktree";
+const BIND_WORKTREE_TOOL: &str = "bind_worktree";
+const UNBIND_WORKTREE_TOOL: &str = "unbind_worktree";
 const OPEN_PTY_TOOL: &str = "open_pty";
 const LIST_PTYS_TOOL: &str = "list_ptys";
 const GET_PTY_TOOL: &str = "get_pty";
@@ -3065,7 +3577,24 @@ struct SpawnAgentToolInput {
     #[serde(default)]
     model_override: Option<String>,
     #[serde(default)]
+    worktree_id: Option<WorktreeId>,
+    #[serde(default)]
     wait: Option<WaitRequest>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CreateWorktreeToolInput {
+    repo_root: String,
+    branch: String,
+    #[serde(default)]
+    start_ref: Option<String>,
+    #[serde(default)]
+    path: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GetWorktreeToolInput {
+    worktree_id: WorktreeId,
 }
 
 #[derive(Debug, Deserialize)]
@@ -3208,6 +3737,7 @@ fn native_runtime_tool_definitions() -> Vec<provider::ToolDefinition> {
                     "history_mode": { "type": "string", "enum": ["empty", "fork_parent_transcript"] },
                     "profile": { "type": "string" },
                     "model_override": { "type": "string" },
+                    "worktree_id": { "type": "string" },
                     "wait": {
                         "type": "object",
                         "properties": {
@@ -3292,6 +3822,72 @@ fn native_runtime_tool_definitions() -> Vec<provider::ToolDefinition> {
                     "on_timeout": { "type": "string", "enum": ["release_hold", "interrupt_child"] }
                 },
                 "required": ["agent_ids"]
+            }),
+        ),
+        provider::ToolDefinition::new(
+            CREATE_WORKTREE_TOOL,
+            "Create a managed git worktree for an existing repository and return its stable worktree id.",
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "repo_root": { "type": "string" },
+                    "branch": { "type": "string" },
+                    "start_ref": { "type": "string" },
+                    "path": { "type": "string" }
+                },
+                "required": ["repo_root", "branch"]
+            }),
+        ),
+        provider::ToolDefinition::new(
+            LIST_WORKTREES_TOOL,
+            "List managed git worktrees currently known to the runtime registry.",
+            serde_json::json!({
+                "type": "object",
+                "properties": {}
+            }),
+        ),
+        provider::ToolDefinition::new(
+            GET_WORKTREE_TOOL,
+            "Fetch one managed git worktree by id.",
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "worktree_id": { "type": "string" }
+                },
+                "required": ["worktree_id"]
+            }),
+        ),
+        provider::ToolDefinition::new(
+            REMOVE_WORKTREE_TOOL,
+            "Remove a managed git worktree by id. Bound worktrees are rejected without mutation.",
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "worktree_id": { "type": "string" }
+                },
+                "required": ["worktree_id"]
+            }),
+        ),
+        provider::ToolDefinition::new(
+            BIND_WORKTREE_TOOL,
+            "Bind the current runtime to an existing managed git worktree by id.",
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "worktree_id": { "type": "string" }
+                },
+                "required": ["worktree_id"]
+            }),
+        ),
+        provider::ToolDefinition::new(
+            UNBIND_WORKTREE_TOOL,
+            "Unbind the current runtime from a managed git worktree by id.",
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "worktree_id": { "type": "string" }
+                },
+                "required": ["worktree_id"]
             }),
         ),
         provider::ToolDefinition::new(
@@ -3468,6 +4064,12 @@ fn is_native_runtime_tool(name: &str) -> bool {
             | INTERRUPT_AGENT_TOOL
             | LIST_AGENTS_TOOL
             | WAIT_AGENT_TOOL
+            | CREATE_WORKTREE_TOOL
+            | LIST_WORKTREES_TOOL
+            | GET_WORKTREE_TOOL
+            | REMOVE_WORKTREE_TOOL
+            | BIND_WORKTREE_TOOL
+            | UNBIND_WORKTREE_TOOL
             | OPEN_PTY_TOOL
             | LIST_PTYS_TOOL
             | GET_PTY_TOOL
@@ -3516,6 +4118,24 @@ fn loop_decision_from_agent_command(command: &AgentCommand) -> Option<LoopDecisi
         AgentCommand::SendAgentMessage { .. }
         | AgentCommand::ReadAgentMessages { .. }
         | AgentCommand::ListAgents { .. } => None,
+    }
+}
+
+fn loop_decision_from_worktree_command(command: &WorktreeCommand) -> Option<LoopDecision> {
+    match command {
+        WorktreeCommand::CreateWorktree { request } => Some(LoopDecision::CreateWorktree {
+            request: request.clone(),
+        }),
+        WorktreeCommand::RemoveWorktree { request } => Some(LoopDecision::RemoveWorktree {
+            request: request.clone(),
+        }),
+        WorktreeCommand::BindWorktree { request } => Some(LoopDecision::BindWorktree {
+            request: request.clone(),
+        }),
+        WorktreeCommand::UnbindWorktree { request } => Some(LoopDecision::UnbindWorktree {
+            request: request.clone(),
+        }),
+        WorktreeCommand::ListWorktrees | WorktreeCommand::GetWorktree { .. } => None,
     }
 }
 
@@ -3577,6 +4197,7 @@ async fn execute_native_runtime_tool(
                 history_mode: input.history_mode.unwrap_or(HistoryMode::Empty),
                 profile: input.profile,
                 model_override: input.model_override,
+                worktree_id: input.worktree_id,
                 ..SpawnRequest::default()
             };
             let child_id = engine.spawn_child_tool(request).await?;
@@ -3590,6 +4211,90 @@ async fn execute_native_runtime_tool(
                 "status": "spawned",
                 "wait": wait_result,
             })))
+        }
+        CREATE_WORKTREE_TOOL => {
+            let input: CreateWorktreeToolInput =
+                serde_json::from_value(call.input).map_err(|error| {
+                    RuntimeError::Tool(format!("invalid create_worktree input: {error}"))
+                })?;
+            let worktree = engine
+                .create_worktree_tool(CreateWorktreeRequest {
+                    repo_root: input.repo_root,
+                    branch: input.branch,
+                    start_ref: input.start_ref,
+                    path: input.path,
+                })
+                .await?;
+            Ok(ToolExecutionResult::success(
+                serde_json::to_value(worktree).map_err(|error| {
+                    RuntimeError::Tool(format!("invalid create_worktree output: {error}"))
+                })?,
+            ))
+        }
+        LIST_WORKTREES_TOOL => Ok(ToolExecutionResult::success(
+            serde_json::to_value(engine.worktrees().await).map_err(|error| {
+                RuntimeError::Tool(format!("invalid list_worktrees output: {error}"))
+            })?,
+        )),
+        GET_WORKTREE_TOOL => {
+            let input: GetWorktreeToolInput =
+                serde_json::from_value(call.input).map_err(|error| {
+                    RuntimeError::Tool(format!("invalid get_worktree input: {error}"))
+                })?;
+            let worktree = engine.worktree(input.worktree_id).await?;
+            Ok(ToolExecutionResult::success(
+                serde_json::to_value(worktree).map_err(|error| {
+                    RuntimeError::Tool(format!("invalid get_worktree output: {error}"))
+                })?,
+            ))
+        }
+        REMOVE_WORKTREE_TOOL => {
+            let input: GetWorktreeToolInput =
+                serde_json::from_value(call.input).map_err(|error| {
+                    RuntimeError::Tool(format!("invalid remove_worktree input: {error}"))
+                })?;
+            let worktree = engine
+                .remove_worktree_tool(RemoveWorktreeRequest {
+                    worktree_id: input.worktree_id,
+                })
+                .await?;
+            Ok(ToolExecutionResult::success(
+                serde_json::to_value(worktree).map_err(|error| {
+                    RuntimeError::Tool(format!("invalid remove_worktree output: {error}"))
+                })?,
+            ))
+        }
+        BIND_WORKTREE_TOOL => {
+            let input: GetWorktreeToolInput =
+                serde_json::from_value(call.input).map_err(|error| {
+                    RuntimeError::Tool(format!("invalid bind_worktree input: {error}"))
+                })?;
+            let worktree = engine
+                .bind_worktree_tool(crate::BindWorktreeRequest {
+                    worktree_id: input.worktree_id,
+                })
+                .await?;
+            Ok(ToolExecutionResult::success(
+                serde_json::to_value(worktree).map_err(|error| {
+                    RuntimeError::Tool(format!("invalid bind_worktree output: {error}"))
+                })?,
+            ))
+        }
+        UNBIND_WORKTREE_TOOL => {
+            let input: GetWorktreeToolInput =
+                serde_json::from_value(call.input).map_err(|error| {
+                    RuntimeError::Tool(format!("invalid unbind_worktree input: {error}"))
+                })?;
+            let worktree = engine
+                .unbind_worktree_tool(UnbindWorktreeRequest {
+                    worktree_id: input.worktree_id,
+                })
+                .await?;
+            Ok(ToolExecutionResult::success(
+                serde_json::to_value(worktree).map_err(|error| {
+                    RuntimeError::Tool(format!("invalid unbind_worktree output: {error}"))
+                })?,
+            ))
         }
         MESSAGE_AGENT_TOOL => {
             let input: MessageAgentToolInput =
@@ -3955,6 +4660,120 @@ async fn wait_for_runtime_targets(
 
         sleep(Duration::from_millis(25)).await;
     }
+}
+
+async fn resolve_open_pty_request_with_bound_worktree(
+    state: &Arc<Mutex<SessionState>>,
+    registry: &Arc<RuntimeRegistryInner>,
+    mut request: OpenPtyRequest,
+) -> Result<OpenPtyRequest, RuntimeError> {
+    if request.cwd.is_some() {
+        return Ok(request);
+    }
+
+    let bound_worktree_id = { state.lock().await.bound_worktree_id };
+    if let Some(worktree_id) = bound_worktree_id {
+        request.cwd = Some(registry.worktree(worktree_id)?.worktree_path);
+    }
+    Ok(request)
+}
+
+async fn resolve_git_repo_root(path: &Path) -> Result<PathBuf, RuntimeError> {
+    let mut command = TokioCommand::new("git");
+    command
+        .arg("-C")
+        .arg(path)
+        .arg("rev-parse")
+        .arg("--show-toplevel");
+    let output = run_git_command_with_output(command, "resolve git repository").await?;
+    Ok(PathBuf::from(output.trim()))
+}
+
+fn resolve_worktree_target_path(
+    config: &RuntimeConfig,
+    worktree_id: WorktreeId,
+    request: &CreateWorktreeRequest,
+) -> Result<PathBuf, RuntimeError> {
+    match &request.path {
+        Some(path) => Ok(PathBuf::from(path)),
+        None => {
+            let managed_root = config.worktree.managed_root.as_ref().ok_or_else(|| {
+                RuntimeError::Worktree(
+                    "worktree path missing and runtime.worktree.managed_root is not configured"
+                        .into(),
+                )
+            })?;
+            Ok(PathBuf::from(managed_root).join(format!(
+                "{}-{}",
+                sanitize_worktree_name(&request.branch),
+                worktree_id.to_string().to_lowercase()
+            )))
+        }
+    }
+}
+
+fn sanitize_worktree_name(branch: &str) -> String {
+    let sanitized = branch
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_') {
+                ch
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>()
+        .trim_matches('-')
+        .to_string();
+    if sanitized.is_empty() {
+        "worktree".into()
+    } else {
+        sanitized
+    }
+}
+
+fn normalize_path_string(path: &Path) -> Result<String, RuntimeError> {
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .map_err(|error| {
+                RuntimeError::Worktree(format!("failed to read current directory: {error}"))
+            })?
+            .join(path)
+    };
+    let canonical = absolute.canonicalize().unwrap_or(absolute);
+    Ok(canonical.to_string_lossy().into_owned())
+}
+
+async fn run_git_command(command: TokioCommand, context: &str) -> Result<(), RuntimeError> {
+    let _ = run_git_command_with_output(command, context).await?;
+    Ok(())
+}
+
+async fn run_git_command_with_output(
+    mut command: TokioCommand,
+    context: &str,
+) -> Result<String, RuntimeError> {
+    let output = command
+        .output()
+        .await
+        .map_err(|error| RuntimeError::Worktree(format!("failed to {context}: {error}")))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let detail = if !stderr.is_empty() {
+            stderr
+        } else if !stdout.is_empty() {
+            stdout
+        } else {
+            format!("git exited with status {}", output.status)
+        };
+        return Err(RuntimeError::Worktree(format!(
+            "failed to {context}: {detail}"
+        )));
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
 async fn read_messages_from_engine(
@@ -4571,6 +5390,9 @@ fn truncate_utf8(value: &str, max_bytes: usize) -> String {
 mod tests {
     use super::*;
     use std::borrow::Cow;
+    use std::fs;
+    use std::path::Path;
+    use std::process::Command as StdCommand;
 
     use async_stream::stream;
     use futures::future::BoxFuture;
@@ -4578,6 +5400,7 @@ mod tests {
         EventStream, MockProvider, ModelInfo, ModelLimit, ProviderCapabilities, ToolDefinition,
         Usage,
     };
+    use tempfile::TempDir;
     use tokio::time::{Duration, timeout};
 
     use crate::ResultMode;
@@ -5210,6 +6033,88 @@ mod tests {
             config,
             state,
         )
+    }
+
+    fn run_git(path: &Path, args: &[&str]) {
+        let output = StdCommand::new("git")
+            .current_dir(path)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "git {:?} failed: {}",
+            args,
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    fn init_git_repo() -> TempDir {
+        let repo = tempfile::tempdir().unwrap();
+        run_git(repo.path(), &["init"]);
+        run_git(repo.path(), &["config", "user.name", "Runtime Test"]);
+        run_git(
+            repo.path(),
+            &["config", "user.email", "runtime@example.com"],
+        );
+        fs::write(repo.path().join("README.md"), "hello worktrees\n").unwrap();
+        run_git(repo.path(), &["add", "README.md"]);
+        run_git(repo.path(), &["commit", "-m", "initial"]);
+        repo
+    }
+
+    async fn wait_for_worktree_count(engine: &SessionEngine, count: usize) -> Vec<WorktreeState> {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
+        loop {
+            let snapshot = engine.snapshot().await;
+            let worktrees = snapshot.worktrees.values().cloned().collect::<Vec<_>>();
+            if worktrees.len() == count {
+                return worktrees;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "timed out waiting for {count} worktrees, saw {}",
+                worktrees.len()
+            );
+            sleep(Duration::from_millis(20)).await;
+        }
+    }
+
+    async fn wait_for_bound_worktree(
+        engine: &SessionEngine,
+        expected: Option<WorktreeId>,
+    ) -> SessionState {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
+        loop {
+            let snapshot = engine.snapshot().await;
+            if snapshot.bound_worktree_id == expected {
+                return snapshot;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "timed out waiting for bound worktree {:?}, last {:?}",
+                expected,
+                snapshot.bound_worktree_id
+            );
+            sleep(Duration::from_millis(20)).await;
+        }
+    }
+
+    async fn wait_for_runtime_error(events: &mut broadcast::Receiver<RuntimeEvent>) -> String {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
+        loop {
+            let event = timeout(Duration::from_millis(250), events.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            if let RuntimeEvent::Error { message, .. } = event {
+                return message;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "timed out waiting for runtime error"
+            );
+        }
     }
 
     async fn spawn_child(engine: &SessionEngine, request: SpawnRequest) -> RuntimeId {
@@ -6348,6 +7253,245 @@ mod tests {
                 .iter()
                 .all(|message| !message.plain_text_lossy().contains("fabricated assistant"))
         );
+    }
+
+    #[tokio::test]
+    async fn worktree_commands_create_bind_and_spawn_child_binding() {
+        let repo = init_git_repo();
+        let managed_root = tempfile::tempdir().unwrap();
+        let mut config = RuntimeConfig::default();
+        config.worktree.managed_root = Some(managed_root.path().to_string_lossy().into_owned());
+        let engine = new_engine_with(
+            MockProvider::new(),
+            Arc::new(PassiveLoop),
+            config,
+            SessionState::new(Ulid::new()),
+        );
+
+        engine
+            .submit(SessionCommand::Worktree(WorktreeCommand::CreateWorktree {
+                request: CreateWorktreeRequest {
+                    repo_root: repo.path().to_string_lossy().into_owned(),
+                    branch: format!("feature-{}", Ulid::new().to_string().to_lowercase()),
+                    start_ref: None,
+                    path: None,
+                },
+            }))
+            .await
+            .unwrap();
+
+        let worktree = wait_for_worktree_count(&engine, 1).await.pop().unwrap();
+        assert_eq!(worktree.bound_runtime_id, None);
+
+        engine
+            .submit(SessionCommand::Worktree(WorktreeCommand::BindWorktree {
+                request: crate::BindWorktreeRequest {
+                    worktree_id: worktree.worktree_id,
+                },
+            }))
+            .await
+            .unwrap();
+
+        let snapshot = wait_for_bound_worktree(&engine, Some(worktree.worktree_id)).await;
+        assert_eq!(snapshot.bound_worktree_id, Some(worktree.worktree_id));
+        assert_eq!(
+            snapshot
+                .worktrees
+                .get(&worktree.worktree_id)
+                .and_then(|state| state.bound_runtime_id),
+            Some(engine.session_id())
+        );
+
+        engine
+            .submit(SessionCommand::Worktree(WorktreeCommand::UnbindWorktree {
+                request: UnbindWorktreeRequest {
+                    worktree_id: worktree.worktree_id,
+                },
+            }))
+            .await
+            .unwrap();
+        let _ = wait_for_bound_worktree(&engine, None).await;
+
+        let child_id = spawn_child(
+            &engine,
+            SpawnRequest {
+                label: Some("child-with-worktree".into()),
+                worktree_id: Some(worktree.worktree_id),
+                ..SpawnRequest::default()
+            },
+        )
+        .await;
+
+        let parent_snapshot = engine.snapshot().await;
+        assert_eq!(
+            parent_snapshot
+                .children
+                .get(&child_id)
+                .and_then(|child| child.bound_worktree_id),
+            Some(worktree.worktree_id)
+        );
+
+        let child_snapshot = engine
+            .registry
+            .handle(child_id)
+            .unwrap()
+            .state
+            .lock()
+            .await
+            .clone();
+        assert_eq!(child_snapshot.bound_worktree_id, Some(worktree.worktree_id));
+        assert_eq!(
+            child_snapshot
+                .worktrees
+                .get(&worktree.worktree_id)
+                .and_then(|state| state.bound_runtime_id),
+            Some(child_id)
+        );
+    }
+
+    #[tokio::test]
+    async fn bound_worktree_supplies_default_pty_cwd() {
+        let repo = init_git_repo();
+        let managed_root = tempfile::tempdir().unwrap();
+        let mut config = RuntimeConfig::default();
+        config.worktree.managed_root = Some(managed_root.path().to_string_lossy().into_owned());
+        let engine = new_engine_with(
+            MockProvider::new(),
+            Arc::new(PassiveLoop),
+            config,
+            SessionState::new(Ulid::new()),
+        );
+
+        let created = execute_native_agent_tool(
+            engine.clone(),
+            ToolCall {
+                id: "create-worktree".into(),
+                name: CREATE_WORKTREE_TOOL.into(),
+                input: serde_json::json!({
+                    "repo_root": repo.path().to_string_lossy(),
+                    "branch": format!("pty-{}", Ulid::new().to_string().to_lowercase())
+                }),
+            },
+        )
+        .await
+        .unwrap();
+        let worktree_id: WorktreeId =
+            serde_json::from_value(created.output["worktree_id"].clone()).unwrap();
+        let worktree_path = created.output["worktree_path"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        execute_native_agent_tool(
+            engine.clone(),
+            ToolCall {
+                id: "bind-worktree".into(),
+                name: BIND_WORKTREE_TOOL.into(),
+                input: serde_json::json!({ "worktree_id": worktree_id }),
+            },
+        )
+        .await
+        .unwrap();
+
+        let opened = execute_native_agent_tool(
+            engine,
+            ToolCall {
+                id: "open-pty-default-cwd".into(),
+                name: OPEN_PTY_TOOL.into(),
+                input: serde_json::json!({}),
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(opened.output["cwd"], worktree_path);
+    }
+
+    #[tokio::test]
+    async fn non_git_worktree_creation_rejects_without_registration() {
+        let non_git_dir = tempfile::tempdir().unwrap();
+        let managed_root = tempfile::tempdir().unwrap();
+        let mut config = RuntimeConfig::default();
+        config.worktree.managed_root = Some(managed_root.path().to_string_lossy().into_owned());
+        let engine = new_engine_with(
+            MockProvider::new(),
+            Arc::new(PassiveLoop),
+            config,
+            SessionState::new(Ulid::new()),
+        );
+        let mut events = engine.subscribe();
+
+        engine
+            .submit(SessionCommand::Worktree(WorktreeCommand::CreateWorktree {
+                request: CreateWorktreeRequest {
+                    repo_root: non_git_dir.path().to_string_lossy().into_owned(),
+                    branch: format!("bad-{}", Ulid::new().to_string().to_lowercase()),
+                    start_ref: None,
+                    path: None,
+                },
+            }))
+            .await
+            .unwrap();
+
+        let error = wait_for_runtime_error(&mut events).await;
+        let snapshot = engine.snapshot().await;
+        assert!(error.contains("resolve git repository"));
+        assert!(snapshot.worktrees.is_empty());
+        assert_eq!(engine.registry.list_worktrees().len(), 0);
+    }
+
+    #[tokio::test]
+    async fn removing_bound_worktree_fails_without_corrupting_state() {
+        let repo = init_git_repo();
+        let managed_root = tempfile::tempdir().unwrap();
+        let mut config = RuntimeConfig::default();
+        config.worktree.managed_root = Some(managed_root.path().to_string_lossy().into_owned());
+        let engine = new_engine_with(
+            MockProvider::new(),
+            Arc::new(PassiveLoop),
+            config,
+            SessionState::new(Ulid::new()),
+        );
+        let mut events = engine.subscribe();
+
+        engine
+            .submit(SessionCommand::Worktree(WorktreeCommand::CreateWorktree {
+                request: CreateWorktreeRequest {
+                    repo_root: repo.path().to_string_lossy().into_owned(),
+                    branch: format!("bound-{}", Ulid::new().to_string().to_lowercase()),
+                    start_ref: None,
+                    path: None,
+                },
+            }))
+            .await
+            .unwrap();
+        let worktree = wait_for_worktree_count(&engine, 1).await.pop().unwrap();
+
+        engine
+            .submit(SessionCommand::Worktree(WorktreeCommand::BindWorktree {
+                request: crate::BindWorktreeRequest {
+                    worktree_id: worktree.worktree_id,
+                },
+            }))
+            .await
+            .unwrap();
+
+        engine
+            .submit(SessionCommand::Worktree(WorktreeCommand::RemoveWorktree {
+                request: RemoveWorktreeRequest {
+                    worktree_id: worktree.worktree_id,
+                },
+            }))
+            .await
+            .unwrap();
+
+        let error = wait_for_runtime_error(&mut events).await;
+        let snapshot = engine.snapshot().await;
+        let preserved = snapshot.worktrees.get(&worktree.worktree_id).unwrap();
+        assert!(error.contains("still bound"));
+        assert_eq!(snapshot.bound_worktree_id, Some(worktree.worktree_id));
+        assert_eq!(preserved.bound_runtime_id, Some(engine.session_id()));
+        assert_eq!(preserved.status, WorktreeStatus::Ready);
     }
 
     #[tokio::test]

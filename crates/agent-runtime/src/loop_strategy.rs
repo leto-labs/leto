@@ -4,9 +4,10 @@ use futures::future::BoxFuture;
 use provider::ProviderInfo;
 
 use crate::{
-    ApprovalRequest, InputDelivery, OpenPtyRequest, PtyCaptureRequest, PtyExecRequest, PtyId,
-    PtySubscription, RuntimeConfig, RuntimeError, RuntimeId, SessionState, SpawnRequest,
-    SubcallRequest, TranscriptAppend, TranscriptRewrite, WaitRequest,
+    ApprovalRequest, BindWorktreeRequest, CreateWorktreeRequest, InputDelivery, OpenPtyRequest,
+    PtyCaptureRequest, PtyExecRequest, PtyId, PtySubscription, RemoveWorktreeRequest,
+    RuntimeConfig, RuntimeError, RuntimeId, SessionState, SpawnRequest, SubcallRequest,
+    TranscriptAppend, TranscriptRewrite, UnbindWorktreeRequest, WaitRequest,
 };
 
 /// Immutable context presented to loop strategies when deciding the next step.
@@ -108,6 +109,26 @@ pub enum LoopDecision {
         message: provider::Message,
         /// Boundary policy for applying the steering.
         when: crate::SteerWhen,
+    },
+    /// Create a managed git worktree.
+    CreateWorktree {
+        /// Worktree creation request.
+        request: CreateWorktreeRequest,
+    },
+    /// Remove a managed git worktree.
+    RemoveWorktree {
+        /// Worktree removal request.
+        request: RemoveWorktreeRequest,
+    },
+    /// Bind the current runtime to a managed git worktree.
+    BindWorktree {
+        /// Worktree binding request.
+        request: BindWorktreeRequest,
+    },
+    /// Unbind the current runtime from a managed git worktree.
+    UnbindWorktree {
+        /// Worktree unbinding request.
+        request: UnbindWorktreeRequest,
     },
     /// Open a new runtime-managed PTY session.
     OpenPty {
