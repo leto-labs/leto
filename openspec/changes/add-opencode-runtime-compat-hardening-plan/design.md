@@ -69,6 +69,26 @@ implementation begins. The initial inventory is broad, but it is not treated as
 complete until the additional runtime/server modules have been reviewed for
 surfaces the web UI may not exercise directly today.
 
+## Decision: Preserve OpenCode Directory And Workspace Scoping Semantics
+
+The pinned OpenCode browser client is not path-agnostic. Its generated SDK
+wrapper injects `x-opencode-directory` and `x-opencode-workspace` headers, and
+the server resolves directory or workspace identity from those headers or the
+equivalent query parameters before routing the request into instance and
+workspace context.
+
+Later implementation of the compat layer must preserve that scoping model for
+browser-facing flows, including:
+
+- directory-scoped bootstrap and session navigation
+- workspace-scoped control-plane operations
+- non-ASCII directory handling that stays compatible with the pinned client
+- consistent project, session, PTY, MCP, and admin-surface resolution under
+  directory or workspace scoped requests
+
+This matters because browser validation will otherwise fail even when the route
+inventory is present and the individual handlers look plausible in isolation.
+
 ## Decision: Model Compat As OpenCode-Native Semantics Over Shared Core Plus Compat-Local State
 
 Later implementation of the `agent-server` compat server layer should follow
@@ -130,6 +150,12 @@ such as:
 
 Later implementation must translate runtime activity into the event shapes that
 the OpenCode UI actually consumes.
+
+This includes both global and directory-scoped stream behavior. The pinned
+browser and runtime surfaces use `global.event` plus instance-scoped
+`event.subscribe`, and later implementation must preserve the semantics that
+make those streams useful for reload, reconnect, and reducer updates,
+including `server.connected` and `server.instance.disposed`.
 
 ## Decision: Scope Runtime Hardening By User-Visible Subsystems
 
@@ -252,6 +278,10 @@ Later implementation must scope:
 - MCP resource inventory and other experimental admin listings
 - formatter and LSP status plus any adjacent admin surfaces that directly
   affect the browser UI
+
+Browser-visible admin surfaces are in scope here even when they are not part
+of the primary chat loop, because the pinned web UI loads them during normal
+bootstrap and settings usage.
 
 ## Decision: Require A Deeper Repocache Pass Before Later Implementation
 

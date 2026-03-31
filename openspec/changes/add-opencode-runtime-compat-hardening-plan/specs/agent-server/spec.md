@@ -14,6 +14,10 @@ status, permission, question, VCS, command, MCP, LSP, config-provider
 defaults, credential mutation routes, and related browser-facing global
 surfaces.
 
+This requirement also covers the pinned client scoping model, including
+directory-scoped and workspace-scoped requests sent through query parameters or
+the `x-opencode-directory` and `x-opencode-workspace` headers.
+
 #### Scenario: Browser bootstrap completes without empty replies
 - **WHEN** the pinned OpenCode UI performs its initial global and directory
   bootstrap against `/v1/compat/opencode`
@@ -21,6 +25,15 @@ surfaces.
   than an empty reply or panic
 - **AND** the resulting state SHALL be sufficient for the UI to continue into
   normal project and session usage
+
+#### Scenario: Header-scoped browser requests resolve the intended instance context
+- **WHEN** the pinned OpenCode client scopes a request with a directory or
+  workspace query value or with `x-opencode-directory` or
+  `x-opencode-workspace`
+- **THEN** the compatibility layer SHALL resolve the same project or workspace
+  context the browser intended
+- **AND** subsequent bootstrap, session, PTY, MCP, and admin-surface reads
+  SHALL remain coherent within that scoped context
 
 ### Requirement: OpenCode Compatibility Event Streams Use OpenCode-Native Semantics
 
@@ -32,6 +45,15 @@ names must be useful to the consumer.
 
 This requirement covers the global event stream plus any shared disposal or
 directory-scoped semantics the pinned OpenCode web UI depends on.
+
+#### Scenario: Browser event streams preserve connect and disposal semantics
+- **WHEN** the pinned OpenCode UI subscribes to `global.event` or
+  `event.subscribe`
+- **THEN** the compat stream SHALL emit the OpenCode-native connect and
+  disposal lifecycle semantics the browser expects, including
+  `server.connected`
+- **AND** directory-scoped resets or reconnects SHALL surface through
+  browser-usable event semantics rather than silent state changes
 
 #### Scenario: Reducer-visible event types are emitted with usable payloads
 - **WHEN** runtime activity changes project, session, message, todo,
@@ -92,21 +114,51 @@ that unblock the affected session.
 - **AND** SHALL NOT depend on placeholder responses disconnected from runtime
   state
 
+#### Scenario: Credential changes trigger browser-visible reconnect semantics
+- **WHEN** the pinned OpenCode UI adds, updates, or removes credentials through
+  `auth.set` or `auth.remove`, including flows derived from `config.providers`
+- **THEN** the compatibility layer SHALL preserve the resulting reload,
+  reconnect, or disposal semantics the browser expects
+- **AND** provider, model, and session-adjacent state SHALL become coherent
+  again without requiring a UI-side workaround
+
 #### Scenario: Deprecated and current permission reply routes remain compatible
 - **WHEN** pinned OpenCode consumers use either the current permission reply
   route family or the deprecated session-scoped respond route family
 - **THEN** the compatibility layer SHALL preserve behavior for both routes as
   required by the pinned release
 
-### Requirement: OpenCode Compatibility Covers Workspace PTY MCP And Review Workflows
+### Requirement: OpenCode Compatibility Preserves Workspace And Worktree Semantics
 
-The compatibility surface SHALL provide deterministic behavior for the
-workspace, worktree, file, review, PTY, MCP, and adjacent admin workflows used
-by the pinned OpenCode app.
+The compatibility surface SHALL preserve the split between OpenCode control
+plane workspaces and git-backed worktree sandboxes where that distinction is
+visible to the browser.
+
+Reset, create, remove, and list operations SHALL remain behaviorally coherent
+with the pinned OpenCode browser flows rather than collapsing those concepts
+into one generic workspace abstraction.
+
+#### Scenario: Workspace and worktree workflows remain distinct
+- **WHEN** the pinned OpenCode UI performs workspace-oriented control-plane
+  operations or git worktree sandbox operations
+- **THEN** the compat layer SHALL preserve the route, payload, and lifecycle
+  distinctions the browser expects
+- **AND** reset or disposal flows SHALL update the related session, terminal,
+  and navigation state coherently
+
+### Requirement: OpenCode Compatibility Covers PTY MCP Review And Browser-Visible Admin Workflows
+
+The compatibility surface SHALL provide deterministic behavior for the file,
+review, PTY, MCP, and browser-visible admin workflows used by the pinned
+OpenCode app.
+
+This includes command inventory, tool inventory, MCP resource inventory, and
+status surfaces such as MCP, formatter, and LSP where the browser loads those
+surfaces during bootstrap, settings, or session-adjacent workflows.
 
 #### Scenario: Non-chat workflows remain usable through compat routes
-- **WHEN** the OpenCode UI performs workspace, worktree, diff, file, PTY, MCP,
-  or admin-driven interactions
+- **WHEN** the OpenCode UI performs diff, file, PTY, MCP, command, tool,
+  resource, or admin-driven interactions
 - **THEN** the compatibility layer SHALL provide usable route behavior and
   follow-up state or events for those workflows
 - **AND** SHALL NOT expose present-but-placeholder endpoints that break normal

@@ -69,9 +69,14 @@ This change proposes to:
 7. explicitly capture the deeper-pass discoveries around `config.providers`,
    `auth.set` or `auth.remove`, `instance.dispose`, instance-scoped
    `event.subscribe`, tool and resource inventory, and the split between
-   workspace and worktree operations where they affect the browser client
+   workspace and worktree operations where they affect the browser client,
+   including directory or workspace header scoping and browser-triggered
+   reset or reload behavior
 8. add `agent-server` spec deltas that make behaviorally real OpenCode
    web UI compatibility a canonical requirement rather than an implicit goal
+9. explicitly scope the browser-visible admin and status surfaces that the
+   pinned web UI loads during normal use, including command inventory,
+   tool inventory, MCP resource inventory, and MCP, formatter, or LSP status
 
 ## Impact
 
