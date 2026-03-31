@@ -13,5 +13,7 @@
   concerns
 - [x] Split `compat/opencode/routes/session.rs` by route cluster and route-doc
   utilities
-- [ ] Split `compat/opencode/types/session.rs` by schema family
-- [ ] Split `tests/http_integration.rs` by API family
+- [x] Split `compat/opencode/mod.rs` by conversion, prompt, auth, and path
+  concerns
+- [x] Split `compat/opencode/types/session.rs` by schema family
+- [x] Split `tests/http_integration.rs` by API family
