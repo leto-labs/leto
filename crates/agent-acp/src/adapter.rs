@@ -8,6 +8,7 @@ use tokio::sync::{mpsc, oneshot};
 use crate::capabilities::{CONFIG_LOOP, CONFIG_MODEL, CONFIG_THOUGHT_LEVEL, initialize_response};
 use crate::errors::{internal_error, map_store_error};
 use crate::event_mapper::{EventMapper, MappedEvent};
+use crate::file_bridge::AcpFileBridge;
 use crate::history_replay::replay_updates;
 use crate::ids::{parse_session_id, session_id_from_ulid};
 
@@ -16,6 +17,7 @@ pub(super) type NotificationEnvelope = (acp::SessionNotification, oneshot::Sende
 /// ACP backend that wraps an AgentCore implementation.
 pub struct AgentCoreAcpBackend<C> {
     core: C,
+    file_bridge: AcpFileBridge,
     session_update_tx: mpsc::UnboundedSender<NotificationEnvelope>,
 }
 
@@ -23,7 +25,7 @@ impl<C: AgentCore> AgentCoreAcpBackend<C> {
     /// Creates a new ACP backend wrapping the given core.
     pub fn new(core: C) -> Self {
         let (tx, _rx) = mpsc::unbounded_channel();
-        Self::with_notification_sender(core, tx)
+        Self::with_file_bridge(core, AcpFileBridge::new(), tx)
     }
 
     /// Creates a new ACP backend using the provided notification channel.
@@ -31,8 +33,17 @@ impl<C: AgentCore> AgentCoreAcpBackend<C> {
         core: C,
         session_update_tx: mpsc::UnboundedSender<NotificationEnvelope>,
     ) -> Self {
+        Self::with_file_bridge(core, AcpFileBridge::new(), session_update_tx)
+    }
+
+    pub(crate) fn with_file_bridge(
+        core: C,
+        file_bridge: AcpFileBridge,
+        session_update_tx: mpsc::UnboundedSender<NotificationEnvelope>,
+    ) -> Self {
         Self {
             core,
+            file_bridge,
             session_update_tx,
         }
     }
@@ -189,6 +200,9 @@ impl<C: AgentCore> acp::Agent for AgentCoreAcpBackend<C> {
         &self,
         arguments: acp::InitializeRequest,
     ) -> Result<acp::InitializeResponse, acp::Error> {
+        self.file_bridge
+            .set_client_capabilities(&arguments.client_capabilities)
+            .await;
         Ok(initialize_response(arguments.protocol_version))
     }
 
@@ -210,6 +224,9 @@ impl<C: AgentCore> acp::Agent for AgentCoreAcpBackend<C> {
             .await
             .map_err(map_store_error)?;
         let session_id = session_id_from_ulid(session.id);
+        self.file_bridge
+            .remember_session_cwd(&session_id, &arguments.cwd)
+            .await;
 
         self.emit(
             &session_id,
@@ -245,6 +262,9 @@ impl<C: AgentCore> acp::Agent for AgentCoreAcpBackend<C> {
             .await
             .map_err(map_store_error)?;
         let acp_session_id = session_id_from_ulid(session.id);
+        self.file_bridge
+            .remember_session_cwd(&acp_session_id, &arguments.cwd)
+            .await;
 
         for update in replay_updates(&session, &messages) {
             self.emit(&acp_session_id, update).await?;

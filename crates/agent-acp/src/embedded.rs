@@ -10,6 +10,7 @@ use dirs::home_dir;
 use provider::MockProvider;
 use provider_openai::{OpenAiApiMode, OpenAiConfigPreset, OpenAiProvider};
 
+use crate::file_bridge::{AcpFileBridge, tool_executor, wrap_provider};
 use crate::run_stdio;
 
 /// Runs the embedded runtime-backed ACP stdio server using local store state.
@@ -51,7 +52,8 @@ async fn build_embedded_core(store: Arc<dyn Store>) -> Result<AgentCoreNative, C
     match AgentCoreNative::build_default_local(store.clone()).await {
         Ok(core) => Ok(core),
         Err(CoreError::NoProvidersRegistered) => Ok(AgentCoreNative::builder(store)
-            .with_provider("mock", Arc::new(MockProvider::new()))
+            .with_provider("mock", wrap_provider(Arc::new(MockProvider::new())))
+            .with_tools(tool_executor(AcpFileBridge::new()))
             .default_provider("mock")
             .build()
             .await?),
@@ -74,7 +76,8 @@ async fn build_env_override_core(
         return Ok(Some(
             AgentCoreNative::builder(store)
                 .without_credential_discovery()
-                .with_provider("mock", Arc::new(MockProvider::new()))
+                .with_provider("mock", wrap_provider(Arc::new(MockProvider::new())))
+                .with_tools(tool_executor(AcpFileBridge::new()))
                 .default_provider("mock")
                 .default_loop(
                     std::env::var("AGENT_DEFAULT_LOOP").unwrap_or_else(|_| "simple".to_owned()),
@@ -110,7 +113,11 @@ async fn build_env_override_core(
     Ok(Some(
         AgentCoreNative::builder(store)
             .without_credential_discovery()
-            .with_provider(provider_name.clone(), Arc::new(OpenAiProvider::new(config)))
+            .with_provider(
+                provider_name.clone(),
+                wrap_provider(Arc::new(OpenAiProvider::new(config))),
+            )
+            .with_tools(tool_executor(AcpFileBridge::new()))
             .default_provider(provider_name)
             .default_loop(
                 std::env::var("AGENT_DEFAULT_LOOP").unwrap_or_else(|_| "simple".to_owned()),

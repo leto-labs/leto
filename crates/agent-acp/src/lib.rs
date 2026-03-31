@@ -5,6 +5,7 @@ pub mod capabilities;
 pub mod embedded;
 pub mod errors;
 pub mod event_mapper;
+mod file_bridge;
 pub mod history_replay;
 pub mod ids;
 pub mod mock;
