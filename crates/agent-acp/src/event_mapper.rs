@@ -113,6 +113,11 @@ impl EventMapper {
             | RuntimeEvent::ChildStatusChanged { .. }
             | RuntimeEvent::ChildCompleted { .. }
             | RuntimeEvent::ChildFailed { .. }
+            | RuntimeEvent::WorktreeCreated { .. }
+            | RuntimeEvent::WorktreeBound { .. }
+            | RuntimeEvent::WorktreeUnbound { .. }
+            | RuntimeEvent::WorktreeRemoved { .. }
+            | RuntimeEvent::WorktreeFailed { .. }
             | RuntimeEvent::AgentInputQueued { .. }
             | RuntimeEvent::AgentInputDelivered { .. }
             | RuntimeEvent::AgentMessageQueued { .. }

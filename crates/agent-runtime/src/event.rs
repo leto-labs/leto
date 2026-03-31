@@ -9,6 +9,7 @@ use crate::{
     PtyCaptureResult, PtyEvent, PtyId, PtySessionState, PtySubscription, RuntimeId,
     SessionBoundary, SessionInputSource, SessionPhase, SteerWhen, SubcallResult, ToolCall,
     ToolExecutionResult, TranscriptAppendResult, TranscriptRewriteResult, WaitRequest, WaitResult,
+    WorktreeId, WorktreeState,
 };
 
 /// Runtime-level events emitted by the bidirectional session engine.
@@ -141,6 +142,42 @@ pub enum RuntimeEvent {
         child_id: RuntimeId,
         /// Failure message.
         error: String,
+    },
+    /// A managed worktree was created.
+    WorktreeCreated {
+        /// Worktree snapshot after creation.
+        worktree: WorktreeState,
+    },
+    /// A runtime was bound to a managed worktree.
+    WorktreeBound {
+        /// Runtime that is now bound.
+        runtime_id: RuntimeId,
+        /// Managed worktree identifier.
+        worktree_id: WorktreeId,
+    },
+    /// A runtime was unbound from a managed worktree.
+    WorktreeUnbound {
+        /// Runtime that was unbound.
+        runtime_id: RuntimeId,
+        /// Managed worktree identifier.
+        worktree_id: WorktreeId,
+    },
+    /// A managed worktree was removed.
+    WorktreeRemoved {
+        /// Worktree snapshot retained for diagnostics.
+        worktree: WorktreeState,
+    },
+    /// A managed worktree operation failed.
+    WorktreeFailed {
+        /// Runtime attempting the operation.
+        runtime_id: RuntimeId,
+        /// Semantic operation label.
+        operation: String,
+        /// Managed worktree identifier when known.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        worktree_id: Option<WorktreeId>,
+        /// Failure message.
+        message: String,
     },
     /// Typed agent input was queued for registry delivery.
     AgentInputQueued {

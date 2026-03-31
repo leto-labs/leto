@@ -62,6 +62,14 @@ impl Default for DoomLoopConfig {
     }
 }
 
+/// Configuration controlling runtime-managed git worktrees.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct WorktreeConfig {
+    /// Optional directory under which the runtime may allocate managed worktrees.
+    pub managed_root: Option<String>,
+}
+
 /// Shared runtime configuration for a storeless in-memory session engine.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -84,6 +92,8 @@ pub struct RuntimeConfig {
     pub compaction: CompactionConfig,
     /// Doom-loop detection settings.
     pub doom_loop: DoomLoopConfig,
+    /// Managed worktree settings.
+    pub worktree: WorktreeConfig,
 }
 
 impl Default for RuntimeConfig {
@@ -98,6 +108,7 @@ impl Default for RuntimeConfig {
             atif: AtifConfig::default(),
             compaction: CompactionConfig::default(),
             doom_loop: DoomLoopConfig::default(),
+            worktree: WorktreeConfig::default(),
         }
     }
 }

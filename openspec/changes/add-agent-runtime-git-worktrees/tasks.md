@@ -1,7 +1,7 @@
-- [ ] Add worktree identifiers, state snapshots, command types, event types, and runtime config needed for managed git worktrees in `agent-runtime`
-- [ ] Implement a flat runtime-owned worktree registry and native git CLI lifecycle for create/list/get/remove/bind/unbind
-- [ ] Extend child spawn to accept an explicit existing `worktree_id` without auto-provisioning
-- [ ] Make bound worktrees supply the default local execution `cwd` when PTY or other runtime-owned local execution omits one
-- [ ] Expose provider-visible native worktree tools that mirror the typed runtime worktree actions
-- [ ] Add runtime tests covering creation, binding, PTY default `cwd`, rejection of non-git targets, and non-corrupting failure behavior
-- [ ] Validate the new OpenSpec change
+- [x] Add worktree identifiers, state snapshots, command types, event types, and runtime config needed for managed git worktrees in `agent-runtime`
+- [x] Implement a flat runtime-owned worktree registry and native git CLI lifecycle for create/list/get/remove/bind/unbind
+- [x] Extend child spawn to accept an explicit existing `worktree_id` without auto-provisioning
+- [x] Make bound worktrees supply the default local execution `cwd` when PTY or other runtime-owned local execution omits one
+- [x] Expose provider-visible native worktree tools that mirror the typed runtime worktree actions
+- [x] Add runtime tests covering creation, binding, PTY default `cwd`, rejection of non-git targets, and non-corrupting failure behavior
+- [x] Validate the new OpenSpec change

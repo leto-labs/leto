@@ -8,7 +8,7 @@ atif = { workspace = true }
 chrono = { workspace = true }
 provider = { workspace = true }
 futures = { workspace = true }
-tokio = { workspace = true, features = ["sync", "rt", "time"] }
+tokio = { workspace = true, features = ["sync", "rt", "time", "process"] }
 tokio-stream = { workspace = true }
 tokio-util = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
@@ -21,3 +21,4 @@ vt100 = { workspace = true }
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time"] }
 async-stream = { workspace = true }
+tempfile = { workspace = true }

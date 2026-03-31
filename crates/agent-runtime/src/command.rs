@@ -13,6 +13,81 @@ pub type SpawnId = Ulid;
 /// Stable identifier for one managed PTY session.
 pub type PtyId = Ulid;
 
+/// Stable identifier for one managed git worktree.
+pub type WorktreeId = Ulid;
+
+/// Lifecycle status tracked for a managed git worktree.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorktreeStatus {
+    /// The worktree is registered and available for use.
+    Ready,
+    /// The runtime is actively removing the worktree.
+    Removing,
+}
+
+/// Structured snapshot of a runtime-managed git worktree.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorktreeState {
+    /// Stable worktree identifier.
+    pub worktree_id: WorktreeId,
+    /// Runtime that originally created the worktree.
+    pub owner_runtime_id: RuntimeId,
+    /// Canonical git repository root backing the worktree.
+    pub repo_root: String,
+    /// Filesystem path to the managed worktree checkout.
+    pub worktree_path: String,
+    /// Branch checked out inside the worktree.
+    pub branch: String,
+    /// Optional start ref used when the worktree was created.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start_ref: Option<String>,
+    /// Runtime currently bound to this worktree, when any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bound_runtime_id: Option<RuntimeId>,
+    /// Current lifecycle status.
+    pub status: WorktreeStatus,
+    /// Most recent runtime-visible error for this worktree, when any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_error: Option<String>,
+}
+
+/// Request to create a new managed git worktree.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CreateWorktreeRequest {
+    /// Existing git repository root to attach the worktree to.
+    pub repo_root: String,
+    /// Branch name to create for the new worktree.
+    pub branch: String,
+    /// Optional start ref passed to `git worktree add`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start_ref: Option<String>,
+    /// Optional explicit path for the worktree checkout.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+}
+
+/// Request to remove a managed git worktree.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RemoveWorktreeRequest {
+    /// Managed worktree identifier.
+    pub worktree_id: WorktreeId,
+}
+
+/// Request to bind the current runtime to an existing managed worktree.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BindWorktreeRequest {
+    /// Managed worktree identifier to bind.
+    pub worktree_id: WorktreeId,
+}
+
+/// Request to unbind the current runtime from a managed worktree.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UnbindWorktreeRequest {
+    /// Managed worktree identifier expected to be bound to the runtime.
+    pub worktree_id: WorktreeId,
+}
+
 /// Optional metadata describing where an inbound session command originated.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionInputSource {
@@ -736,6 +811,8 @@ pub struct SpawnRequest {
     pub loop_name: Option<String>,
     /// Optional runtime-native child reporting policy identifier.
     pub reporting: Option<String>,
+    /// Optional existing worktree binding applied to the child runtime.
+    pub worktree_id: Option<WorktreeId>,
 }
 
 impl Default for SpawnRequest {
@@ -751,8 +828,41 @@ impl Default for SpawnRequest {
             config_override: None,
             loop_name: None,
             reporting: None,
+            worktree_id: None,
         }
     }
+}
+
+/// Worktree-oriented commands accepted by a runtime.
+#[derive(Debug, Clone, PartialEq)]
+pub enum WorktreeCommand {
+    /// Create a new managed worktree.
+    CreateWorktree {
+        /// Worktree creation request.
+        request: CreateWorktreeRequest,
+    },
+    /// List worktrees currently known to the runtime registry.
+    ListWorktrees,
+    /// Fetch a single worktree snapshot by id.
+    GetWorktree {
+        /// Worktree identifier.
+        worktree_id: WorktreeId,
+    },
+    /// Remove a managed worktree.
+    RemoveWorktree {
+        /// Worktree removal request.
+        request: RemoveWorktreeRequest,
+    },
+    /// Bind the current runtime to a managed worktree.
+    BindWorktree {
+        /// Worktree binding request.
+        request: BindWorktreeRequest,
+    },
+    /// Unbind the current runtime from a managed worktree.
+    UnbindWorktree {
+        /// Worktree unbinding request.
+        request: UnbindWorktreeRequest,
+    },
 }
 
 /// Directed runtime-to-runtime message envelope.
@@ -894,6 +1004,8 @@ pub enum SessionCommand {
     Approve(ApprovalDecision),
     /// Submit agent-oriented work such as spawn or messaging.
     Agent(AgentCommand),
+    /// Submit worktree-oriented work such as creating, binding, or removing worktrees.
+    Worktree(WorktreeCommand),
     /// Submit PTY-oriented work such as opening, executing, or subscribing.
     Pty(PtyCommand),
     /// Shut down the in-memory runtime engine and stop processing commands.
@@ -926,6 +1038,7 @@ mod tests {
         assert_eq!(request.config_override, None);
         assert_eq!(request.loop_name, None);
         assert_eq!(request.reporting, None);
+        assert_eq!(request.worktree_id, None);
     }
 
     #[test]
