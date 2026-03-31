@@ -4,7 +4,6 @@
 ACP stdio adapter over the current agent stack. Defines the runtime-backed
 backend, ACP-facing session configuration, and the supported local launch
 surfaces that exist today.
-
 ## Requirements
 ### Requirement: ACP Backend Depends On AgentCore
 The real ACP backend SHALL depend on the shared `AgentCore` boundary rather
@@ -76,11 +75,21 @@ human-readable tracing and backend logs.
 The real ACP backend SHALL also treat user-driven cancellation as a normal ACP
 outcome rather than as an internal protocol failure.
 
+Repo-owned ACP validation clients SHALL be able to capture prompt-failure
+debug information without polluting ACP protocol stdout.
+
 #### Scenario: Cancelled turn is not surfaced as ACP internal error
 
 - **WHEN** the real ACP backend ends a turn because the session was cancelled
 - **THEN** the prompt request SHALL complete with ACP's cancelled stop reason
 - **AND** it SHALL NOT be surfaced as ACP `internal_error`
+
+#### Scenario: Prompt failure diagnostics do not corrupt ACP stdout
+
+- **WHEN** a repo-owned ACP client captures backend logs and a prompt fails
+- **THEN** human-readable diagnostics SHALL remain in stderr or client-owned
+  debug artifacts
+- **AND** ACP protocol stdout SHALL remain valid for the client transport
 
 ### Requirement: ACP Compatibility Launch Path Remains Available
 
@@ -89,6 +98,11 @@ runtime-backed ACP stdio server.
 
 The `agent-acp` crate SHALL continue to expose a direct stdio entrypoint for
 repo-owned binaries and tests.
+
+The repo SHALL also expose:
+
+- a direct `agent-acp` binary identity for repo-owned ACP integrations
+- an explicit `agent-acp-mock` launch path for ACP smoke validation
 
 #### Scenario: Existing agent ACP command starts the backend
 
@@ -101,3 +115,40 @@ repo-owned binaries and tests.
 - **WHEN** a repo-owned binary or test needs to start the real ACP backend
 - **THEN** it SHALL be able to call the exported `agent_acp::run_stdio(...)`
   entrypoint
+
+#### Scenario: Direct agent-acp binary is available
+
+- **WHEN** a repo-owned integration such as Harbor needs the real ACP backend
+- **THEN** it SHALL be able to launch a direct `agent-acp` binary identity
+
+#### Scenario: ACP smoke validation keeps an explicit mock lane
+
+- **WHEN** the repo runs the `acpx` compatibility harness
+- **THEN** it SHALL be able to launch an explicit `agent-acp-mock` backend
+  without requiring external model credentials
+
+### Requirement: ACP Tool Lifecycles Use One Pending Call Followed By Updates
+
+The real `agent-acp` backend SHALL expose one coherent ACP tool lifecycle for
+each runtime tool invocation.
+
+The backend SHALL:
+
+- emit one pending `ToolCall` when the runtime first surfaces the call
+- emit `ToolCallUpdate` messages for in-progress and completed transitions
+- avoid replaying duplicate pending tool calls from committed assistant
+  transcript messages after runtime tool events already emitted them
+
+#### Scenario: Runtime tool call advances through ACP updates
+
+- **WHEN** the runtime surfaces a pending, started, and completed tool call
+- **THEN** ACP SHALL emit one pending `ToolCall`
+- **AND** subsequent lifecycle changes SHALL be emitted as `ToolCallUpdate`
+
+#### Scenario: Transcript replay does not duplicate a runtime-owned tool call
+
+- **WHEN** the runtime already emitted ACP updates for a tool call
+- **AND** the committed assistant transcript later includes the same tool call
+- **THEN** the ACP adapter SHALL not emit a second pending `ToolCall` for that
+  same runtime-owned invocation
+

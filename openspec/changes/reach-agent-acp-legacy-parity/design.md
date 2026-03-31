@@ -2,35 +2,29 @@
 
 ## Decision: Scope ACP Parity To Code-Backed Legacy Behavior
 
-This change only tracks ACP behavior that still exists in legacy code and is
-still consumed by the repo:
+This change now tracks the one ACP behavior that still exists in legacy code
+and is not yet present on the live stack:
 
-- direct real and mock ACP launch identities
 - client-owned filesystem bridging
-- session-model compatibility behavior
-- repo-owned launchers and Harbor integration
 
 OpenCode compatibility and MCP are explicitly out of scope because they were
 never part of the legacy `brain-acp` baseline.
 
 ## Decision: Preserve Current Repo-Used ACP Behavior By Default
 
-The default migration rule for this change is to preserve existing repo-used
-ACP behavior unless there is an explicit retirement decision captured in the
-spec.
+The default migration rule for the remaining work is to preserve ACP
+client-owned filesystem behavior rather than silently falling back to
+backend-host-only writes when a client exposes ACP filesystem capabilities.
 
-That means:
-
-- do not silently drop the mock validation lane
-- do not silently drop Harbor's current session-model workflow
-- do not silently replace ACP client-owned file operations with backend-host
-  filesystem writes
+The current Harbor path is already operational because the backend runs inside
+the task container and can write directly into the task workspace. That does
+not remove the need for explicit ACP client-owned filesystem mediation when a
+client wants to own those file operations.
 
 ## Decision: Keep The Migration Boundary On Agent ACP Surfaces
 
 The target design belongs on current surfaces:
 
-- `agent-acp` owns the backend and launch identities
-- `repo-tooling` owns Harbor and repo launcher migration
+- `agent-acp` owns the backend-facing client bridge behavior
 
 The change should not add new future work to legacy `brain-*` capabilities.

@@ -59,6 +59,15 @@ This SHALL include:
 - **THEN** the store SHALL preserve the existing API key or OAuth tokens
 - **AND** only mutate the health metadata
 
+#### Scenario: Older credential files remain readable when optional metadata is missing
+
+- **WHEN** a file-backed store reopens a credential record created before
+  newer health or label metadata existed
+- **THEN** missing optional metadata SHALL deserialize to default in-memory
+  values
+- **AND** the store SHALL not fail initialization because of those missing
+  fields
+
 ### Requirement: Agent Store Persists Project Bootstrap Defaults
 
 The `agent-store` crate SHALL persist the project-level defaults required for

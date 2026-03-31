@@ -3,8 +3,9 @@
 ## Description
 Platform-agnostic AI agent engine in Rust. The current application-facing stack
 uses `agent-core` over `agent-runtime`, `agent-store`, `agent-tools`,
-`agent-loops`, and the standalone `provider-*` crates. Legacy `brain-*` crates
-remain in the repository for compatibility and migration work.
+`agent-loops`, and the standalone `provider-*` crates. Legacy `brain-*` source
+is archived locally under `archive/brain/` and is not part of the committed
+workspace.
 
 ## Architecture
 - Active workspace crates:
@@ -13,7 +14,6 @@ remain in the repository for compatibility and migration work.
   - `chat-teams`
   - `chat-telegram`
   - `atif`
-  - `brain-types`
   - `provider`
   - `provider-openai`
   - `provider-anthropic`
@@ -28,11 +28,12 @@ remain in the repository for compatibility and migration work.
   - `agent-server`
   - `agent-acp`
   - `agent-cli`
-  - legacy `brain-*` compatibility crates (`brain-providers`, `brain-stores`, `brain-loops`, `brain-tools`, `brain-transports`, `brain-server`, `brain-core`, `brain-acp`, `brain-cli`, `brain-config`)
 - Active workspace tool:
   - `tools/provider-preset-gen`
-- Examples still present in the repo but outside the active workspace:
-  - `examples/server`
+- Local-only legacy archive:
+  - `archive/brain/crates/brain-*`
+  - archived legacy-only examples, scripts, and Harbor helpers under
+    `archive/brain/`
 - The modern stack splits responsibilities as:
   - `provider` and `provider-*` for the shared provider SDK and concrete integrations
   - `agent-runtime` for the live session engine
@@ -51,8 +52,8 @@ remain in the repository for compatibility and migration work.
 - `AgentCore` / `AgentCoreNative` in `agent-core` are the preferred
   application boundary for CLI, ACP, and hosted surfaces
 - `SessionEngine` in `agent-runtime` is the reusable live-session substrate
-- `Brain` in `brain-core` remains legacy engine infrastructure rather than the
-  preferred product boundary
+- `Brain` in archived `brain-core` remains legacy engine infrastructure rather
+  than the preferred product boundary
 - Minimal abstractions: only add a trait when you need swappability
 - `thiserror` for library errors, `anyhow` for application/example code only
 - `tracing` for logging, never `println!` in library code
