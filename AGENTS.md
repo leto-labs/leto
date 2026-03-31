@@ -15,7 +15,52 @@ skills add <owner/repo> --agent claude-code cursor -y
 
 ---
 
-## Project: brain
+## Git Worktrees
+
+Agents should assume they may be running from `main` or from any linked worktree.
+
+- Determine the active worktree root with `git rev-parse --show-toplevel`
+- Determine the active branch with `git branch --show-current`
+- Inspect all attached worktrees with `git worktree list`
+- Treat the active worktree directory as the project root for commands, edits, tests, and relative paths
+
+Worktree layout convention:
+
+- The primary checkout is typically named `main`
+- Linked worktrees should be sibling directories next to `main`, for example:
+  - `../feature-xyz`
+  - `../fix-shell-timeout`
+- Prefer sibling worktrees over nested clones or ad hoc copies
+
+Create new worktrees with sibling paths when branch isolation is useful:
+
+```bash
+git worktree add ../feature-xyz -b feature/xyz
+git worktree add ../fix-shell-timeout -b fix/shell-timeout
+```
+
+If you are currently inside a linked worktree and need to create another one, use the repo root or any attached worktree:
+
+```bash
+git worktree list
+git worktree add ../feature-xyz -b feature/xyz
+```
+
+Agent behavior in worktrees:
+
+- Do not assume `main` is the active checkout; always verify the current worktree and branch first when context matters
+- Keep branch-specific changes inside the current worktree only; never edit sibling worktrees from the active one
+- Prefer worktree-local transient state such as `.env`, build artifacts, and agent session state unless a file is intentionally shared
+- Suggest creating a fresh worktree when the user wants parallel agent work, risky experiments, or isolated feature development
+- Before deleting a worktree, run `git status --short` inside it and `git worktree list` from any repo checkout
+
+---
+
+## Project: leto
+
+Product name: `leto`
+
+Core engine/workspace focus:
 
 Rust workspace (edition 2024). Platform-agnostic AI agent engine. The current
 application-facing stack centers on `agent-core`, `agent-runtime`,
