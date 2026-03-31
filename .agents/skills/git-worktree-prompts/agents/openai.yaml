@@ -1,0 +1,4 @@
+interface:
+  display_name: "Git Worktree Prompts"
+  short_description: "Create worktrees with prompt.txt handoffs"
+  default_prompt: "Use $git-worktree-prompts to create sibling worktrees for parallel tasks and seed each one with a root prompt.txt handoff."
