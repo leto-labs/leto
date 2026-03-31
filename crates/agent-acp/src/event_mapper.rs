@@ -9,6 +9,8 @@ use agent_runtime::{
 };
 use provider::ContentBlock;
 
+use crate::file_bridge::sanitize_tool_input;
+
 pub enum MappedEvent {
     Updates(Vec<acp::SessionUpdate>),
     Cancelled,
@@ -218,7 +220,7 @@ fn tool_presentation(call: &ToolCall) -> ToolPresentation {
     ToolPresentation {
         title: default_tool_title(&call.name).to_owned(),
         kind: tool_kind(&call.name),
-        raw_input: call.input.clone(),
+        raw_input: sanitize_tool_input(call.input.clone()),
     }
 }
 
