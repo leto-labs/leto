@@ -523,7 +523,7 @@ than the earlier benchmark survey alone.
 
 ## Harbor-Driven Loop Findings
 
-The first full `brain-acp` robust run on `terminal-bench@2.0` ended at:
+The first full `agent-acp` robust run on `terminal-bench@2.0` ended at:
 
 - `24/89` passes
 - `48/89` verifier failures
@@ -537,12 +537,12 @@ are now loop and runtime behavior rather than startup portability.
 ### What the full run changed
 
 Before the full Harbor run, it was still plausible that the main blocker for
-`brain-acp` was the container environment itself.
+`agent-acp` was the container environment itself.
 
 After the full Harbor run, that is no longer the main story:
 
 - the backend now starts across the suite
-- Harbor can run `brain-acp` end to end on the full dataset
+- Harbor can run `agent-acp` end to end on the full dataset
 - the remaining problems are now mostly about turn control, failure surfacing,
   and completion quality
 

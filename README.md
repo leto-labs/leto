@@ -41,18 +41,20 @@ The agent loop is a **trait**, not a hardcoded function. Different strategies ar
 
 ```
 crates/
-  brain-types/        Data structs + 4 traits (Provider, Tool, Store, AgentLoop)
-  brain-providers/    MockProvider, OpenAiProvider (feature-gated)
   provider/           Shared v2 provider SDK
   provider-openai/    Standalone OpenAI-compatible v2 provider crate
   provider-anthropic/ Standalone Anthropic v2 provider crate
   provider-mistralrs/ Standalone mistral.rs local v2 provider crate
   provider-llamacpp/  Standalone llama.cpp local v2 provider crate
-  brain-stores/       InMemoryStore (FileStore, SqliteStore later)
-  brain-loops/        SimpleLoop, EchoTool (PlanLoop, ExploreLoop later)
-  brain-core/         Facade — re-exports all crates above
-examples/
-  cli-echo/           Dumb CLI — just stdin/stdout wiring via brain-core
+  agent-runtime/      Live per-session execution engine
+  agent-loops/        Current loop strategies
+  agent-tools/        Typed tool implementations and native tool registry
+  agent-store/        Durable project/session/message/credential storage
+  agent-core/         Shared product-facing orchestration boundary
+  agent-core-remote/  Remote AgentCore client
+  agent-server/       Hosted server surface
+  agent-acp/          ACP adapter surface
+  agent-cli/          Local CLI surface
 ```
 
 ## Tech Stack
@@ -69,13 +71,14 @@ examples/
 
 ## Provider Roadmap
 
-Each step is a clean swap — zero changes to brain-types:
+The current provider path is centered on `provider` plus standalone
+`provider-*` crates:
 
 1. **MockProvider** *(done)* — echo, no network, no API keys
 2. **OpenAiProvider** *(done)* — reqwest + SSE streaming, feature-gated behind `openai`
 3. **Ollama** — use OpenAiProvider with `with_base_url("http://localhost:11434/v1")`
 4. **Local** — Candle / llama.cpp bindings, fully offline
-5. **WASM** — brain-wasm crate wrapping brain-core for browser
+5. **WASM** — a future browser-facing adapter over the modern stack
 
 ## Build Commands
 
@@ -85,7 +88,6 @@ OPENAI_API_KEY=sk-... cargo run -p cli-echo        # real OpenAI inference
 OPENAI_MODEL=gpt-4o cargo run -p cli-echo          # custom model
 cargo test --workspace                              # run all tests
 cargo build --release                               # release build
-cargo build --no-default-features -p brain-providers # no HTTP deps
 cargo check -p provider-mistralrs --features mistralrs
 cargo check -p provider-llamacpp --features llamacpp
 ```

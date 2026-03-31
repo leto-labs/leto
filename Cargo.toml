@@ -6,7 +6,6 @@ members = [
     "crates/chat-teams",
     "crates/chat-telegram",
     "crates/atif",
-    "crates/brain-types",
     "crates/provider",
     "crates/agent-runtime",
     "crates/agent-loops",
@@ -21,16 +20,6 @@ members = [
     "crates/provider-llamacpp",
     "crates/provider-mistralrs",
     "crates/provider-openai",
-    "crates/brain-providers",
-    "crates/brain-stores",
-    "crates/brain-loops",
-    "crates/brain-tools",
-    "crates/brain-transports",
-    "crates/brain-server",
-    "crates/brain-core",
-    "crates/brain-acp",
-    "crates/brain-cli",
-    "crates/brain-config",
     "tools/provider-preset-gen",
 ]
 
@@ -108,7 +97,6 @@ chat = { path = "crates/chat" }
 chat-slack = { path = "crates/chat-slack" }
 chat-teams = { path = "crates/chat-teams" }
 chat-telegram = { path = "crates/chat-telegram" }
-brain-types = { path = "crates/brain-types" }
 provider = { path = "crates/provider" }
 agent-runtime = { path = "crates/agent-runtime" }
 agent-loops = { path = "crates/agent-loops" }
@@ -123,15 +111,6 @@ provider-anthropic = { path = "crates/provider-anthropic" }
 provider-llamacpp = { path = "crates/provider-llamacpp" }
 provider-mistralrs = { path = "crates/provider-mistralrs" }
 provider-openai = { path = "crates/provider-openai" }
-brain-providers = { path = "crates/brain-providers" }
-brain-stores = { path = "crates/brain-stores" }
-brain-loops = { path = "crates/brain-loops" }
-brain-transports = { path = "crates/brain-transports" }
-brain-tools = { path = "crates/brain-tools" }
-brain-server = { path = "crates/brain-server" }
-brain-core = { path = "crates/brain-core" }
-brain-acp = { path = "crates/brain-acp" }
-brain-config = { path = "crates/brain-config" }
 
 [profile.release]
 opt-level = 3

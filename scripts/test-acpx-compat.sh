@@ -8,7 +8,7 @@ set -euo pipefail
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd -- "${SCRIPT_DIR}/.." && pwd)
-LAUNCHER="${REPO_ROOT}/scripts/brain-acp-launcher.sh"
+LAUNCHER="${REPO_ROOT}/scripts/agent-acp-launcher.sh"
 
 need_cmd() {
   command -v "$1" >/dev/null 2>&1 || {
@@ -56,64 +56,64 @@ WORKDIR=$(mktemp -d)
 trap 'rm -rf "${WORKDIR}"' EXIT
 git -C "${WORKDIR}" init -q
 
-CODex_OUT=$(run_capture \
+CODEX_OUT=$(run_capture \
   "acpx codex exec hello world" \
   acpx --cwd "${WORKDIR}" codex exec "Reply exactly with: hello world")
-assert_contains "${CODex_OUT}" "hello world"
+assert_contains "${CODEX_OUT}" "hello world"
 
 HELLO_OUT=$(run_capture \
-  "brain acp mock one-shot hello world" \
+  "agent acp mock one-shot hello world" \
   acpx --cwd "${WORKDIR}" --agent "${LAUNCHER}" exec "Reply exactly with: hello world")
-assert_contains "${HELLO_OUT}" "Mock brain-acp response: Reply exactly with: hello world"
+assert_contains "${HELLO_OUT}" "Mock agent-acp response: Reply exactly with: hello world"
 
 PERMISSION_OUT=$(run_capture \
-  "brain acp mock permission request" \
+  "agent acp mock permission request" \
   acpx --cwd "${WORKDIR}" --agent "${LAUNCHER}" --approve-all exec "mock:request-permission")
 assert_contains "${PERMISSION_OUT}" "Mock permission probe completed: allow-once."
 
 READ_FILE="${WORKDIR}/mock-read.txt"
 printf 'hello with unicode: café → résumé\n' > "${READ_FILE}"
 READ_OUT=$(run_capture \
-  "brain acp mock file read" \
+  "agent acp mock file read" \
   acpx --cwd "${WORKDIR}" --agent "${LAUNCHER}" exec "mock:read-file ${READ_FILE}")
 assert_contains "${READ_OUT}" "Mock file read probe completed for ${READ_FILE}."
 
 WRITE_FILE="${WORKDIR}/mock-write.txt"
 WRITE_CONTENT="hello-write from acpx harness"
 WRITE_OUT=$(run_capture \
-  "brain acp mock file write" \
+  "agent acp mock file write" \
   acpx --cwd "${WORKDIR}" --agent "${LAUNCHER}" --approve-all exec "mock:write-file ${WRITE_FILE} ${WRITE_CONTENT}")
 assert_contains "${WRITE_OUT}" "Mock file write probe completed for ${WRITE_FILE}."
 
 TERMINAL_OUT=$(run_capture \
-  "brain acp mock terminal flow" \
+  "agent acp mock terminal flow" \
   acpx --cwd "${WORKDIR}" --agent "${LAUNCHER}" --approve-all exec "mock:terminal echo hi")
 assert_contains "${TERMINAL_OUT}" "Mock terminal probe completed for \`echo hi\`"
 assert_contains "${TERMINAL_OUT}" "exit=0"
 
 TERMINAL_KILL_OUT=$(run_capture \
-  "brain acp mock terminal kill flow" \
+  "agent acp mock terminal kill flow" \
   acpx --cwd "${WORKDIR}" --agent "${LAUNCHER}" --approve-all exec "mock:terminal-kill sleep 5")
 assert_contains "${TERMINAL_KILL_OUT}" "Mock terminal probe completed for \`sleep 5\`"
 assert_contains "${TERMINAL_KILL_OUT}" "exit="
 
 SESSION_NAME="compat"
 run_capture \
-  "brain acp mock sessions new" \
+  "agent acp mock sessions new" \
   acpx --cwd "${WORKDIR}" --agent "${LAUNCHER}" sessions new --name "${SESSION_NAME}" >/dev/null
 
 STATUS_OUT=$(run_capture \
-  "brain acp mock status" \
+  "agent acp mock status" \
   acpx --cwd "${WORKDIR}" --agent "${LAUNCHER}" status -s "${SESSION_NAME}")
 assert_contains "${STATUS_OUT}" "status:"
 
 SHOW_OUT=$(run_capture \
-  "brain acp mock sessions show" \
+  "agent acp mock sessions show" \
   acpx --format json --cwd "${WORKDIR}" --agent "${LAUNCHER}" sessions show "${SESSION_NAME}")
 assert_contains "${SHOW_OUT}" "\"acpSessionId\":\"mock-session-1\""
 
 LIST_OUT=$(run_capture \
-  "brain acp mock sessions list" \
+  "agent acp mock sessions list" \
   acpx --format json --cwd "${WORKDIR}" --agent "${LAUNCHER}" sessions list)
 assert_contains "${LIST_OUT}" "\"name\":\"${SESSION_NAME}\""
 

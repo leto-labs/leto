@@ -59,11 +59,15 @@ impl EventMapper {
                 let presentation = tool_presentation(&call);
                 self.tool_calls
                     .insert(call.id.clone(), presentation.clone());
-                MappedEvent::Updates(vec![acp::SessionUpdate::ToolCall(
-                    acp::ToolCall::new(call.id, presentation.title)
-                        .kind(presentation.kind)
-                        .status(acp::ToolCallStatus::InProgress)
-                        .raw_input(presentation.raw_input),
+                MappedEvent::Updates(vec![acp::SessionUpdate::ToolCallUpdate(
+                    acp::ToolCallUpdate::new(
+                        call.id,
+                        acp::ToolCallUpdateFields::new()
+                            .title(presentation.title)
+                            .kind(presentation.kind)
+                            .status(acp::ToolCallStatus::InProgress)
+                            .raw_input(presentation.raw_input),
+                    ),
                 )])
             }
             RuntimeEvent::ToolCallFinished { call, result } => {
@@ -79,6 +83,7 @@ impl EventMapper {
                             .title(presentation.title)
                             .kind(presentation.kind)
                             .status(acp::ToolCallStatus::Completed)
+                            .raw_input(presentation.raw_input)
                             .content(vec![acp::ToolCallContent::from(acp::ContentBlock::Text(
                                 acp::TextContent::new(render_tool_result(&result)),
                             ))])
@@ -181,21 +186,7 @@ impl EventMapper {
                                 acp::ContentBlock::Text(acp::TextContent::new(text.clone())),
                             )),
                         ),
-                        ContentBlock::ToolCall { id, name, input } => {
-                            let call = ToolCall {
-                                id: id.clone(),
-                                name: name.clone(),
-                                input: input.clone(),
-                            };
-                            let presentation = tool_presentation(&call);
-                            self.tool_calls.insert(id.clone(), presentation.clone());
-                            Some(acp::SessionUpdate::ToolCall(
-                                acp::ToolCall::new(id.clone(), presentation.title)
-                                    .kind(presentation.kind)
-                                    .status(acp::ToolCallStatus::Pending)
-                                    .raw_input(presentation.raw_input),
-                            ))
-                        }
+                        ContentBlock::ToolCall { .. } => None,
                         ContentBlock::ImageUrl { .. } | ContentBlock::ToolResult { .. } => None,
                         ContentBlock::Text { .. } => None,
                         ContentBlock::Refusal { .. } => None,

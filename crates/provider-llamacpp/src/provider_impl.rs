@@ -665,9 +665,15 @@ fn map_oaicompat_messages(request: &Request) -> Result<Vec<serde_json::Value>, E
 
         let mut tool_calls = Vec::new();
         for block in &message.content {
-            if let provider::ContentBlock::ToolCall { id, name, input } = block {
+            if let provider::ContentBlock::ToolCall {
+                id,
+                call_id,
+                name,
+                input,
+            } = block
+            {
                 tool_calls.push(serde_json::json!({
-                    "id": id,
+                    "id": call_id.clone().unwrap_or_else(|| id.clone()),
                     "type": "function",
                     "function": {
                         "name": name,

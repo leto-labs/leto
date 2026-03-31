@@ -1,8 +1,7 @@
 # Architecture Overview
 
-This section documents the current `brain` workspace using the newer
-`agent-*` / `provider-*` naming. Legacy `brain-*` crates still exist in the
-repo, but they are no longer the primary architecture story.
+This section documents the current `brain` workspace using the live
+`agent-*` / `provider-*` naming.
 
 ## Stack At A Glance
 
@@ -15,7 +14,6 @@ repo, but they are no longer the primary architecture story.
 | Runtime capabilities | [`tools/README.md`](tools/README.md), [`provider/README.md`](provider/README.md), [`stores/README.md`](stores/README.md), [`transports.md`](transports.md), [`config.md`](config.md) | Tool execution, provider integrations, persistence, thin transports, and bootstrap config | Mixed maturity |
 | Client surfaces | [`cli.md`](cli.md), [`acp.md`](acp.md), [`server/README.md`](server/README.md) | Local CLI, ACP adapter, and hosted server surfaces | Active product surfaces |
 | Benchmark/export surfaces | [`atif.md`](atif.md) | ATIF transcript/export model for Harbor-facing runs | Important integration layer |
-| Deferred legacy surface | [`server/README.md`](server/README.md) | `brain-server` and older compatibility layers kept for migration context | Legacy / deferred |
 
 ## System Map
 
@@ -25,8 +23,6 @@ flowchart TD
     ACP[agent-acp]
     Harbor[Harbor direct + ACP runs]
     Server[agent-server]
-    Legacy[brain-server<br/>legacy]
-
     Core[agent-core::AgentCoreNative]
     Session[agent-runtime::SessionEngine]
 
@@ -42,8 +38,6 @@ flowchart TD
     Server --> Core
     Harbor --> CLI
     Harbor --> ACP
-    Legacy -. older path .-> Core
-
     Core --> Session
     Core --> Provider
     Core --> Loops

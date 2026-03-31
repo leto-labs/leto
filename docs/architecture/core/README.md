@@ -2,8 +2,9 @@
 
 `agent-core` is the current orchestration layer. It contains the shared
 product-facing `AgentCore` boundary plus the concrete local implementation
-`AgentCoreNative`. Legacy `brain-core` still exists in the repo, but it is not
-the preferred application boundary.
+`AgentCoreNative`. Legacy `brain-core` is archived locally for reference, but
+it is not part of the committed workspace or the preferred application
+boundary.
 
 ## Table Of Contents
 

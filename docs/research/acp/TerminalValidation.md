@@ -2,14 +2,14 @@
 
 ## Summary
 
-The first real-world validation target for the mock `brain acp` proof of
+The first real-world validation target for the mock `agent acp` proof of
 concept should be a terminal-native ACP client rather than a full editor.
 
 For this repo, that means a headless ACP CLI, not a full-screen TUI.
 
 This keeps the validation loop fast:
 
-- launch `brain acp` locally
+- launch `agent acp` locally
 - drive the ACP lifecycle from a terminal client
 - inspect shell output and ACP logs directly
 - keep richer TUI checks separate from the baseline compatibility path
@@ -35,31 +35,31 @@ Use the explicit mock ACP binary through Cargo so each run picks up local
 source changes automatically:
 
 ```bash
-acpx --agent "cargo run -q -p brain-acp --bin brain-acp-mock" exec "Reply exactly with: hello world"
+acpx --agent "cargo run -q -p agent-acp --bin agent-acp-mock" exec "Reply exactly with: hello world"
 ```
 
 This is the canonical local launcher for the current repo state because:
 
-- `brain-acp-mock` is the explicit current mock ACP binary
-- it launches directly from the dedicated `brain-acp` crate
+- `agent-acp-mock` is the explicit current mock ACP binary
+- it launches directly from the dedicated `agent-acp` crate
 - `cargo run` rebuilds when relevant source changes exist
 
-The `brain-acp` binary name also exists now, but it is still temporarily
-mock-backed and reserved for the future real ACP runtime. The explicit mock
-binary remains the correct compatibility target for now.
+The `agent-acp` binary name now points at the real runtime-backed ACP surface.
+The explicit mock binary remains the right compatibility target for this smoke
+workflow because it does not require external model credentials.
 
 The built-binary form remains possible for faster repeated runs, but it is not
 the default local validation path:
 
 ```bash
-cargo run -q -p brain-acp --bin brain-acp
+cargo run -q -p agent-acp --bin agent-acp
 ```
 
 For an isolated temp working directory or an automated harness, use the repo's
 stable launcher script instead of raw `cargo run`:
 
 ```bash
-./scripts/brain-acp-launcher.sh
+./scripts/agent-acp-launcher.sh
 ```
 
 This avoids `cargo` resolving the workspace from the temp cwd used by `acpx`.
@@ -80,15 +80,15 @@ command -v acpx
 acpx --help
 ```
 
-This change does not require `brain` to package or vendor `acpx`; it only
+This repo does not package or vendor `acpx`; it only
 defines `acpx` as the baseline manual validation target.
 
 ## Required Validation Flow
 
 The terminal validation pass should verify all of the following against local
-`brain acp`:
+`agent acp`:
 
-1. Launch the client against `brain acp` over stdio with the Cargo-based
+1. Launch the client against `agent acp` over stdio with the Cargo-based
    launcher.
 2. Initialize ACP successfully.
 3. Run a one-shot hello-world prompt and observe streamed output.
@@ -121,19 +121,19 @@ the default `cargo test` path.
 At the moment, the harness does not gate on `acpx` prompt-reconnect behavior
 such as `session/load` reuse, `set-mode`, config mutation, or cancel-on-reload.
 Those remain useful compatibility probes, but they are not yet stable enough in
-the current `acpx` + mock `brain-acp` combination to be treated as passing
+the current `acpx` + mock `agent-acp` combination to be treated as passing
 baseline coverage.
 
 ## Expected Success Criteria
 
 The validation is successful when:
 
-- `brain acp` starts cleanly and stays attached to the client over stdio
+- `agent acp` starts cleanly and stays attached to the client over stdio
 - prompt turns stream visible mocked agent output
 - client-owned ACP requests invoked by the mock `mock:` commands round-trip
   successfully
 - any client limitations are recorded as client-specific observations rather
-  than treated as failures of the `brain-acp` mock surface
+  than treated as failures of the `agent-acp` mock surface
 
 ## Recorded Local Validation
 
@@ -141,27 +141,27 @@ The following commands were run successfully in this workspace:
 
 ```bash
 acpx codex exec "Reply exactly with: hello world"
-acpx --agent "cargo run -q -p brain-acp --bin brain-acp-mock" exec "Reply exactly with: hello world"
-acpx --approve-all --agent "cargo run -q -p brain-acp --bin brain-acp-mock" exec "mock:request-permission"
+acpx --agent "cargo run -q -p agent-acp --bin agent-acp-mock" exec "Reply exactly with: hello world"
+acpx --approve-all --agent "cargo run -q -p agent-acp --bin agent-acp-mock" exec "mock:request-permission"
 ```
 
 Observed outcomes:
 
 - Codex path returned `hello world`
-- `brain acp` path returned `Mock brain-acp response: Reply exactly with: hello world`
+- `agent acp` path returned `Mock agent-acp response: Reply exactly with: hello world`
 - permission probe surfaced `session/request_permission` and streamed back
   `allow-once`
 
 ## Richer TUI Checks
 
 After the terminal validation path is documented and runnable, richer manual
-multi-turn validation may be performed in Nori against the same local `brain
+multi-turn validation may be performed in Nori against the same local `agent
 acp` entry point. This is useful for UX confidence, but it is intentionally
 separate from the baseline `acpx` compatibility gate.
 
 One more boundary is worth keeping explicit: if the next product requirement is
 ACP-native session settings such as thought level or fast-mode controls inside
 the main TUI, that should not automatically become a reason to build a
-client-specific bridge in `brain-acp`. `acpx` remains the control-surface
+client-specific bridge in `agent-acp`. `acpx` remains the control-surface
 baseline, while Nori remains the strongest TUI candidate. If Nori lacks a
 generic ACP mode/config-option UX, extending the client is the cleaner fix.

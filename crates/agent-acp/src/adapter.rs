@@ -326,7 +326,10 @@ impl<C: AgentCore> acp::Agent for AgentCoreAcpBackend<C> {
                 MappedEvent::Cancelled => {
                     return Ok(acp::PromptResponse::new(acp::StopReason::Cancelled));
                 }
-                MappedEvent::Failed(message) => return Err(internal_error(message)),
+                MappedEvent::Failed(message) => {
+                    tracing::error!("agent-acp prompt failed: {message}");
+                    return Err(internal_error(message));
+                }
                 MappedEvent::TurnComplete(stop_reason) => {
                     return Ok(acp::PromptResponse::new(stop_reason));
                 }

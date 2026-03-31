@@ -795,10 +795,15 @@ fn map_responses_message(message: &Message) -> Result<Vec<ResponseInputItem>, Pr
         let mut items = Vec::new();
         for block in &message.content {
             match block {
-                provider::ContentBlock::ToolCall { id, name, input } => {
+                provider::ContentBlock::ToolCall {
+                    id,
+                    call_id,
+                    name,
+                    input,
+                } => {
                     items.push(ResponseInputItem::FunctionCall {
                         id: id.clone(),
-                        call_id: id.clone(),
+                        call_id: call_id.clone().unwrap_or_else(|| id.clone()),
                         name: name.clone(),
                         arguments: serde_json::to_string(input)?,
                     });
@@ -886,7 +891,9 @@ fn map_chat_completions_message(message: &Message) -> Result<ChatCompletionMessa
                     image_url: ChatCompletionImageUrlPart { url: url.clone() },
                 });
             }
-            provider::ContentBlock::ToolCall { id, name, input } => {
+            provider::ContentBlock::ToolCall {
+                id, name, input, ..
+            } => {
                 tool_calls.push(ChatCompletionToolCall {
                     id: id.clone(),
                     call_type: "function".into(),

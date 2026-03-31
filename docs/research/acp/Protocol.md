@@ -154,7 +154,7 @@ For the current repo decision-making path:
 - some clients, such as Codex ACP, use that surface directly
 - the inspected Nori ACP path appears narrower and more model-centric
 - if richer ACP-native session settings matter in the main TUI, extending the
-  client is cleaner than forcing `brain-acp` to encode client-specific bridge
+  client is cleaner than forcing `agent-acp` to encode client-specific bridge
   behavior
 
 See also:

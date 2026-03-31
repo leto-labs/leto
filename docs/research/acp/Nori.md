@@ -1,14 +1,14 @@
 # Nori
 
 Source-first notes on `nori-cli` as a non-editor ACP client relevant to
-`brain acp`.
+`agent acp`.
 
 This repo was inspected from the local repocache clone on 2026-03-18.
 
 ## Short Answer
 
 `nori-cli` is the strongest true TUI candidate we have found so far for a final
-multi-turn ACP UX pass against `brain acp`.
+multi-turn ACP UX pass against `agent acp`.
 
 The main reason is no longer just "it looks like a good TUI". The important
 source-level change is that Nori now appears to have a real custom ACP agent
@@ -67,42 +67,42 @@ and then validates startup and message exchange in the TUI:
 
 - [`repocache/tilework-tech/nori-cli/codex-rs/tui-pty-e2e/tests/live_custom_agent.rs`](../../../repocache/tilework-tech/nori-cli/codex-rs/tui-pty-e2e/tests/live_custom_agent.rs)
 
-For `brain`, that means a plausible path exists to point Nori at direct
-`brain-acp` crate binaries rather than routing ACP through `brain-cli`.
+For this repo, that means a plausible path exists to point Nori at direct
+`agent-acp` crate binaries rather than routing ACP through `agent-cli`.
 
 The old single-agent shape was:
 
 ```toml
 [agents.distribution.local]
 command = "cargo"
-args = ["run", "-q", "-p", "brain-acp", "--bin", "brain-acp-mock"]
+args = ["run", "-q", "-p", "agent-acp", "--bin", "agent-acp-mock"]
 ```
 
 The current local setup on this machine now uses two ACP entries in
 `~/.nori/cli/config.toml` so both binary identities are visible in the picker:
 
 ```toml
-agent = "brain-acp-mock"
+agent = "agent-acp-mock"
 
 [[agents]]
-name = "Brain ACP"
-slug = "brain-acp"
+name = "Agent ACP"
+slug = "agent-acp"
 
 [agents.distribution.local]
 command = "cargo"
-args = ["run", "-q", "-p", "brain-acp", "--bin", "brain-acp"]
+args = ["run", "-q", "-p", "agent-acp", "--bin", "agent-acp"]
 
 [[agents]]
-name = "Brain ACP Mock"
-slug = "brain-acp-mock"
+name = "Agent ACP Mock"
+slug = "agent-acp-mock"
 
 [agents.distribution.local]
 command = "cargo"
-args = ["run", "-q", "-p", "brain-acp", "--bin", "brain-acp-mock"]
+args = ["run", "-q", "-p", "agent-acp", "--bin", "agent-acp-mock"]
 ```
 
 Today both binaries are still backed by the mock runtime. Later, only
-`brain-acp` should switch to the real ACP implementation.
+`agent-acp` should switch to the real ACP implementation.
 
 ## ACP Coverage
 
@@ -183,11 +183,11 @@ the right protocol-native place for controls like thinking level or fast mode.
 If the product goal is "serious ACP-native session controls in the main TUI we
 actually want to use," then the cleaner path now looks like:
 
-- keep `brain-acp` protocol-native and runtime-clean
+- keep `agent-acp` protocol-native and runtime-clean
 - treat Nori as the strongest TUI base we have
 - add the missing ACP mode/config-option UX to Nori directly
 
-That is a better boundary than teaching `brain-acp` to emulate client-specific
+That is a better boundary than teaching `agent-acp` to emulate client-specific
 combined controls or overloading the model picker with reasoning/speed variants
 just because the current client path is narrower than the protocol.
 
@@ -195,7 +195,7 @@ So the current documentation recommendation is:
 
 - use `acpx` for baseline ACP interoperability
 - use Nori as the main TUI reference
-- prefer a Nori fork/extension over a `brain-acp` bridge if richer ACP session
+- prefer a Nori fork/extension over a `agent-acp` bridge if richer ACP session
   settings are the next product step
 
 ## Local Fork Workflow
@@ -246,10 +246,10 @@ Risks:
 - its upstream messaging is still provider-first, so custom local agent UX may be less polished than the underlying implementation suggests
 - client terminal ACP methods are currently stubbed to `method_not_found`
 
-## `brain acp` Validation Note
+## `agent acp` Validation Note
 
 One practical interoperability detail showed up during manual validation with
-the current mock `brain acp` server: Nori intercepts slash-prefixed chat input
+the current mock `agent acp` server: Nori intercepts slash-prefixed chat input
 for its own TUI command layer before it reaches the ACP agent.
 
 That means the mock server should expose its synthetic probes only through
@@ -300,7 +300,7 @@ currently return `method_not_found` in:
 
 So `mock:terminal ...` and `mock:terminal-kill ...` are expected to fail in
 Nori today even though they work in `acpx`. Terminal ACP behavior should be
-validated with `acpx`, not treated as a `brain acp` interoperability failure
+validated with `acpx`, not treated as a `agent acp` interoperability failure
 inside Nori.
 
 ## Repo-Owned Prompt Pack
@@ -339,7 +339,7 @@ That produces slash-style Nori commands such as:
 - `/prompts:mock-move-file`
 
 These Nori custom prompts are only a shortcut layer. They expand into the
-existing `mock:*` prompt text that the local `brain acp` mock agent already
+existing `mock:*` prompt text that the local `agent acp` mock agent already
 understands.
 
 The prompt pack intentionally excludes terminal commands because Nori's ACP
@@ -351,5 +351,5 @@ client still returns `method_not_found` for terminal methods. Keep using
 
 One more iteration detail: because the local Nori agents are launched through
 `cargo run`, source changes are only picked up when Nori starts a fresh
-conversation. After editing `brain-acp`, run `/new` before re-testing so Nori
+conversation. After editing `agent-acp`, run `/new` before re-testing so Nori
 respawns the agent process.

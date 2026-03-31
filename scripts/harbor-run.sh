@@ -5,9 +5,11 @@ set -euo pipefail
 if [[ $# -lt 2 || $# -gt 3 ]]; then
   echo "Usage: ./scripts/harbor-run.sh <agent> <dataset> [task-name]" >&2
   echo "Examples:" >&2
+  echo "  ./scripts/harbor-run.sh agent hello-world@1.0" >&2
   echo "  ./scripts/harbor-run.sh codex hello-world@1.0" >&2
   echo "  ./scripts/harbor-run.sh codex terminal-bench-sample@2.0 regex-log" >&2
   echo "  ./scripts/harbor-run.sh terminus-2 terminal-bench-sample@2.0 chess-best-move" >&2
+  echo "  ./scripts/harbor-run.sh agent-acp terminal-bench-sample@2.0 sqlite-with-gcov" >&2
   echo "  ./scripts/harbor-run.sh codex-acp terminal-bench-sample@2.0 sqlite-with-gcov" >&2
   exit 1
 fi
@@ -123,63 +125,74 @@ if [[ -n "${HARBOR_TASK_NAME}" ]]; then
 fi
 
 case "${AGENT}" in
-  brain)
-    HARBOR_SESSION_CWD="${HARBOR_SESSION_CWD:-/app}"
-    HARBOR_BRAIN_LOOP="${HARBOR_BRAIN_LOOP:-simple}"
-    HARBOR_BACKEND_ARTIFACT_PATH="${HARBOR_BACKEND_ARTIFACT_PATH:-}"
-    HARBOR_AGENT_IMPORT_PATH="${HARBOR_AGENT_IMPORT_PATH:-tools.harbor.agents.brain:BrainAgent}"
-    HARBOR_PROVIDER="${HARBOR_PROVIDER:-${HARBOR_MODEL%%/*}}"
-    if [[ "${HARBOR_PROVIDER}" == "${HARBOR_MODEL}" ]]; then
-      HARBOR_PROVIDER="openai"
-    fi
-    case "${HARBOR_PROVIDER}" in
-      gemini)
-        resolved_api_key_default="${GEMINI_API_KEY:-}"
-        ;;
-      openrouter)
-        resolved_api_key_default="${OPENROUTER_API_KEY:-}"
-        ;;
-      xai)
-        resolved_api_key_default="${XAI_API_KEY:-}"
-        ;;
-      *)
-        resolved_api_key_default="${OPENAI_API_KEY:-}"
-        ;;
-    esac
-
-    HARBOR_API_KEY="${HARBOR_API_KEY:-${resolved_api_key_default}}"
-    HARBOR_BASE_URL="${HARBOR_BASE_URL:-${OPENAI_BASE_URL:-}}"
-
+  agent)
+    HARBOR_API_KEY="${HARBOR_API_KEY:-${OPENAI_API_KEY:-}}"
     if [[ -z "${HARBOR_API_KEY}" ]]; then
-      echo "brain Harbor runs require HARBOR_API_KEY or OPENAI_API_KEY." >&2
+      echo "OPENAI_API_KEY or HARBOR_API_KEY must be set for repo-local Harbor agent runs." >&2
       exit 1
     fi
 
-    if [[ -z "${HARBOR_BACKEND_ARTIFACT_PATH}" ]]; then
-      echo "Building direct Harbor brain backend artifact..."
-      if cargo build -p brain-cli --release --target x86_64-unknown-linux-musl; then
-        HARBOR_BACKEND_ARTIFACT_PATH="${ROOT_DIR}/target/x86_64-unknown-linux-musl/release/brain"
-      else
-        echo "musl release build failed, falling back to host debug build." >&2
-        cargo build -p brain-cli
-        HARBOR_BACKEND_ARTIFACT_PATH="${ROOT_DIR}/target/debug/brain"
-      fi
-    fi
+    HARBOR_AGENT_LOOP="${HARBOR_AGENT_LOOP:-simple}"
+    HARBOR_AGENT_BASE_URL="${HARBOR_AGENT_BASE_URL:-${HARBOR_BASE_URL:-}}"
+    HARBOR_AGENT_API_SURFACE="${HARBOR_AGENT_API_SURFACE:-${HARBOR_API_SURFACE:-}}"
+    HARBOR_AGENT_IMPORT_PATH="${HARBOR_AGENT_IMPORT_PATH:-tools.harbor.agents.agent:HarborAgent}"
 
     cmd+=(
       --agent-import-path "${HARBOR_AGENT_IMPORT_PATH}"
-      --ak "session_cwd=${HARBOR_SESSION_CWD}"
-      --ak "brain_loop=${HARBOR_BRAIN_LOOP}"
-      --ak "provider=${HARBOR_PROVIDER}"
-      --ak "backend_artifact_path=${HARBOR_BACKEND_ARTIFACT_PATH}"
+      --ak "agent_loop=${HARBOR_AGENT_LOOP}"
+      --ak "provider=${HARBOR_MODEL%%/*}"
     )
 
-    if [[ -n "${HARBOR_BASE_URL}" ]]; then
-      export HARBOR_BASE_URL
-      cmd+=(--ak "base_url=${HARBOR_BASE_URL}")
+    if [[ -n "${HARBOR_AGENT_BASE_URL}" ]]; then
+      cmd+=(--ak "base_url=${HARBOR_AGENT_BASE_URL}")
     fi
 
-    export HARBOR_API_KEY
+    if [[ -n "${HARBOR_AGENT_API_SURFACE}" ]]; then
+      cmd+=(--ak "api_surface=${HARBOR_AGENT_API_SURFACE}")
+    fi
+    ;;
+  agent-acp)
+    HARBOR_PERMISSION_MODE="${HARBOR_PERMISSION_MODE:-allow_once}"
+    HARBOR_SESSION_CWD="${HARBOR_SESSION_CWD:-/app}"
+    HARBOR_BACKEND_ARGS="${HARBOR_BACKEND_ARGS:-}"
+    HARBOR_AUTH_METHOD="${HARBOR_AUTH_METHOD:-openai-api-key}"
+    HARBOR_ENABLE_TERMINAL="${HARBOR_ENABLE_TERMINAL:-true}"
+    HARBOR_ENABLE_FILESYSTEM="${HARBOR_ENABLE_FILESYSTEM:-true}"
+    HARBOR_AGENT_LOOP="${HARBOR_AGENT_LOOP:-simple}"
+    HARBOR_AGENT_BASE_URL="${HARBOR_AGENT_BASE_URL:-${HARBOR_BASE_URL:-}}"
+    HARBOR_AGENT_API_SURFACE="${HARBOR_AGENT_API_SURFACE:-${HARBOR_API_SURFACE:-}}"
+    HARBOR_AGENT_IMPORT_PATH="${HARBOR_AGENT_IMPORT_PATH:-tools.harbor.agents.agent_acp:HarborAcpAgent}"
+
+    cmd+=(
+      --agent-import-path "${HARBOR_AGENT_IMPORT_PATH}"
+      --ak "permission_mode=${HARBOR_PERMISSION_MODE}"
+      --ak "session_cwd=${HARBOR_SESSION_CWD}"
+      --ak "enable_terminal=${HARBOR_ENABLE_TERMINAL}"
+      --ak "enable_filesystem=${HARBOR_ENABLE_FILESYSTEM}"
+      --ak "agent_loop=${HARBOR_AGENT_LOOP}"
+      --ak "provider=${HARBOR_MODEL%%/*}"
+    )
+
+    if [[ -n "${HARBOR_BACKEND_ARGS}" ]]; then
+      cmd+=(--ak "backend_args=${HARBOR_BACKEND_ARGS}")
+    fi
+
+    if [[ -n "${HARBOR_AUTH_METHOD}" ]]; then
+      cmd+=(--ak "auth_method=${HARBOR_AUTH_METHOD}")
+    fi
+
+    if [[ -n "${HARBOR_AGENT_BASE_URL}" ]]; then
+      cmd+=(--ak "base_url=${HARBOR_AGENT_BASE_URL}")
+    fi
+
+    if [[ -n "${HARBOR_AGENT_API_SURFACE}" ]]; then
+      cmd+=(--ak "api_surface=${HARBOR_AGENT_API_SURFACE}")
+    fi
+
+    if [[ "${HARBOR_AUTH_METHOD}" == "openai-api-key" ]] && [[ -z "${HARBOR_API_KEY:-${OPENAI_API_KEY:-}}" ]]; then
+      echo "OPENAI_API_KEY or HARBOR_API_KEY must be set for repo-local Harbor agent-acp runs when auth_method=openai-api-key." >&2
+      exit 1
+    fi
     ;;
   codex-acp)
     if ! command -v codex-acp >/dev/null 2>&1; then
@@ -216,41 +229,6 @@ case "${AGENT}" in
       echo "No host Codex auth file found at ${HARBOR_HOST_CODEX_AUTH_PATH}." >&2
       echo "Set HARBOR_AUTH_METHOD=openai-api-key with OPENAI_API_KEY, or provide HARBOR_HOST_CODEX_AUTH_PATH." >&2
       exit 1
-    fi
-    ;;
-  brain-acp)
-    HARBOR_PERMISSION_MODE="${HARBOR_PERMISSION_MODE:-allow_once}"
-    HARBOR_SESSION_CWD="${HARBOR_SESSION_CWD:-/app}"
-    HARBOR_BACKEND_ARGS="${HARBOR_BACKEND_ARGS:-}"
-    HARBOR_BRAIN_LOOP="${HARBOR_BRAIN_LOOP:-}"
-    HARBOR_HOST_BRAIN_HOME_PATH="${HARBOR_HOST_BRAIN_HOME_PATH:-$HOME/.brain}"
-    HARBOR_BACKEND_ARTIFACT_PATH="${HARBOR_BACKEND_ARTIFACT_PATH:-}"
-    HARBOR_ENABLE_TERMINAL="${HARBOR_ENABLE_TERMINAL:-true}"
-    HARBOR_AGENT_IMPORT_PATH="${HARBOR_AGENT_IMPORT_PATH:-tools.harbor.agents.acp_brain:AcpBrainAgent}"
-
-    if [[ ! -d "${HARBOR_HOST_BRAIN_HOME_PATH}/credentials" ]]; then
-      echo "brain-acp requires ${HARBOR_HOST_BRAIN_HOME_PATH}/credentials on the host." >&2
-      exit 1
-    fi
-
-    cmd+=(
-      --agent-import-path "${HARBOR_AGENT_IMPORT_PATH}"
-      --ak "permission_mode=${HARBOR_PERMISSION_MODE}"
-      --ak "session_cwd=${HARBOR_SESSION_CWD}"
-      --ak "enable_terminal=${HARBOR_ENABLE_TERMINAL}"
-      --ak "host_brain_home_path=${HARBOR_HOST_BRAIN_HOME_PATH}"
-    )
-
-    if [[ -n "${HARBOR_BACKEND_ARGS}" ]]; then
-      cmd+=(--ak "backend_args=${HARBOR_BACKEND_ARGS}")
-    fi
-
-    if [[ -n "${HARBOR_BRAIN_LOOP}" ]]; then
-      cmd+=(--ak "brain_loop=${HARBOR_BRAIN_LOOP}")
-    fi
-
-    if [[ -n "${HARBOR_BACKEND_ARTIFACT_PATH}" ]]; then
-      cmd+=(--ak "backend_artifact_path=${HARBOR_BACKEND_ARTIFACT_PATH}")
     fi
     ;;
   *)

@@ -176,6 +176,7 @@ pub struct CredentialHealth {
     pub last_ok: Option<DateTime<Utc>>,
     pub last_error: Option<CredentialError>,
     pub consecutive_errors: u32,
+    #[serde(default = "credential_health_updated_at_default")]
     pub updated_at: DateTime<Utc>,
 }
 
@@ -185,9 +186,13 @@ impl Default for CredentialHealth {
             last_ok: None,
             last_error: None,
             consecutive_errors: 0,
-            updated_at: Utc::now(),
+            updated_at: credential_health_updated_at_default(),
         }
     }
+}
+
+fn credential_health_updated_at_default() -> DateTime<Utc> {
+    Utc::now()
 }
 
 impl CredentialHealth {
@@ -236,6 +241,7 @@ pub struct CredentialError {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CredentialEntry {
     pub id: String,
+    #[serde(default)]
     pub label: String,
     pub credential: ProviderCredential,
     pub enabled: bool,

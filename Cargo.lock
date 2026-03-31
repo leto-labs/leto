@@ -26,13 +26,18 @@ dependencies = [
  "agent-core",
  "agent-runtime",
  "agent-store",
+ "anyhow",
  "async-trait",
+ "chrono",
+ "dirs",
  "futures",
  "provider",
+ "provider-openai",
  "serde_json",
  "tokio",
  "tokio-util",
  "tracing",
+ "tracing-subscriber",
  "ulid",
 ]
 
@@ -760,211 +765,6 @@ dependencies = [
  "rust-stemmers",
  "stop-words",
  "unicode-segmentation",
-]
-
-[[package]]
-name = "brain-acp"
-version = "0.1.0"
-dependencies = [
- "agent-client-protocol",
- "async-trait",
- "brain-config",
- "brain-core",
- "brain-tools",
- "chrono",
- "futures",
- "serde_json",
- "tokio",
- "tokio-util",
- "tracing",
- "tracing-subscriber",
- "ulid",
-]
-
-[[package]]
-name = "brain-cli"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "atif",
- "brain-acp",
- "brain-config",
- "brain-core",
- "brain-stores",
- "chrono",
- "clap",
- "futures",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "tempfile",
- "tokio",
- "tokio-util",
- "tracing",
- "tracing-subscriber",
- "ulid",
-]
-
-[[package]]
-name = "brain-config"
-version = "0.1.0"
-dependencies = [
- "brain-stores",
- "brain-types",
- "dirs",
- "serde",
- "tempfile",
- "thiserror 2.0.18",
- "toml 0.8.23",
-]
-
-[[package]]
-name = "brain-core"
-version = "0.1.0"
-dependencies = [
- "async-stream",
- "atif",
- "brain-config",
- "brain-loops",
- "brain-providers",
- "brain-stores",
- "brain-tools",
- "brain-transports",
- "brain-types",
- "chrono",
- "futures",
- "serde_json",
- "tempfile",
- "tokio",
- "tokio-stream",
- "tokio-util",
- "tracing",
- "ulid",
-]
-
-[[package]]
-name = "brain-loops"
-version = "0.1.0"
-dependencies = [
- "async-stream",
- "brain-types",
- "futures",
- "serde",
- "serde_json",
- "tokio",
- "tokio-stream",
- "tokio-util",
- "tracing",
- "ulid",
-]
-
-[[package]]
-name = "brain-providers"
-version = "0.1.0"
-dependencies = [
- "async-stream",
- "base64 0.22.1",
- "brain-stores",
- "brain-types",
- "chrono",
- "dotenvy",
- "encoding_rs",
- "eventsource-stream",
- "form_urlencoded",
- "futures",
- "hf-hub",
- "llama-cpp-2",
- "mistralrs",
- "rand 0.9.2",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "sha2",
- "tokio",
- "tracing",
- "ulid",
-]
-
-[[package]]
-name = "brain-server"
-version = "0.1.0"
-dependencies = [
- "axum",
- "brain-core",
- "brain-loops",
- "brain-providers",
- "brain-stores",
- "brain-types",
- "chrono",
- "futures",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "tokio",
- "tokio-stream",
- "tokio-util",
- "tracing",
- "ulid",
-]
-
-[[package]]
-name = "brain-stores"
-version = "0.1.0"
-dependencies = [
- "atif",
- "brain-types",
- "chrono",
- "dirs",
- "futures",
- "serde",
- "serde_json",
- "tempfile",
- "tokio",
- "tokio-stream",
- "tracing",
- "ulid",
-]
-
-[[package]]
-name = "brain-tools"
-version = "0.1.0"
-dependencies = [
- "agent-client-protocol",
- "brain-types",
- "futures",
- "glob",
- "portable-pty",
- "regex",
- "serde",
- "serde_json",
- "tempfile",
- "tokio",
- "tracing",
- "vt100",
- "walkdir",
-]
-
-[[package]]
-name = "brain-transports"
-version = "0.1.0"
-dependencies = [
- "brain-types",
- "futures",
- "tokio",
-]
-
-[[package]]
-name = "brain-types"
-version = "0.1.0"
-dependencies = [
- "atif",
- "chrono",
- "futures",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio-util",
- "ulid",
 ]
 
 [[package]]

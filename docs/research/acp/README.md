@@ -78,7 +78,7 @@ Current architectural reading of that working set:
 - Nori is still the strongest TUI base
 - if `brain` needs richer ACP-native session settings in a serious TUI, the
   cleaner next move is likely to extend or fork Nori rather than build a
-  `brain-acp` bridge around client UX gaps
+  `agent-acp` bridge around client UX gaps
 
 The remaining client notes are retained as research and comparison material,
 not as the current implementation target.
@@ -128,7 +128,7 @@ All rows below reflect the state observed on 2026-03-18.
 
 - `BrainServer` gives `brain` a session-aware runtime boundary
 - `enrich-event-model` already calls out ACP alignment as a goal
-- `add-brain-cli` already has a placeholder task for `brain acp`
+- `add-brain-cli` already has a placeholder task for `agent acp`
 - the current conflict is architectural: one pending design treats ACP as a
   thin future bridge, while the event model and CLI tasks point toward
   first-class ACP support

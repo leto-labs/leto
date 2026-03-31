@@ -300,8 +300,13 @@ fn output_message_to_chat_completion(message: &Message) -> ChatCompletionMessage
         .content
         .iter()
         .filter_map(|block| match block {
-            ContentBlock::ToolCall { id, name, input } => Some(ChatCompletionToolCall {
-                id: id.clone(),
+            ContentBlock::ToolCall {
+                id,
+                call_id,
+                name,
+                input,
+            } => Some(ChatCompletionToolCall {
+                id: call_id.clone().unwrap_or_else(|| id.clone()),
                 call_type: "function".to_owned(),
                 function: ChatCompletionFunctionCall {
                     name: name.clone(),

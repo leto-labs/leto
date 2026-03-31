@@ -2,8 +2,9 @@
 
 The current provider story is split between the standalone shared `provider`
 SDK and concrete `provider-*` crates such as `provider-openai` and
-`provider-anthropic`. Legacy `brain-providers` code remains in the repo, but it
-is no longer the primary naming for current-facing docs.
+`provider-anthropic`. Legacy `brain-providers` code is archived locally for
+reference, but it is no longer committed source or the primary naming for
+current-facing docs.
 
 ## Table Of Contents
 

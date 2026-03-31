@@ -1,8 +1,8 @@
 # Config Bootstrap
 
 Current config resolution is an `agent-core` bootstrap concern over the shared
-`agent-store::ProjectConfig` model. Legacy `brain-config` code remains in the
-repo, but it is no longer the primary architecture boundary.
+`agent-store::ProjectConfig` model. Legacy `brain-config` code is archived
+locally for reference, but it is no longer part of the committed workspace.
 
 ## Config Layers
 

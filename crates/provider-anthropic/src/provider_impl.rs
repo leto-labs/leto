@@ -274,7 +274,9 @@ fn map_message(message: &Message) -> Result<MessageParam, ProviderError> {
             provider::ContentBlock::ImageUrl { url } => ContentBlockParam::Image {
                 source: ImageSource::Url { url: url.clone() },
             },
-            provider::ContentBlock::ToolCall { id, name, input } => ContentBlockParam::ToolUse {
+            provider::ContentBlock::ToolCall {
+                id, name, input, ..
+            } => ContentBlockParam::ToolUse {
                 id: id.clone(),
                 name: name.clone(),
                 input: input.clone(),

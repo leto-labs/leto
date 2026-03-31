@@ -14,13 +14,13 @@ This repo was last updated from local source inspection on 2026-03-20.
 
 ## Matrix
 
-| Capability | ACP protocol | `acpx` | Nori | Codex ACP | current `brain-acp` |
+| Capability | ACP protocol | `acpx` | Nori | Codex ACP | current `agent-acp` |
 | --- | --- | --- | --- | --- | --- |
 | `session/load` | Protocol-defined | Confirmed | Confirmed | Confirmed | Confirmed |
-| `session/set_model` | Protocol-defined, unstable | Partial | Confirmed | Confirmed | Confirmed |
+| model selection | Protocol-defined, unstable `session/set_model` or config replacement | Partial | Confirmed | Confirmed | Confirmed via `session/set_config_option` |
 | session modes | Protocol-defined | Confirmed | Not found in inspected path | Confirmed | Not found in inspected path |
-| session config options | Protocol-defined | Confirmed | Not found in inspected path | Confirmed | Not found in inspected path |
-| `session/set_config_option` | Protocol-defined | Confirmed | Not found in inspected path | Confirmed | Not found in inspected path |
+| session config options | Protocol-defined | Confirmed | Not found in inspected path | Confirmed | Confirmed |
+| `session/set_config_option` | Protocol-defined | Confirmed | Not found in inspected path | Confirmed | Confirmed |
 | filesystem client methods | Protocol-defined | Partial | Confirmed | Confirmed | Mock confirmed, real backend not yet client-owned |
 | terminal client methods | Protocol-defined | Partial | Not found in inspected path | Confirmed | Mock confirmed, real backend not yet client-owned |
 | permission requests | Protocol-defined | Partial | Confirmed | Confirmed | Mock confirmed |
@@ -99,12 +99,12 @@ References:
 
 - [`repocache/zed-industries/codex-acp/src/thread.rs`](../../../repocache/zed-industries/codex-acp/src/thread.rs)
 
-### Current `brain-acp`
+### Current `agent-acp`
 
-Current `brain-acp` is split:
+Current `agent-acp` is split:
 
-- real backend: confirmed `session/load`, prompt flow, cancel, and unstable
-  `session/set_model`
+- real backend: confirmed `session/load`, prompt flow, cancel, and session
+  config options for model / thought level / loop
 - mock backend: confirmed session modes, config options, permission flow, file
   flows, terminal probes, and thought chunks for ACP UX validation
 
@@ -114,13 +114,13 @@ truth we want to preserve long term.
 
 References:
 
-- [`crates/brain-acp/src/backend/agent.rs`](../../crates/brain-acp/src/backend/agent.rs)
-- [`crates/brain-acp/src/backend/capabilities.rs`](../../crates/brain-acp/src/backend/capabilities.rs)
-- [`crates/brain-acp/src/mock/capabilities.rs`](../../crates/brain-acp/src/mock/capabilities.rs)
+- [`crates/agent-acp/src/adapter.rs`](../../crates/agent-acp/src/adapter.rs)
+- [`crates/agent-acp/src/capabilities.rs`](../../crates/agent-acp/src/capabilities.rs)
+- [`crates/agent-acp/src/mock/capabilities.rs`](../../crates/agent-acp/src/mock/capabilities.rs)
 
 ## Working Conclusion
 
-For `brain`, the cleanest current split is:
+For this repo, the cleanest current split is:
 
 - `acpx` for baseline ACP compatibility and control-surface probing
 - Nori as the strongest TUI base
@@ -128,7 +128,7 @@ For `brain`, the cleanest current split is:
 
 And the current product recommendation is:
 
-- do **not** contort `brain-acp` into a client-specific bridge just because the
+- do **not** contort `agent-acp` into a client-specific bridge just because the
   current Nori ACP path is missing generic mode/config support
 - if richer ACP-native session settings in the main TUI are the goal, extend or
   fork Nori instead

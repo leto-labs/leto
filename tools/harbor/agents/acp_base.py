@@ -274,10 +274,48 @@ class BaseAcpAgent(BaseAgent, ABC):
                 debug_log.read_text(encoding="utf-8") + "prompting session\n",
                 encoding="utf-8",
             )
-            prompt_response = await conn.prompt(
-                prompt=[text_block(instruction)],
-                session_id=session.session_id,
-            )
+            try:
+                prompt_response = await conn.prompt(
+                    prompt=[text_block(instruction)],
+                    session_id=session.session_id,
+                )
+            except Exception as error:
+                debug_log.write_text(
+                    debug_log.read_text(encoding="utf-8")
+                    + f"prompt failed: {type(error).__name__}: {error}\n",
+                    encoding="utf-8",
+                )
+                bridge_log.write_text(
+                    json.dumps(
+                        {
+                            "backend_location": "container",
+                            "backend_command": self._backend_command,
+                            "backend_args": self._resolved_backend_argv()[1:],
+                            "backend_artifact_path": str(self._resolved_backend_artifact_path()),
+                            "host_auth_path": (
+                                str(self._resolved_host_auth_path())
+                                if self._resolved_host_auth_path()
+                                else None
+                            ),
+                            "docker_exec_argv": argv,
+                            "session_cwd": self.session_cwd,
+                            "auth_method": self.auth_method,
+                            "initialize": _jsonable(init_response),
+                            "new_session": _jsonable(session),
+                            "assistant_text": client.assistant_text(),
+                            "thought_text": client.thought_text(),
+                            "prompt_error": {
+                                "type": type(error).__name__,
+                                "message": str(error),
+                            },
+                        },
+                        indent=2,
+                        ensure_ascii=False,
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
+                raise
             debug_log.write_text(
                 debug_log.read_text(encoding="utf-8") + "prompt completed\n",
                 encoding="utf-8",

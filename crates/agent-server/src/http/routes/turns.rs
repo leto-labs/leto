@@ -127,6 +127,7 @@ pub(in crate::http) async fn append_tool_calls(
                     MessageRole::Assistant,
                     vec![ContentBlock::ToolCall {
                         id: tool_call_id.clone(),
+                        call_id: None,
                         name: call.name,
                         input: tool_call_input,
                     }],

@@ -4,8 +4,8 @@
 
 `Harbor` is the repo's current operational harness for external agent
 benchmarks. This page is the production-facing guide for how we actually run
-Harbor in this repo, what currently works, and what the latest runs tell us
-about the `brain` loop.
+Harbor in this repo, what currently works, and how to validate the live
+`agent-*` stack.
 
 For benchmark-research framing and the full `terminal-bench@2.0` task matrix,
 see [`research/benchmarks/Harbor.md`](research/benchmarks/Harbor.md).
@@ -17,9 +17,9 @@ The repo currently uses six Harbor reference surfaces:
 - built-in `codex`
 - built-in `mini-swe-agent`
 - built-in `terminus-2`
-- repo-local direct `brain`
+- repo-local direct `agent`
 - repo-local `codex-acp`
-- repo-local `brain-acp`
+- repo-local `agent-acp`
 
 Current maturity:
 
@@ -27,14 +27,9 @@ Current maturity:
 - `mini-swe-agent` is a useful built-in comparison surface, but weaker on
   heavier environment-repair tasks
 - `terminus-2` is a Harbor-native reference surface
-- `brain` is the direct native benchmark surface for iterating on `brain`
-  loops without ACP in the middle
+- `agent` is the direct repo-local benchmark surface over `agent exec`
 - `codex-acp` is the main repo-local ACP comparison path
-- `brain-acp` is real and usable, but still the surface we are actively
-  improving rather than the stable baseline
-
-For the internal native `ATIF` architecture behind the direct `brain` surface,
-see [`architecture/atif.md`](architecture/atif.md).
+- `agent-acp` is the repo-local ACP loop-validation path on the live stack
 
 ## Runner Interface
 
@@ -53,11 +48,11 @@ just harbor-run <agent> <dataset> [task-name]
 Examples:
 
 ```bash
+./scripts/harbor-run.sh agent hello-world@1.0
 ./scripts/harbor-run.sh codex hello-world@1.0
-./scripts/harbor-run.sh brain hello-world@1.0
 ./scripts/harbor-run.sh terminus-2 terminal-bench-sample@2.0 chess-best-move
+just harbor-run agent-acp terminal-bench-sample@2.0 regex-log
 just harbor-run codex-acp terminal-bench-sample@2.0 regex-log
-HARBOR_BRAIN_LOOP=robust just harbor-run brain-acp terminal-bench@2.0
 HARBOR_ENV=daytona HARBOR_MODEL=openai/gpt-5.3-codex just harbor-run terminus-2 terminal-bench-sample@2.0 configure-git-webserver
 ```
 
@@ -114,15 +109,13 @@ Important local prerequisites:
 - Docker must be available and healthy for `HARBOR_ENV=docker`
 - `DAYTONA_API_KEY` is required for `HARBOR_ENV=daytona`
 - built-in `codex` requires `OPENAI_API_KEY`
-- direct Harbor `brain` uses `OPENAI_API_KEY` by default and does not depend
-  on `~/.brain`
-- direct Harbor `brain` defaults to the Responses API when the selected
-  OpenAI-compatible provider preset declares support, and falls back to
-  chat completions otherwise
 - `mini-swe-agent` accepts `MSWEA_API_KEY` or provider-specific keys such as
   `OPENAI_API_KEY`
+- direct `agent` requires `OPENAI_API_KEY` or `HARBOR_API_KEY`
+- `agent-acp` defaults to `auth_method=openai-api-key` and therefore also
+  requires `OPENAI_API_KEY` or `HARBOR_API_KEY` unless the caller overrides
+  the auth strategy
 - `codex-acp` prefers host Codex auth from `~/.codex/auth.json`
-- `brain-acp` expects `~/.brain/credentials` and optional `~/.brain/config.toml`
 
 Recommended first Daytona validation:
 
@@ -161,7 +154,7 @@ The repo-local ACP path is:
 - `acp_client.py` for the Harbor-side ACP client
 - `acp_base.py` for the shared ACP lifecycle
 - `acp_codex.py` for Codex
-- `acp_brain.py` for Brain
+- `agent_acp.py` for the repo-local `agent-acp` backend
 
 For container-backed ACP runs:
 
@@ -174,20 +167,6 @@ Important distinction:
 
 - staged ACP backend files are not bind mounts
 - they are separate in-container copies created via Harbor upload APIs
-
-`brain-acp` now prefers the portable musl artifact:
-
-```text
-target/x86_64-unknown-linux-musl/release/brain-acp
-```
-
-Build it with:
-
-```bash
-just build-release
-```
-
-This requires a musl toolchain such as `musl-gcc`.
 
 ## Resource Model And Concurrency
 
@@ -223,64 +202,22 @@ This includes:
 - per-trial `result.json`
 - agent logs
 - verifier logs
-- raw direct `brain` artifacts such as `run.json` and `events.jsonl`
-- Rust-emitted ATIF `trajectory.json` for the direct `brain` surface
+- direct `agent` artifacts such as `run.json` and `events.jsonl`
+- Rust-emitted ATIF `trajectory.json` for the repo-local direct surface
 
 The Docker task environments are ephemeral. The Harbor artifacts are not.
 
-## Findings From Recent Runs
+## Validation Focus
 
-### `brain-acp` robust full `terminal-bench@2.0` baseline
+Current Harbor validation should prioritize the live migrated surfaces:
 
-The first full-suite `brain-acp` robust run is:
+- direct `agent` on `hello-world@1.0`
+- `agent-acp` on `hello-world@1.0`
+- bounded `terminal-bench-sample@2.0` probes for both repo-local surfaces
+- `codex` and `codex-acp` as external comparison baselines
 
-- [brain-acp-terminal-bench-2.0-k1-musl](/home/leovigna/Documents/projects/leovigna/mauser/target/harbor/jobs/brain-acp-terminal-bench-2.0-k1-musl)
-
-Aggregate result:
-
-- `24/89` passes
-- `48/89` verifier failures
-- `23/89` trials with exceptions
-- mean reward `0.2697`
-
-Representative passes included:
-
-- `fix-git`
-- `git-leak-recovery`
-- `headless-terminal`
-- `portfolio-optimization`
-- `query-optimize`
-- `sparql-university`
-
-### What this run proved
-
-- the musl packaging fix worked across the full mixed-image suite
-- the remaining bottlenecks are loop behavior, request failures, and timeout
-  handling rather than startup portability
-- `brain-acp` is viable enough for full-suite measurement, but not yet close to
-  the built-in Codex baseline
-
-### Main failure classes
-
-1. `RequestError` tasks that all collapsed into backend iteration-limit failure
-   behavior
-2. `AgentTimeoutError` tasks, especially long or heavy tasks
-3. clean verifier failures where the task ran end to end but the produced
-   solution was wrong
-
-Representative timeout edge case:
-
-- [build-pov-ray result](/home/leovigna/Documents/projects/leovigna/mauser/target/harbor/jobs/brain-acp-terminal-bench-2.0-k1-musl/build-pov-ray__rrcbuzd/result.json)
-
-That task reached verifier reward `1.0` but still timed out at the Harbor
-agent layer, which indicates the agent got stuck in a final shell step after
-essentially solving the task.
-
-Representative request-error pattern:
-
-- [mteb-leaderboard backend-stderr](/home/leovigna/Documents/projects/leovigna/mauser/target/harbor/jobs/brain-acp-terminal-bench-2.0-k1-musl/mteb-leaderboard__UiCV5zk/agent/backend-stderr.txt)
-
-The request-error trials all showed the same backend signature:
+The repo treats full-suite Harbor runs as a later validation stage after these
+checkpoint surfaces are stable.
 
 ```text
 max iterations reached: 20

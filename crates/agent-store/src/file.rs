@@ -84,13 +84,16 @@ async fn load_data(root: &Path) -> Result<StoreData, StoreError> {
         let provider_name = provider_dir.file_name().to_string_lossy().to_string();
         let mut creds = fs::read_dir(provider_dir.path()).await?;
         while let Some(entry) = creds.next_entry().await? {
-            let credential: CredentialEntry = read_json(&entry.path()).await?;
+            let mut credential: CredentialEntry = read_json(&entry.path()).await?;
             let credential_id = entry
                 .path()
                 .file_stem()
                 .and_then(|stem| stem.to_str())
                 .ok_or_else(|| StoreError::InvalidInput("invalid credential filename".into()))?
                 .to_owned();
+            if credential.label.is_empty() {
+                credential.label = credential.id.clone();
+            }
             data.credentials
                 .insert((provider_name.clone(), credential_id), credential);
         }
@@ -431,6 +434,7 @@ impl Store for FileStore {
 
 #[cfg(test)]
 mod tests {
+    use chrono::Utc;
     use provider::Message;
     use tempfile::TempDir;
 
@@ -526,5 +530,44 @@ mod tests {
             .await
             .unwrap();
         assert!(messages.is_empty());
+    }
+
+    #[tokio::test]
+    async fn file_store_loads_legacy_credentials_without_health_updated_at() {
+        let temp = TempDir::new().unwrap();
+        std::fs::create_dir_all(temp.path().join("credentials/openai")).unwrap();
+        std::fs::write(
+            temp.path().join("credentials/openai/default.json"),
+            r#"{
+  "id": "default",
+  "credential": {
+    "type": "api_key",
+    "api_key": "sk-test"
+  },
+  "health": {
+    "last_ok": null,
+    "last_error": null,
+    "consecutive_errors": 0
+  },
+  "enabled": true,
+  "created_at": "2026-03-20T15:55:51.249824654Z"
+}
+"#,
+        )
+        .unwrap();
+
+        let before = Utc::now();
+        let store = FileStore::new(temp.path()).await.unwrap();
+        let after = Utc::now();
+
+        let credential = store
+            .credentials()
+            .get(("openai".to_owned(), "default".to_owned()))
+            .await
+            .unwrap();
+
+        assert_eq!(credential.id, "default");
+        assert_eq!(credential.label, "default");
+        assert!(credential.health.updated_at >= before && credential.health.updated_at <= after);
     }
 }

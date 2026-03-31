@@ -1,9 +1,0 @@
-[package]
-name = "brain-transports"
-edition.workspace = true
-version.workspace = true
-
-[dependencies]
-brain-types = { workspace = true }
-tokio = { workspace = true, features = ["io-util", "io-std", "rt", "sync"] }
-futures = { workspace = true }

@@ -15,7 +15,7 @@ Harbor is the most useful current harness for this repo because it gives us a
 common execution layer across:
 
 - built-in benchmark agents such as `codex`, `mini-swe-agent`, and `terminus-2`
-- repo-local ACP-backed agents such as `codex-acp` and `brain-acp`
+- repo-local ACP-backed agents such as `codex-acp` and `agent-acp`
 
 That makes it more valuable than a benchmark that effectively hardcodes one
 agent runtime.
@@ -142,13 +142,14 @@ and `10 GB` storage.
 Examples:
 
 ```bash
+./scripts/harbor-run.sh agent hello-world@1.0
 ./scripts/harbor-run.sh codex hello-world@1.0
 ./scripts/harbor-run.sh terminus-2 terminal-bench-sample@2.0 chess-best-move
 just harbor-run codex hello-world@1.0
 just harbor-run mini-swe-agent terminal-bench-sample@2.0 regex-log
 just harbor-run codex-acp terminal-bench-sample@2.0 chess-best-move
-HARBOR_BRAIN_LOOP=robust just harbor-run brain-acp terminal-bench-sample@2.0 regex-log
-just harbor-run brain-acp terminal-bench@2.0
+HARBOR_AGENT_LOOP=robust just harbor-run agent-acp terminal-bench-sample@2.0 regex-log
+just harbor-run agent-acp terminal-bench@2.0
 just harbor-run codex terminal-bench-sample@2.0 sqlite-with-gcov
 HARBOR_ENV=daytona HARBOR_FORCE_BUILD=false HARBOR_MODEL=openai/gpt-5.3-codex just harbor-run terminus-2 terminal-bench-sample@2.0 configure-git-webserver
 ```
@@ -189,7 +190,17 @@ just harbor-datasets
 - is registered as a native Harbor agent in repocache:
   [name.py](/home/leovigna/Documents/projects/leovigna/mauser/repocache/harbor-framework/harbor/src/harbor/models/agent/name.py),
   [factory.py](/home/leovigna/Documents/projects/leovigna/mauser/repocache/harbor-framework/harbor/src/harbor/agents/factory.py)
-- serves as a fifth reference surface because it ships with Harbor itself
+- serves as a built-in reference surface because it ships with Harbor itself
+
+### Repo-local direct `agent`
+
+- Harbor agent import path:
+  `tools.harbor.agents.agent:HarborAgent`
+- runs the local `agent` binary directly through `agent exec`
+- avoids ACP entirely
+- requires `OPENAI_API_KEY` or `HARBOR_API_KEY`
+- writes direct-run artifacts including `run.json`, `events.jsonl`, and
+  `trajectory.json`
 
 ### Repo-local `codex-acp`
 
@@ -201,17 +212,17 @@ just harbor-datasets
 - prefers host Codex auth from `~/.codex/auth.json`
 - supports `HARBOR_AUTH_METHOD=openai-api-key` as fallback
 
-### Repo-local `brain-acp`
+### Repo-local `agent-acp`
 
 - Harbor agent import path:
-  `tools.harbor.agents.acp_brain:AcpBrainAgent`
+  `tools.harbor.agents.agent_acp:HarborAcpAgent`
 - uses the shared Harbor ACP client and shared `BaseAcpAgent`
 - prefers a portable Harbor artifact at
-  `target/x86_64-unknown-linux-musl/release/brain-acp`
-- falls back to host-local `target/release/brain-acp` or `target/debug/brain-acp`
-- copies the selected local `brain-acp` binary into the Harbor task environment
-- stages `~/.brain/credentials` and optional `config.toml` into a fresh container `BRAIN_HOME`
-- supports `HARBOR_BRAIN_LOOP=robust` for stronger bounded-task behavior
+  `target/x86_64-unknown-linux-musl/release/agent-acp`
+- falls back to host-local `target/release/agent-acp` or `target/debug/agent-acp`
+- copies the selected local `agent-acp` binary into the Harbor task environment
+- optionally stages `~/.brain/credentials` and `config.toml` into a fresh container `AGENT_HOME`
+- supports `HARBOR_AGENT_LOOP=robust` for stronger bounded-task behavior
 
 To build the preferred Harbor artifact, use the repo musl build path:
 

@@ -4187,8 +4187,14 @@ fn render_block_for_summary(block: &provider::ContentBlock) -> String {
         | provider::ContentBlock::Reasoning { text }
         | provider::ContentBlock::Refusal { text } => text.clone(),
         provider::ContentBlock::ImageUrl { url } => format!("[image:{url}]"),
-        provider::ContentBlock::ToolCall { id, name, input } => {
-            format!("tool_call id={id} name={name} input={input}")
+        provider::ContentBlock::ToolCall {
+            id,
+            call_id,
+            name,
+            input,
+        } => {
+            let execution_id = call_id.clone().unwrap_or_else(|| id.clone());
+            format!("tool_call id={id} call_id={execution_id} name={name} input={input}")
         }
         provider::ContentBlock::ToolResult {
             call_id,
@@ -4448,7 +4454,12 @@ impl AssistantAccumulator {
                 }
             }
             BlockKind::ToolCall { name, call_id } => {
-                let id = call_id.unwrap_or(block.id);
+                let runtime_call_id = call_id.unwrap_or_else(|| block.id.clone());
+                let transcript_id = block
+                    .id
+                    .strip_prefix("openai-tool-call:")
+                    .unwrap_or(block.id.as_str())
+                    .to_owned();
                 let name = name.unwrap_or_else(|| "tool".into());
                 let input = if block.json.trim().is_empty() {
                     serde_json::Value::Object(serde_json::Map::new())
@@ -4456,15 +4467,46 @@ impl AssistantAccumulator {
                     serde_json::from_str(&block.json)
                         .unwrap_or_else(|_| serde_json::Value::String(block.json.clone()))
                 };
+                if let Some(existing) = self
+                    .tool_calls
+                    .iter_mut()
+                    .find(|call| call.id == runtime_call_id)
+                {
+                    if is_empty_tool_input(&existing.input) && !is_empty_tool_input(&input) {
+                        existing.input = input.clone();
+                        if let Some((
+                            _,
+                            _,
+                            provider::ContentBlock::ToolCall {
+                                input: existing_input,
+                                ..
+                            },
+                        )) = self.finalized.iter_mut().find(|(_, _, block)| {
+                            matches!(
+                                block,
+                                provider::ContentBlock::ToolCall { id: existing_id, .. }
+                                    if existing_id == &transcript_id
+                            )
+                        }) {
+                            *existing_input = input;
+                        }
+                    }
+                    return Ok(());
+                }
                 self.tool_calls.push(ToolCall {
-                    id: id.clone(),
+                    id: runtime_call_id.clone(),
                     name: name.clone(),
                     input: input.clone(),
                 });
                 self.finalized.push((
                     block.output_index,
                     block.sequence,
-                    provider::ContentBlock::ToolCall { id, name, input },
+                    provider::ContentBlock::ToolCall {
+                        id: transcript_id.clone(),
+                        call_id: (transcript_id != runtime_call_id).then_some(runtime_call_id),
+                        name,
+                        input,
+                    },
                 ));
             }
             BlockKind::Unknown { kind } => {
@@ -4491,6 +4533,10 @@ impl AssistantAccumulator {
         }
         Ok(())
     }
+}
+
+fn is_empty_tool_input(input: &serde_json::Value) -> bool {
+    matches!(input, serde_json::Value::Object(map) if map.is_empty())
 }
 
 fn is_retryable_provider_error(error: &provider::Error) -> bool {
@@ -4563,6 +4609,58 @@ mod tests {
                 })))
             })
         }
+    }
+
+    #[test]
+    fn assistant_accumulator_dedupes_duplicate_tool_calls_by_id() {
+        let mut accumulator = AssistantAccumulator::default();
+
+        accumulator
+            .finalize_block(ActiveBlock {
+                id: "block-1".into(),
+                output_index: 0,
+                sequence: 0,
+                kind: BlockKind::ToolCall {
+                    name: Some("file_write".into()),
+                    call_id: Some("call-1".into()),
+                },
+                text: String::new(),
+                json: r#"{"path":"hello.txt","content":"Hello, world!"}"#.into(),
+            })
+            .unwrap();
+
+        accumulator
+            .finalize_block(ActiveBlock {
+                id: "block-2".into(),
+                output_index: 0,
+                sequence: 1,
+                kind: BlockKind::ToolCall {
+                    name: Some("file_write".into()),
+                    call_id: Some("call-1".into()),
+                },
+                text: String::new(),
+                json: String::new(),
+            })
+            .unwrap();
+
+        let (message, tool_calls) = accumulator.finish().unwrap();
+        assert_eq!(tool_calls.len(), 1);
+        assert_eq!(
+            tool_calls[0].input,
+            serde_json::json!({"path":"hello.txt","content":"Hello, world!"})
+        );
+        assert!(matches!(
+            message.as_ref().and_then(|message| message.content.first()),
+            Some(provider::ContentBlock::ToolCall {
+                id,
+                call_id,
+                input,
+                ..
+            })
+                if id == "block-1"
+                    && call_id.as_deref() == Some("call-1")
+                    && input == &serde_json::json!({"path":"hello.txt","content":"Hello, world!"})
+        ));
     }
 
     struct PassiveLoop;

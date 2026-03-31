@@ -3,7 +3,7 @@
 The modern stack keeps transport concerns intentionally thin. Local human-facing
 I/O mostly lives in `agent-cli`, ACP transport mapping lives in `agent-acp`,
 and hosted delivery lives in `agent-server`. The older `brain-transports`
-crate remains as legacy transport infrastructure rather than the primary path.
+implementation is archived locally rather than kept in the committed tree.
 
 ## Current Surface
 

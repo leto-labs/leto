@@ -20,8 +20,8 @@ skills add <owner/repo> --agent claude-code cursor -y
 Rust workspace (edition 2024). Platform-agnostic AI agent engine. The current
 application-facing stack centers on `agent-core`, `agent-runtime`,
 `agent-store`, `agent-tools`, `agent-loops`, and the standalone `provider-*`
-crates. Legacy `brain-*` crates remain in the repo for compatibility and
-incremental migration work.
+crates. Legacy `brain-*` source is kept only as a local gitignored archive
+under `archive/brain/` when reference material is still needed.
 
 ### Conventions
 - Traits as interfaces, not class hierarchies
@@ -29,8 +29,8 @@ incremental migration work.
 - `AgentCore` / `AgentCoreNative` in `agent-core` are the preferred
   application boundary
 - `SessionEngine` in `agent-runtime` owns live per-session execution mechanics
-- `Brain` in `brain-core` remains legacy engine infrastructure, not the primary
-  product boundary
+- `Brain` in archived `brain-core` remains legacy engine infrastructure, not
+  the primary product boundary
 - `thiserror` for library errors, `anyhow` for application code only
 - `tracing` for logging, never `println!` in library code
 - Library code never reads env vars — config is passed as data
@@ -74,7 +74,8 @@ incremental migration work.
 - `agent-acp` — ACP adapter surface over `AgentCore`
 - `agent-cli` — local CLI binary crate exposing the `agent` command
 - `atif` — Harbor-compatible trajectory/export schema crate
-- Legacy compatibility crates still present: `brain-types`, `brain-providers`, `brain-stores`, `brain-loops`, `brain-tools`, `brain-transports`, `brain-core`, `brain-acp`, `brain-cli`, `brain-config`, `brain-server`
+- Local-only legacy archive: `archive/brain/crates/brain-*` is not committed
+  and exists only for source reference during migration cleanup
 
 ### Specs
 Canonical specs live in `openspec/specs/`. Check `openspec/changes/` for pending

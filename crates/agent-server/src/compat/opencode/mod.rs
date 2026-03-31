@@ -407,12 +407,17 @@ fn compat_parts(message_id: Ulid, session_id: SessionId, message: &Message) -> V
                 url: url.clone(),
                 source: None,
             }),
-            ContentBlock::ToolCall { id, name, input } => PartDoc::Tool(ToolPartDoc {
+            ContentBlock::ToolCall {
+                id,
+                call_id,
+                name,
+                input,
+            } => PartDoc::Tool(ToolPartDoc {
                 id: compat_part_id(message_id, index),
                 session_id: compat_session_id(session_id),
                 message_id: compat_message_id(message_id),
                 part_type: ToolPartKindDoc::Tool,
-                call_id: id.clone(),
+                call_id: call_id.clone().unwrap_or_else(|| id.clone()),
                 tool: name.clone(),
                 state: ToolStateDoc::Pending(ToolStatePendingDoc {
                     status: ToolStatePendingKindDoc::Pending,

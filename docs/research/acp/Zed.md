@@ -85,7 +85,7 @@ supports.
 ## What This Means For `brain`
 
 - Zed is the best near-term ACP target for `brain`.
-- A well-packaged `brain acp` mode would immediately unlock a serious editor
+- A well-packaged `agent acp` mode would immediately unlock a serious editor
   experience without building a Zed extension.
 - If `brain` later wants top-tier Zed polish, the work should happen after ACP
   works well, not before.

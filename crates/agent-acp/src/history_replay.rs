@@ -56,8 +56,16 @@ fn render_block(block: &ContentBlock) -> Option<String> {
         | ContentBlock::Reasoning { text }
         | ContentBlock::Refusal { text } => text.clone(),
         ContentBlock::ImageUrl { url } => format!("[image:{url}]"),
-        ContentBlock::ToolCall { id, name, input } => {
-            format!("[tool_call:{name}:{id}] {input}")
+        ContentBlock::ToolCall {
+            id,
+            call_id,
+            name,
+            input,
+        } => {
+            format!(
+                "[tool_call:{name}:{}] {input}",
+                call_id.clone().unwrap_or_else(|| id.clone())
+            )
         }
         ContentBlock::ToolResult {
             call_id,

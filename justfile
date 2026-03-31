@@ -50,7 +50,7 @@ build-release:
     rustup target add x86_64-unknown-linux-musl
     cargo build --workspace --release --target x86_64-unknown-linux-musl
 
-# Run the opt-in acpx compatibility harness against brain-acp
+# Run the opt-in acpx compatibility harness against the live explicit mock ACP surface
 acpx-compat:
     ./scripts/test-acpx-compat.sh
 

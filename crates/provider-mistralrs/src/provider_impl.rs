@@ -294,10 +294,15 @@ async fn add_message(
             provider::ContentBlock::ImageUrl { url } => {
                 images.push(load_image(url).await?);
             }
-            provider::ContentBlock::ToolCall { id, name, input } => {
+            provider::ContentBlock::ToolCall {
+                id,
+                call_id,
+                name,
+                input,
+            } => {
                 tool_calls.push(ToolCallResponse {
                     index: tool_calls.len(),
-                    id: id.clone(),
+                    id: call_id.clone().unwrap_or_else(|| id.clone()),
                     tp: ToolCallType::Function,
                     function: CalledFunction {
                         name: name.clone(),

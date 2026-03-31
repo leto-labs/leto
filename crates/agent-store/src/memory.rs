@@ -651,8 +651,12 @@ impl Store for InMemoryStore {
 
     fn subscribe(&self) -> StoreStream<StoreEvent> {
         Box::pin(
-            BroadcastStream::new(self.events.subscribe())
-                .filter_map(|item| async move { item.ok() }),
+            BroadcastStream::new(self.events.subscribe()).filter_map(
+                |item: Result<
+                    StoreEvent,
+                    tokio_stream::wrappers::errors::BroadcastStreamRecvError,
+                >| async move { item.ok() },
+            ),
         )
     }
 }

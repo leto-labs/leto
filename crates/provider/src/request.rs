@@ -38,6 +38,9 @@ pub enum ContentBlock {
     ToolCall {
         /// Provider- or caller-assigned tool-call identifier.
         id: String,
+        /// Provider-specific execution call identifier when distinct from `id`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        call_id: Option<String>,
         /// Tool name.
         name: String,
         /// Structured tool input payload.
@@ -85,6 +88,7 @@ impl ContentBlock {
     ) -> Self {
         Self::ToolCall {
             id: id.into(),
+            call_id: None,
             name: name.into(),
             input,
         }

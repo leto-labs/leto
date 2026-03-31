@@ -355,7 +355,13 @@ fn lossy_text_from_blocks(
 fn tool_calls_from_blocks(blocks: &[ContentBlock]) -> Result<Option<Vec<atif::ToolCall>>, String> {
     let mut tool_calls = Vec::new();
     for block in blocks {
-        let ContentBlock::ToolCall { id, name, input } = block else {
+        let ContentBlock::ToolCall {
+            id,
+            call_id,
+            name,
+            input,
+        } = block
+        else {
             continue;
         };
         let arguments = match input {
@@ -367,7 +373,7 @@ fn tool_calls_from_blocks(blocks: &[ContentBlock]) -> Result<Option<Vec<atif::To
             }
         };
         tool_calls.push(atif::ToolCall {
-            tool_call_id: id.clone(),
+            tool_call_id: call_id.clone().unwrap_or_else(|| id.clone()),
             function_name: name.clone(),
             arguments,
         });

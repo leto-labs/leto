@@ -1,7 +1,7 @@
 # ACP UI
 
 Source-first notes on `acp-ui` as a standalone ACP client relevant to
-`brain acp`.
+`agent acp`.
 
 This repo was inspected from the local repocache clone on 2026-03-18.
 
@@ -10,7 +10,7 @@ This repo was inspected from the local repocache clone on 2026-03-18.
 `acp-ui` is the cleanest standalone custom-agent launcher we have found so far.
 
 If the question is "what standalone UI is most likely to talk to a custom local
-`brain acp` command right now with minimal ceremony?", `acp-ui` is the best
+`agent acp` command right now with minimal ceremony?", `acp-ui` is the best
 answer so far.
 
 The tradeoff is that it is a desktop app rather than a terminal TUI, and its
@@ -67,7 +67,7 @@ it is a much smaller inference than with most other clients.
 ## ACP Coverage
 
 `acp-ui` has solid support for the core custom-client surfaces that matter for
-`brain acp`, but its current ACP coverage is narrower than Nori's.
+`agent acp`, but its current ACP coverage is narrower than Nori's.
 
 What is clearly present:
 
@@ -116,7 +116,7 @@ But weaker for:
 ## Fit For `brain`
 
 `acp-ui` is the strongest current standalone custom-agent UI candidate for
-`brain acp` if "easy to configure and inspect" matters more than "must be a TUI".
+`agent acp` if "easy to configure and inspect" matters more than "must be a TUI".
 
 Why:
 

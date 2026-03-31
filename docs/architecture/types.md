@@ -2,7 +2,7 @@
 
 The current shared contracts are no longer concentrated in one `brain-*`
 crate. They are primarily split across `provider`, `agent-runtime`, and
-`agent-store`, with legacy `brain-types` still present for compatibility.
+`agent-store`.
 
 ## Responsibilities
 

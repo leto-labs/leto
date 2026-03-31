@@ -2,14 +2,14 @@
 
 ## Summary
 
-For a final keyboard-first UX pass against local `brain acp`, both
+For a final keyboard-first UX pass against local `agent acp`, both
 `agentic.nvim` and `codecompanion.nvim` are now worth keeping in `repocache`.
 They are both real ACP clients, but they optimize for different things.
 
 The practical recommendation for `brain` today is:
 
 - use `codecompanion.nvim` as the primary Neovim ACP client when the goal is to
-  exercise as much of `brain-acp`'s client-owned surface as possible
+  exercise as much of `agent-acp`'s client-owned surface as possible
 - use `agentic.nvim` as the secondary Neovim ACP client when the goal is the
   most ACP-centric shell with built-in session restore and simpler provider
   switching
@@ -43,7 +43,7 @@ Important limitations for `brain`:
 
 That makes `agentic.nvim` excellent for checking multi-turn ACP chat UX, mode
 changes, permissions, and restore behavior, but weak for validating the
-file-read/file-write part of `brain-acp`'s external-client surface.
+file-read/file-write part of `agent-acp`'s external-client surface.
 
 ## `codecompanion.nvim`
 
@@ -68,18 +68,18 @@ Important limitations for `brain`:
 - agent plans are received but not rendered in the chat UI
 - session management is documented as create/load/persist, but "No restore"
   remains the current limitation
-- there is no obvious generic built-in `brain` adapter; using `brain acp`
+- there is no obvious generic built-in `brain` adapter; using `agent acp`
   cleanly will likely require a small custom ACP adapter or extending an
   existing ACP preset
 
-## Decision For `brain acp`
+## Decision For `agent acp`
 
 If the question is "which Neovim client should be the primary final UX check
-for `brain acp` right now?", the answer is `codecompanion.nvim`.
+for `agent acp` right now?", the answer is `codecompanion.nvim`.
 
 Why:
 
-- it exercises file read/write requests, which `brain-acp` already exposes and
+- it exercises file read/write requests, which `agent-acp` already exposes and
   which `agentic.nvim` does not currently advertise
 - it has explicit ACP permission UX with diff preview
 - it supports session load plus dynamic ACP slash commands and mode/model flows
@@ -105,12 +105,12 @@ configuration shape.
 
 - `agentic.nvim` is simpler to point at a custom ACP server because
   `acp_providers` can directly name a command and args
-- `codecompanion.nvim` has stronger ACP coverage, but `brain acp` likely needs
+- `codecompanion.nvim` has stronger ACP coverage, but `agent acp` likely needs
   a small custom ACP adapter entry rather than pretending to be one of the
   preset agents
 
 That setup cost is acceptable because the final UX pass should optimize for
-coverage of `brain-acp`, not minimal Neovim config.
+coverage of `agent-acp`, not minimal Neovim config.
 
 ## Source Highlights
 

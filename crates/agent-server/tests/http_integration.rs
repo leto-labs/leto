@@ -2213,7 +2213,7 @@ async fn canonical_tool_calls_route_appends_tool_call_history() {
     assert_eq!(appended[0].message.role, MessageRole::Assistant);
     assert!(matches!(
         appended[0].message.content.as_slice(),
-        [ContentBlock::ToolCall { id, name, input }]
+        [ContentBlock::ToolCall { id, name, input, .. }]
             if id == "call_1" && name == "echo" && input == &serde_json::json!({"text": "hello tool"})
     ));
     assert_eq!(appended[1].session_id, session.id);
@@ -2353,7 +2353,7 @@ async fn canonical_session_workflow_round_trips_turns_tool_calls_and_history() {
     assert_eq!(history[4].message.role, MessageRole::Assistant);
     assert!(matches!(
         history[4].message.content.as_slice(),
-        [ContentBlock::ToolCall { id, name, input }]
+        [ContentBlock::ToolCall { id, name, input, .. }]
             if id == "workflow_call"
                 && name == "echo"
                 && input == &serde_json::json!({"text": "workflow tool input"})

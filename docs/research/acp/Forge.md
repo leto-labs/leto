@@ -11,7 +11,7 @@ The main conclusion for `brain` is split:
 
 - `forge` is a serious ACP-native TUI reference and worth keeping in
   `repocache`
-- `forge` is not yet a clean immediate client for local `brain acp`, because
+- `forge` is not yet a clean immediate client for local `agent acp`, because
   its actual agent launch flow is registry-driven rather than a documented raw
   `--agent "<command>"` path like `acpx`
 
@@ -19,7 +19,7 @@ So the current recommendation is:
 
 - keep `acpx` as the most reliable custom-agent ACP client
 - keep `forge` as the strongest ACP TUI candidate and implementation reference
-- revisit `forge` as a live `brain acp` client only if it gains a raw custom
+- revisit `forge` as a live `agent acp` client only if it gains a raw custom
   launcher or if `brain` is wrapped/published in a way Forge can resolve as an
   agent
 
@@ -41,7 +41,7 @@ From source, Forge already has meaningful ACP product coverage:
 That makes Forge qualitatively different from editor-hosted ACP shells. It is a
 true terminal-first ACP product, not just a plugin or adapter.
 
-## Gaps And Risks For `brain acp`
+## Gaps And Risks For `agent acp`
 
 ### 1. Agent launch is registry-driven
 
@@ -66,7 +66,7 @@ The current flag shape is things like:
 - `--agent "name=claude model=opus mode=bypassPermissions"`
 
 That is materially different from
-`acpx --agent "cargo run -q -p brain-acp --bin brain-acp-mock"`.
+`acpx --agent "cargo run -q -p agent-acp --bin agent-acp-mock"`.
 
 ### 2. File read/write is currently disabled as a client capability
 
@@ -78,7 +78,7 @@ Forge's ACP client wiring currently advertises:
 in both the connection path and orchestrator path.
 
 That means Forge is not presently positioned as a high-coverage ACP client for
-`brain-acp`'s `fs/*` client-owned surface, even though it is strong elsewhere.
+`agent-acp`'s `fs/*` client-owned surface, even though it is strong elsewhere.
 
 ### 3. No evidence of general `terminal/*` client support
 
@@ -117,12 +117,12 @@ For `brain` today:
 - use `forge` as a source reference for a serious ACP TUI
 - keep it in `repocache` for continued study of terminal UX, session views,
   plan rendering, and ACP orchestration
-- do not treat it as the primary immediate manual client for local `brain acp`
+- do not treat it as the primary immediate manual client for local `agent acp`
   unless we prove a custom agent launch path
 
 Practical ranking after this analysis:
 
-1. `acpx` for custom local `brain acp` interoperability
+1. `acpx` for custom local `agent acp` interoperability
 2. `forge` for the best ACP-native terminal UX reference and most promising
    future TUI client
 3. Neovim clients for editor-hosted UX checks

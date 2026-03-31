@@ -10,7 +10,7 @@ agent-runtime = { workspace = true }
 dirs = { workspace = true }
 futures = { workspace = true }
 tokio = { workspace = true, features = ["fs", "sync"] }
-tokio-stream = { workspace = true }
+tokio-stream = { workspace = true, features = ["sync"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 chrono = { workspace = true }

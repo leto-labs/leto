@@ -45,6 +45,10 @@ fn tool_events_map_to_pending_and_completed_updates() {
 
     let pending = mapper.map(CoreEvent::Turn {
         session_id,
+        event: RuntimeEvent::ToolCallPending { call: call.clone() },
+    });
+    let started = mapper.map(CoreEvent::Turn {
+        session_id,
         event: RuntimeEvent::ToolCallStarted { call: call.clone() },
     });
     let completed = mapper.map(CoreEvent::Turn {
@@ -62,7 +66,17 @@ fn tool_events_map_to_pending_and_completed_updates() {
         pending_updates.as_slice(),
         [acp::SessionUpdate::ToolCall(tool_call)]
             if tool_call.tool_call_id.0.as_ref() == "call-1"
-                && matches!(tool_call.status, acp::ToolCallStatus::InProgress)
+                && matches!(tool_call.status, acp::ToolCallStatus::Pending)
+    ));
+
+    let MappedEvent::Updates(started_updates) = started else {
+        panic!("expected started updates");
+    };
+    assert!(matches!(
+        started_updates.as_slice(),
+        [acp::SessionUpdate::ToolCallUpdate(update)]
+            if update.tool_call_id.0.as_ref() == "call-1"
+                && matches!(update.fields.status, Some(acp::ToolCallStatus::InProgress))
     ));
 
     let MappedEvent::Updates(completed_updates) = completed else {
@@ -74,6 +88,42 @@ fn tool_events_map_to_pending_and_completed_updates() {
             if update.tool_call_id.0.as_ref() == "call-1"
                 && matches!(update.fields.status, Some(acp::ToolCallStatus::Completed))
     ));
+}
+
+#[test]
+fn assistant_message_tool_calls_are_suppressed_after_runtime_tool_events() {
+    let mut mapper = EventMapper::new();
+    let session_id = Session::new(ulid::Ulid::new()).id;
+    let call = ToolCall {
+        id: "call-1".into(),
+        name: "file_write".into(),
+        input: serde_json::json!({"path": "hello.txt", "content": "Hello, world!"}),
+    };
+
+    let _ = mapper.map(CoreEvent::Turn {
+        session_id,
+        event: RuntimeEvent::ToolCallPending { call: call.clone() },
+    });
+
+    let mapped = mapper.map(CoreEvent::Turn {
+        session_id,
+        event: RuntimeEvent::MessageCommitted {
+            message: Message::new(
+                MessageRole::Assistant,
+                vec![ContentBlock::ToolCall {
+                    id: call.id,
+                    call_id: None,
+                    name: call.name,
+                    input: call.input,
+                }],
+            ),
+        },
+    });
+
+    let MappedEvent::Updates(updates) = mapped else {
+        panic!("expected updates");
+    };
+    assert!(updates.is_empty());
 }
 
 #[test]
