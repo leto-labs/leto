@@ -1,0 +1,17 @@
+[package]
+name = "agent-tool-process"
+edition.workspace = true
+version.workspace = true
+
+[features]
+default = ["native"]
+native = ["dep:tokio"]
+component = []
+
+[dependencies]
+agent-tool = { workspace = true }
+futures = { workspace = true }
+schemars = { workspace = true }
+serde = { workspace = true }
+tokio = { workspace = true, features = ["process"], optional = true }
+

@@ -4,8 +4,10 @@ edition.workspace = true
 version.workspace = true
 
 [dependencies]
+agent-tool = { workspace = true }
+agent-tool-files = { workspace = true }
+agent-tool-process = { workspace = true }
 agent-loops = { workspace = true }
-agent-tools = { workspace = true }
 agent-runtime = { workspace = true }
 agent-store = { workspace = true }
 atif = { workspace = true }

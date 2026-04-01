@@ -17,6 +17,12 @@ pub enum RuntimeError {
     Internal(String),
 }
 
+impl From<agent_tool::ToolError> for RuntimeError {
+    fn from(value: agent_tool::ToolError) -> Self {
+        Self::Tool(value.to_string())
+    }
+}
+
 impl RuntimeError {
     pub fn recoverable(&self) -> bool {
         matches!(

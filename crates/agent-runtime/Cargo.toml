@@ -6,6 +6,7 @@ version.workspace = true
 [dependencies]
 atif = { workspace = true }
 chrono = { workspace = true }
+agent-tool = { workspace = true }
 provider = { workspace = true }
 futures = { workspace = true }
 tokio = { workspace = true, features = ["sync", "rt", "time", "process"] }

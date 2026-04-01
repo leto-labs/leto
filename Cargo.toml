@@ -6,20 +6,23 @@ members = [
     "crates/chat-teams",
     "crates/chat-telegram",
     "crates/atif",
-    "crates/provider",
+    "crates/agent-provider/provider",
+    "crates/agent-tool/tool",
+    "crates/agent-tool/tool-files",
+    "crates/agent-tool/tool-process",
+    "crates/agent-tool/tool-web",
     "crates/agent-runtime",
     "crates/agent-loops",
-    "crates/agent-tools",
     "crates/agent-store",
     "crates/agent-core",
     "crates/agent-core-remote",
     "crates/agent-server",
     "crates/agent-acp",
     "crates/agent-cli",
-    "crates/provider-anthropic",
-    "crates/provider-llamacpp",
-    "crates/provider-mistralrs",
-    "crates/provider-openai",
+    "crates/agent-provider/provider-anthropic",
+    "crates/agent-provider/provider-llamacpp",
+    "crates/agent-provider/provider-mistralrs",
+    "crates/agent-provider/provider-openai",
     "tools/provider-preset-gen",
 ]
 
@@ -97,20 +100,23 @@ chat = { path = "crates/chat" }
 chat-slack = { path = "crates/chat-slack" }
 chat-teams = { path = "crates/chat-teams" }
 chat-telegram = { path = "crates/chat-telegram" }
-provider = { path = "crates/provider" }
+provider = { path = "crates/agent-provider/provider" }
+agent-tool = { path = "crates/agent-tool/tool" }
+agent-tool-files = { path = "crates/agent-tool/tool-files" }
+agent-tool-process = { path = "crates/agent-tool/tool-process" }
+agent-tool-web = { path = "crates/agent-tool/tool-web" }
 agent-runtime = { path = "crates/agent-runtime" }
 agent-loops = { path = "crates/agent-loops" }
-agent-tools = { path = "crates/agent-tools" }
 agent-store = { path = "crates/agent-store" }
 agent-core = { path = "crates/agent-core" }
 agent-core-remote = { path = "crates/agent-core-remote" }
 agent-server = { path = "crates/agent-server" }
 agent-acp = { path = "crates/agent-acp" }
 agent-cli = { path = "crates/agent-cli" }
-provider-anthropic = { path = "crates/provider-anthropic" }
-provider-llamacpp = { path = "crates/provider-llamacpp" }
-provider-mistralrs = { path = "crates/provider-mistralrs" }
-provider-openai = { path = "crates/provider-openai" }
+provider-anthropic = { path = "crates/agent-provider/provider-anthropic" }
+provider-llamacpp = { path = "crates/agent-provider/provider-llamacpp" }
+provider-mistralrs = { path = "crates/agent-provider/provider-mistralrs" }
+provider-openai = { path = "crates/agent-provider/provider-openai" }
 
 [profile.release]
 opt-level = 3

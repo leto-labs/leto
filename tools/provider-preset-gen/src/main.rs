@@ -12,7 +12,7 @@ use serde::Deserialize;
 const MODELS_DEV_URL: &str = "https://github.com/anomalyco/models.dev";
 const MODELS_DEV_BRANCH: &str = "dev";
 const MODELS_DEV_PATH: &str = "repocache/anomalyco/models.dev";
-const OUTPUT_DIR: &str = "crates/provider-openai/src/presets";
+const OUTPUT_DIR: &str = "crates/agent-provider/provider-openai/src/presets";
 
 #[derive(Parser, Debug)]
 struct Args {

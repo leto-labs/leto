@@ -1,11 +1,16 @@
-# Project: brain
+# Project: leto
 
 ## Description
 Platform-agnostic AI agent engine in Rust. The current application-facing stack
-uses `agent-core` over `agent-runtime`, `agent-store`, `agent-tools`,
-`agent-loops`, and the standalone `provider-*` crates. Legacy `brain-*` source
-is archived locally under `archive/brain/` and is not part of the committed
-workspace.
+uses `agent-core` over `agent-runtime`, `agent-store`, `agent-tool`, the
+`agent-tool-*` family crates, `agent-loops`, and the standalone `provider-*`
+crates. Legacy `brain-*` source is archived locally under `archive/brain/` and
+is not part of the committed workspace.
+
+Repository layout groups standalone ecosystems under shared folders:
+
+- `crates/agent-provider/` contains `provider` plus the standalone `provider-*` crates
+- `crates/agent-tool/` contains `agent-tool` plus the standalone `agent-tool-*` crates
 
 ## Architecture
 - Active workspace crates:
@@ -21,7 +26,10 @@ workspace.
   - `provider-llamacpp`
   - `agent-runtime`
   - `agent-loops`
-  - `agent-tools`
+  - `agent-tool`
+  - `agent-tool-files`
+  - `agent-tool-process`
+  - `agent-tool-web`
   - `agent-store`
   - `agent-core`
   - `agent-core-remote`
@@ -37,8 +45,9 @@ workspace.
 - The modern stack splits responsibilities as:
   - `provider` and `provider-*` for the shared provider SDK and concrete integrations
   - `agent-runtime` for the live session engine
+  - `agent-tool` for the shared tool SDK and runtime-facing executor contract
+  - `agent-tool-files` / `agent-tool-process` / `agent-tool-web` for first-party tool families
   - `agent-store` for durable state
-  - `agent-tools` for typed tool implementations
   - `agent-loops` for loop policy
   - `agent-core` / `agent-core-remote` / `agent-server` / `agent-acp` / `agent-cli` for application surfaces
 

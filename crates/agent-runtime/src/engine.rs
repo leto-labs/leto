@@ -3109,7 +3109,7 @@ impl EngineRuntime {
             let result = if is_native_runtime_tool(&call.name) {
                 execute_native_runtime_tool(engine, call.clone()).await
             } else {
-                tools.execute(call.clone()).await
+                tools.execute(call.clone()).await.map_err(Into::into)
             };
             let _ = command_tx
                 .send(EngineCommand::ToolFinished { call, result })
@@ -5403,7 +5403,7 @@ mod tests {
     use tempfile::TempDir;
     use tokio::time::{Duration, timeout};
 
-    use crate::ResultMode;
+    use crate::{ResultMode, ToolError};
 
     struct TestTools;
 
@@ -5425,7 +5425,7 @@ mod tests {
         fn execute<'a>(
             &'a self,
             call: ToolCall,
-        ) -> BoxFuture<'a, Result<ToolExecutionResult, RuntimeError>> {
+        ) -> BoxFuture<'a, Result<ToolExecutionResult, ToolError>> {
             Box::pin(async move {
                 Ok(ToolExecutionResult::success(serde_json::json!({
                     "echoed": call.input

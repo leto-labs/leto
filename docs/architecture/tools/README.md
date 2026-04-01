@@ -1,16 +1,17 @@
 # Tools
 
-`agent-tools` packages the runtime capabilities that loops can invoke. The
-crate uses typed request/response contracts plus an erased runtime-facing tool
-executor so the public tool surface stays stable while execution moves between
-native Rust implementations and ACP-backed client-owned operations.
+The tool layer is now split between `agent-tool`, which owns the shared tool
+SDK and erased runtime-facing executor contract, and first-party `agent-tool-*`
+family crates that implement concrete tool packs. This keeps the execution
+boundary stable while file, process, and future web capabilities evolve
+independently.
 
 ## Table Of Contents
 
 | Tool | Document |
 | --- | --- |
 | Overview | [`README.md`](README.md) |
-| `echo` | [`echo.md`](echo.md) |
+| `agent-tool` / `echo` | [`echo.md`](echo.md) |
 | `file_read` | [`file_read.md`](file_read.md) |
 | `file_write` | [`file_write.md`](file_write.md) |
 | `file_edit` | [`file_edit.md`](file_edit.md) |
@@ -25,7 +26,7 @@ native Rust implementations and ACP-backed client-owned operations.
 
 | Tool | Main purpose | Backend style |
 | --- | --- | --- |
-| `echo` | Small test/debug tool | Direct implementation |
+| `echo` | Small test/debug tool in `agent-tool` | Direct implementation |
 | `file_read` | Read file contents with offset/limit controls | Native and ACP-backed variants |
 | `file_write` | Create or overwrite files | Native and ACP-backed variants |
 | `file_edit` | Single-match replacement edits | Native |
@@ -33,13 +34,13 @@ native Rust implementations and ACP-backed client-owned operations.
 | `list_directory` | Tree-like directory listing | Native |
 | `glob_search` | File pattern search | Native |
 | `grep` | Regex content search | Native |
-| `shell` | One-shot shell command execution | Native |
-| `terminal_session` | Persistent interactive terminal session | Native |
+| `shell` | One-shot shell command execution in `agent-tool-process` | Native |
 
 ## Pattern
 
 | Layer | Responsibility |
 | --- | --- |
+| `agent-tool` SDK | Shared `ToolExecutor`, tool call/result envelopes, and standard registry |
 | `Tool` implementation | Advertise schema and validate arguments |
 | Driver trait | Define the execution contract for a family of tools |
 | Native / ACP driver | Perform the actual filesystem, shell, or client-bridge work |
@@ -71,6 +72,8 @@ flowchart TD
 
 ## Runtime Default Surface
 
-`native_tools()` is the preset that registers the common local tool suite for
-the CLI and native core bootstrap. That gives `agent-cli` and direct Harbor
-runs one consistent baseline tool inventory.
+The native core bootstrap now composes the shared `agent-tool` SDK registry
+with the native tool-family helpers from `agent-tool-files` and
+`agent-tool-process`. That gives `agent-cli` and direct Harbor runs one
+consistent baseline tool inventory without requiring a monolithic `agent-tools`
+crate.

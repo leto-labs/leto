@@ -1,0 +1,5 @@
+- [x] Add the `agent-tool` shared SDK crate and move the shared tool boundary out of `agent-runtime`
+- [x] Split first-party builtin tools into `agent-tool-files`, `agent-tool-process`, and `agent-tool-web`
+- [x] Update `agent-core`, `agent-runtime`, and `agent-acp` to consume the new tool family crates
+- [x] Replace stale repository and OpenSpec references to the old `agent-tools` monolith
+- [x] Validate the OpenSpec change and verify the workspace with `cargo test --workspace`

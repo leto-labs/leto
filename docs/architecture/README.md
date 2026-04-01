@@ -7,7 +7,7 @@ This section documents the current `brain` workspace using the live
 
 | Layer | Crates | Role in the stack | Current status |
 | --- | --- | --- | --- |
-| Shared contracts | [`types.md`](types.md) | Where current shared contracts are split across `provider`, `agent-runtime`, and `agent-store` | Active foundation |
+| Shared contracts | [`types.md`](types.md) | Where current shared contracts are split across `provider`, `agent-tool`, `agent-runtime`, and `agent-store` | Active foundation |
 | Application core | [`core/README.md`](core/README.md) | `AgentCore`, `AgentCoreNative`, and the future remote core shape | Core orchestration |
 | Reusable session engine | [`agent-runtime/README.md`](agent-runtime/README.md) | Live per-session engine and loop/runtime boundary | Active foundation |
 | Execution strategies | [`loops/README.md`](loops/README.md) | `simple`, `robust`, `terminus2`, `terminus-kira` | Highest churn / experimental pressure |
@@ -28,7 +28,10 @@ flowchart TD
 
     Provider[provider / provider-*]
     Loops[agent-loops]
-    Tools[agent-tools]
+    ToolSdk[agent-tool]
+    ToolFiles[agent-tool-files]
+    ToolProcess[agent-tool-process]
+    ToolWeb[agent-tool-web]
     Store[agent-store]
     Atif[atif]
 
@@ -41,11 +44,14 @@ flowchart TD
     Core --> Session
     Core --> Provider
     Core --> Loops
-    Core --> Tools
+    Core --> ToolSdk
+    Core --> ToolFiles
+    Core --> ToolProcess
+    Core --> ToolWeb
     Core --> Store
     Core --> Atif
     Session --> Provider
-    Session --> Tools
+    Session --> ToolSdk
 ```
 
 ## Runtime Turn Flow
@@ -97,5 +103,5 @@ sequenceDiagram
 | Core boundary | `agent-core` keeps product-facing orchestration separate from the live session engine | More behavior is now traveling through events, approvals, PTYs, and child agents |
 | Runtime assembly | `AgentCoreNative` gives one place to resolve providers, loops, and tools | More responsibilities are accumulating around bootstrap, credentials, and client integration |
 | Loop experimentation | Loop work is isolated in `agent-loops` instead of hardcoding policy in `agent-core` | `terminus2` and `terminus-kira` are materially different from `simple`/`robust` |
-| Tooling | Driver pattern keeps tool contracts stable while swapping execution backends | ACP-backed file access and persistent terminal sessions expand the contract surface |
+| Tooling | `agent-tool` separates the shared executor contract from first-party tool families | File/process/web capabilities now evolve independently instead of accumulating in one monolith |
 | Benchmarks | `agent exec` and `atif` give a direct benchmark/export path | Harbor and loop work are influencing architecture faster than the docs had kept up |

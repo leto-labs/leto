@@ -3,29 +3,21 @@
 ## Purpose
 TBD - created by archiving change add-agent-core-and-store. Update Purpose after archive.
 ## Requirements
-### Requirement: Agent Tools Must Provide Typed V2 Tool Implementations
+### Requirement: Agent Tools Capability Must Resolve To The Split Tool Family Architecture
 
-The system MUST provide an `agent-tools` crate that owns the concrete v2 tool
-surface for local runtime assembly.
+The system MUST treat the old `agent-tools` capability as a legacy reference to
+the split tool-family architecture rather than as a required monolithic crate.
 
-The crate MUST keep typed Rust request/response contracts and swappable driver
-traits while exposing an erased runtime-facing `ToolExecutor` surface.
+The canonical tool surface SHALL now be provided by:
 
-#### Scenario: Native tool registry backs the runtime executor
-- **WHEN** a caller builds the default native `agent-tools` registry
-- **THEN** it exposes provider-visible tool definitions
-- **AND** dispatches tool calls by name through typed request/response handlers
+- `agent-tool` for shared tool contracts and the standard registry
+- `agent-tool-files` for canonical file/workspace/search tools
+- `agent-tool-process` for canonical process tools
+- `agent-tool-web` for the reserved web-oriented tool family boundary
 
-### Requirement: Agent Tools Must Generate Schemas Directly From Typed Contracts
-
-The system MUST generate tool input and output schemas directly from the typed
-request/response types used by `agent-tools`.
-
-The v1 implementation MUST use direct `schemars` output and MUST NOT add a
-schema-normalization layer unless a concrete compatibility problem requires it.
-
-#### Scenario: Tool schemas preserve required fields and descriptions
-- **WHEN** an `agent-tools` request/response type derives the schema traits
-- **THEN** its generated tool definition preserves required fields
-- **AND** object/field descriptions may come from Rust doc comments or explicit schema attributes
-
+#### Scenario: Reader resolves the current tool architecture
+- **WHEN** a caller or contributor looks up the canonical tool capability
+- **THEN** the workspace directs them to the `agent-tool` plus `agent-tool-*`
+  family crates
+- **AND** it SHALL NOT require a monolithic `agent-tools` crate to assemble the
+  default native tool surface

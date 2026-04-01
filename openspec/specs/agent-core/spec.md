@@ -11,7 +11,8 @@ composition boundary above `agent-runtime`.
 #### Scenario: Default local assembly
 - **WHEN** a caller builds the default local core surface
 - **THEN** the core registers a default loop
-- **AND** installs a native `agent-tools` tool executor
+- **AND** installs a native tool executor composed from `agent-tool`,
+  `agent-tool-files`, and `agent-tool-process`
 - **AND** requires at least one real registered or discovered provider
 
 #### Scenario: Default local assembly rejects missing providers

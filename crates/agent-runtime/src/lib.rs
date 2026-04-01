@@ -7,8 +7,11 @@ mod event;
 mod loop_strategy;
 mod pty;
 mod session;
-mod tool;
 
+pub use agent_tool::{
+    ApprovalDecision, ApprovalRequest, ToolApproval, ToolCall, ToolError, ToolExecutionResult,
+    ToolExecutor,
+};
 pub use command::*;
 pub use config::*;
 pub use engine::*;
@@ -21,4 +24,3 @@ pub use provider::{
 };
 pub(crate) use pty::*;
 pub use session::*;
-pub use tool::*;

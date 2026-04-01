@@ -39,16 +39,24 @@ The agent loop is a **trait**, not a hardcoded function. Different strategies ar
 
 ## Workspace
 
-```
+``` 
 crates/
-  provider/           Shared v2 provider SDK
-  provider-openai/    Standalone OpenAI-compatible v2 provider crate
-  provider-anthropic/ Standalone Anthropic v2 provider crate
-  provider-mistralrs/ Standalone mistral.rs local v2 provider crate
-  provider-llamacpp/  Standalone llama.cpp local v2 provider crate
+  agent-provider/
+    provider/         Shared v2 provider SDK
+    provider-openai/  Standalone OpenAI-compatible v2 provider crate
+    provider-anthropic/
+                     Standalone Anthropic v2 provider crate
+    provider-mistralrs/
+                     Standalone mistral.rs local v2 provider crate
+    provider-llamacpp/
+                     Standalone llama.cpp local v2 provider crate
   agent-runtime/      Live per-session execution engine
   agent-loops/        Current loop strategies
-  agent-tools/        Typed tool implementations and native tool registry
+  agent-tool/
+    tool/             Shared tool SDK and erased runtime-facing executor contract
+    tool-files/       Canonical file/workspace/search tool family
+    tool-process/     Canonical process tool family
+    tool-web/         Future web-oriented tool family boundary
   agent-store/        Durable project/session/message/credential storage
   agent-core/         Shared product-facing orchestration boundary
   agent-core-remote/  Remote AgentCore client
@@ -71,8 +79,8 @@ crates/
 
 ## Provider Roadmap
 
-The current provider path is centered on `provider` plus standalone
-`provider-*` crates:
+The current provider path is centered on `crates/agent-provider/` and keeps
+`provider` plus standalone `provider-*` crates grouped as one ecosystem:
 
 1. **MockProvider** *(done)* — echo, no network, no API keys
 2. **OpenAiProvider** *(done)* — reqwest + SSE streaming, feature-gated behind `openai`

@@ -64,9 +64,15 @@ Core engine/workspace focus:
 
 Rust workspace (edition 2024). Platform-agnostic AI agent engine. The current
 application-facing stack centers on `agent-core`, `agent-runtime`,
-`agent-store`, `agent-tools`, `agent-loops`, and the standalone `provider-*`
-crates. Legacy `brain-*` source is kept only as a local gitignored archive
-under `archive/brain/` when reference material is still needed.
+`agent-store`, `agent-tool`, the `agent-tool-*` family crates, `agent-loops`,
+and the standalone `provider-*` crates. Legacy `brain-*` source is kept only as
+a local gitignored archive under `archive/brain/` when reference material is
+still needed.
+
+Repository layout groups standalone ecosystems under shared folders:
+
+- `crates/agent-provider/` contains `provider` plus the standalone `provider-*` crates
+- `crates/agent-tool/` contains `agent-tool` plus the standalone `agent-tool-*` crates
 
 ### Conventions
 - Traits as interfaces, not class hierarchies
@@ -103,15 +109,18 @@ under `archive/brain/` when reference material is still needed.
 - `provider-llamacpp` — standalone llama.cpp local v2 provider crate (feature `llamacpp`, off by default)
 - `agent-runtime` — live session engine, runtime events, loop/runtime boundary, PTY and child-agent control
 - `agent-store` — durable project/session/message/credential/trajectory storage, including `FileStore` and project bootstrap config helpers
-- `agent-tools` — typed v2 tool implementations and the erased runtime-facing tool executor:
-  - `echo.rs` — EchoTool (platform-independent, no driver)
-  - `file_read/` — FileReadDriver, FileReadTool\<T\>, FileReadDriverNative (feature `native`)
-  - `file_write/` — FileWriteDriver, FileWriteTool\<T\>, FileWriteDriverNative
-  - `file_edit/` — FileEditDriver, FileEditTool\<T\>, FileEditDriverNative
-  - `shell/` — ShellDriver, ShellTool\<T\>, ShellDriverNative
-  - `glob_search/` — GlobDriver, GlobTool\<T\>, GlobDriverNative
-  - `grep/` — GrepDriver, GrepTool\<T\>, GrepDriverNative
-  - `native_tools()` — preset returning all native-backed tools
+- `agent-tool` — shared tool SDK and erased runtime-facing tool executor contract
+- `agent-tool-files` — canonical file/workspace/search tool family:
+  - `file_read/` — FileReadDriver, FileReadTool\<T\>, NativeFileReadDriver
+  - `file_write/` — FileWriteDriver, FileWriteTool\<T\>, NativeFileWriteDriver
+  - `file_edit/` — FileEditDriver, FileEditTool\<T\>, NativeFileEditDriver
+  - `apply_patch/` — ApplyPatchDriver, ApplyPatchTool\<T\>, NativeApplyPatchDriver
+  - `list_directory/` — ListDirectoryDriver, ListDirectoryTool\<T\>, NativeListDirectoryDriver
+  - `glob_search/` — GlobSearchDriver, GlobSearchTool\<T\>, NativeGlobSearchDriver
+  - `grep/` — GrepDriver, GrepTool\<T\>, AutoGrepDriver / NativeGrepDriver / RipgrepDriver
+- `agent-tool-process` — canonical process tool family:
+  - `shell/` — ShellDriver, ShellTool\<T\>, NativeShellDriver
+- `agent-tool-web` — dedicated family boundary for future web-oriented canonical tools
 - `agent-loops` — current loop strategies such as `SimpleLoop`, `RobustLoop`, `Terminus2Loop`, and `TerminusKiraLoop`
 - `agent-core` — shared product-facing core boundary (`AgentCore`, `AgentCoreNative`) over stores, providers, tools, and loops
 - `agent-core-remote` — remote `AgentCore` client over the canonical hosted protocol

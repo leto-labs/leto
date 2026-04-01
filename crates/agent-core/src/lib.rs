@@ -18,7 +18,9 @@ use agent_store::{
     CredentialEntry, Project, ProjectConfig, ProjectId, Session, SessionId, SessionUpdate, Store,
     StoreError, StoreEvent, StoredMessage, normalize_project_root,
 };
-use agent_tools::native_tools as native_tool_executor;
+use agent_tool::{EchoTool, RegistryToolExecutor};
+use agent_tool_files::register_native_tools as register_native_file_tools;
+use agent_tool_process::register_native_tools as register_native_process_tools;
 use chrono::{DateTime, Utc};
 use futures::{Stream, StreamExt, future::BoxFuture};
 use provider::{
@@ -39,6 +41,17 @@ use tokio_util::sync::CancellationToken;
 use crate::bootstrap::resolve_project_config;
 
 const CORE_EVENT_CAPACITY: usize = 1024;
+
+fn native_tool_executor() -> RegistryToolExecutor {
+    let mut registry = RegistryToolExecutor::new();
+    registry
+        .register(Arc::new(EchoTool))
+        .expect("builtin core tool name should be unique");
+    register_native_file_tools(&mut registry).expect("builtin file tool names should be unique");
+    register_native_process_tools(&mut registry)
+        .expect("builtin process tool names should be unique");
+    registry
+}
 
 /// Stream of events emitted by the application-facing core boundary.
 pub type CoreEventStream = Pin<Box<dyn Stream<Item = CoreEvent> + Send>>;
@@ -524,8 +537,9 @@ impl AgentCoreNative {
         AgentCoreNativeBuilder::new(store)
     }
 
-    /// Builds a default local core surface with native `agent-tools`,
-    /// `SimpleLoop`, and provider discovery from stored credentials.
+    /// Builds a default local core surface with the native `agent-tool`
+    /// family crates, `SimpleLoop`, and provider discovery from stored
+    /// credentials.
     pub async fn build_default_local(store: Arc<dyn Store>) -> Result<Self, CoreError> {
         Self::builder(store).build().await
     }

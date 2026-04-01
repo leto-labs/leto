@@ -17,7 +17,7 @@ mod tests {
         AgentCommand, ApprovalDecision, ControlEvent, InterruptMode, Message, MessageRole,
         OpenPtyRequest, PtyCommand, RuntimeConfig, RuntimeEvent, SessionBoundary, SessionCommand,
         SessionEngine, SessionPhase, SessionState, SpawnRequest, SteerWhen, ToolApproval, ToolCall,
-        ToolExecutionResult, ToolExecutor,
+        ToolError, ToolExecutionResult, ToolExecutor,
     };
     use async_stream::stream;
     use futures::future::BoxFuture;
@@ -50,7 +50,7 @@ mod tests {
         fn execute<'a>(
             &'a self,
             call: ToolCall,
-        ) -> BoxFuture<'a, Result<ToolExecutionResult, agent_runtime::RuntimeError>> {
+        ) -> BoxFuture<'a, Result<ToolExecutionResult, ToolError>> {
             Box::pin(async move {
                 Ok(ToolExecutionResult::success(serde_json::json!({
                     "message": call.input["message"].clone()
@@ -75,7 +75,7 @@ mod tests {
         fn execute<'a>(
             &'a self,
             call: ToolCall,
-        ) -> BoxFuture<'a, Result<ToolExecutionResult, agent_runtime::RuntimeError>> {
+        ) -> BoxFuture<'a, Result<ToolExecutionResult, ToolError>> {
             EchoTools.execute(call)
         }
     }

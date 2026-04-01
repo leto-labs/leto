@@ -1,0 +1,5 @@
+- [x] Move provider crates into `crates/agent-provider/` and tool crates into `crates/agent-tool/`
+- [x] Update workspace Cargo paths and any path-sensitive tooling
+- [x] Update docs and specs that mention the old flat crate directories
+- [x] Validate the OpenSpec change
+- [x] Run `cargo test --workspace`

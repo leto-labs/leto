@@ -1,0 +1,29 @@
+[package]
+name = "agent-tool-files"
+edition.workspace = true
+version.workspace = true
+
+[features]
+default = ["native"]
+native = ["dep:tokio"]
+component = ["dep:wasmtime"]
+
+[dependencies]
+agent-tool = { workspace = true }
+agent-tool-process = { workspace = true, optional = false }
+futures = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+provider = { workspace = true }
+schemars = { workspace = true }
+tokio = { workspace = true, features = ["fs", "process"], optional = true }
+tracing = { workspace = true }
+wasmtime = { version = "43.0.0", default-features = false, features = ["component-model", "cranelift", "runtime", "std"], optional = true }
+glob = "0.3"
+regex = "1"
+walkdir = "2"
+
+[dev-dependencies]
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }

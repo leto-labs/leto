@@ -1,8 +1,8 @@
 # Shared Contracts
 
 The current shared contracts are no longer concentrated in one `brain-*`
-crate. They are primarily split across `provider`, `agent-runtime`, and
-`agent-store`.
+crate. They are primarily split across `provider`, `agent-tool`,
+`agent-runtime`, and `agent-store`.
 
 ## Responsibilities
 
@@ -10,7 +10,7 @@ crate. They are primarily split across `provider`, `agent-runtime`, and
 | --- | --- | --- |
 | Inference contract | `provider::{Provider, Request, Message, ToolDefinition, ProviderInfo}` | Keeps model backends swappable |
 | Runtime contract | `agent-runtime::{SessionEngine, RuntimeEvent, LoopStrategy}` | Separates live execution mechanics from product orchestration |
-| Tool contract | `agent-runtime::ToolExecutor` plus `agent-tools` typed contracts | Decouples loop policy from tool implementation |
+| Tool contract | `agent-tool::{ToolExecutor, ToolCall, ToolExecutionResult}` plus the `agent-tool-*` family crates | Decouples loop policy from tool implementation |
 | Persistence contract | `agent-store::{Store, ProjectStore, SessionStore, MessageStore, CredentialStore, TrajectoryStore}` | Keeps durable state ownership out of the loop implementation |
 | Application boundary | `agent-core::AgentCore` | Gives CLI, ACP, and server one shared consumer surface |
 | Configuration model | `agent-store::ProjectConfig` and `agent-runtime::RuntimeConfig` | Carries bootstrap and live runtime settings |
@@ -36,6 +36,7 @@ flowchart TD
 
     Provider --> Message[message + request model]
     Provider --> Event[provider event model]
+    ToolSdk[agent-tool]
     Runtime --> Tool[tool executor boundary]
     Runtime --> Loop[loop/runtime boundary]
     Runtime --> Event
@@ -43,6 +44,7 @@ flowchart TD
     Core --> Runtime
     Core --> Store
     Core --> Provider
+    Runtime --> ToolSdk
 ```
 
 ## Places To Watch

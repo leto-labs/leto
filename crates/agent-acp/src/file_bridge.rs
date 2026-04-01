@@ -6,12 +6,17 @@ use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
 use agent_client_protocol::{self as acp, Client as _};
-use agent_runtime::{RuntimeError, ToolCall, ToolExecutionResult, ToolExecutor};
-use agent_tools::{
-    ApplyPatchTool, AutoGrepDriver, EchoTool, FileEditTool, GlobSearchTool, GrepTool,
-    ListDirectoryTool, NativeApplyPatchDriver, NativeFileEditDriver, NativeGlobSearchDriver,
-    NativeListDirectoryDriver, NativeShellDriver, RegistryToolExecutor, ShellTool, TypedTool,
+use agent_runtime::RuntimeError;
+use agent_tool::{
+    EchoTool, RegistryToolExecutor, ToolCall, ToolError, ToolExecutionResult, ToolExecutor,
+    TypedTool,
 };
+use agent_tool_files::{
+    ApplyPatchTool, AutoGrepDriver, FileEditTool, FileReadTool, FileWriteTool, GlobSearchTool,
+    GrepTool, ListDirectoryTool, NativeApplyPatchDriver, NativeFileEditDriver,
+    NativeFileReadDriver, NativeFileWriteDriver, NativeGlobSearchDriver, NativeListDirectoryDriver,
+};
+use agent_tool_process::{NativeShellDriver, ShellTool};
 use async_stream::stream;
 use futures::{StreamExt, future::BoxFuture};
 use provider::ToolDefinition;
@@ -369,13 +374,27 @@ struct AcpBridgeToolExecutor {
 impl AcpBridgeToolExecutor {
     fn new(bridge: AcpFileBridge) -> Self {
         let mut native = RegistryToolExecutor::new();
-        native.register(Arc::new(EchoTool));
-        native.register(Arc::new(FileEditTool::new(NativeFileEditDriver)));
-        native.register(Arc::new(ApplyPatchTool::new(NativeApplyPatchDriver)));
-        native.register(Arc::new(ShellTool::new(NativeShellDriver)));
-        native.register(Arc::new(ListDirectoryTool::new(NativeListDirectoryDriver)));
-        native.register(Arc::new(GlobSearchTool::new(NativeGlobSearchDriver)));
-        native.register(Arc::new(GrepTool::new(AutoGrepDriver)));
+        native
+            .register(Arc::new(EchoTool))
+            .expect("bridge tool name should be unique");
+        native
+            .register(Arc::new(FileEditTool::new(NativeFileEditDriver)))
+            .expect("bridge tool name should be unique");
+        native
+            .register(Arc::new(ApplyPatchTool::new(NativeApplyPatchDriver)))
+            .expect("bridge tool name should be unique");
+        native
+            .register(Arc::new(ShellTool::new(NativeShellDriver)))
+            .expect("bridge tool name should be unique");
+        native
+            .register(Arc::new(ListDirectoryTool::new(NativeListDirectoryDriver)))
+            .expect("bridge tool name should be unique");
+        native
+            .register(Arc::new(GlobSearchTool::new(NativeGlobSearchDriver)))
+            .expect("bridge tool name should be unique");
+        native
+            .register(Arc::new(GrepTool::new(AutoGrepDriver)))
+            .expect("bridge tool name should be unique");
         Self { native, bridge }
     }
 }
@@ -383,10 +402,8 @@ impl AcpBridgeToolExecutor {
 impl ToolExecutor for AcpBridgeToolExecutor {
     fn definitions(&self) -> Vec<ToolDefinition> {
         let mut definitions = self.native.definitions();
-        definitions
-            .push(agent_tools::FileReadTool::new(agent_tools::NativeFileReadDriver).definition());
-        definitions
-            .push(agent_tools::FileWriteTool::new(agent_tools::NativeFileWriteDriver).definition());
+        definitions.push(FileReadTool::new(NativeFileReadDriver).definition());
+        definitions.push(FileWriteTool::new(NativeFileWriteDriver).definition());
         definitions.sort_by(|left, right| left.name.cmp(&right.name));
         definitions
     }
@@ -394,13 +411,13 @@ impl ToolExecutor for AcpBridgeToolExecutor {
     fn execute<'a>(
         &'a self,
         call: ToolCall,
-    ) -> BoxFuture<'a, Result<ToolExecutionResult, RuntimeError>> {
+    ) -> BoxFuture<'a, Result<ToolExecutionResult, ToolError>> {
         Box::pin(async move {
             match call.name.as_str() {
                 "file_read" => {
                     let request: BridgeFileReadRequest = serde_json::from_value(call.input.clone())
                         .map_err(|error| {
-                            RuntimeError::Tool(format!("invalid input for file_read: {error}"))
+                            ToolError::new(format!("invalid input for file_read: {error}"))
                         })?;
                     if let Some(session_id) = request.session_id.as_deref()
                         && let Some(output) = self
@@ -411,7 +428,8 @@ impl ToolExecutor for AcpBridgeToolExecutor {
                                 request.offset,
                                 request.limit,
                             )
-                            .await?
+                            .await
+                            .map_err(|error| ToolError::new(error.to_string()))?
                     {
                         return Ok(ToolExecutionResult::success(serde_json::json!(output)));
                     }
@@ -420,13 +438,14 @@ impl ToolExecutor for AcpBridgeToolExecutor {
                 "file_write" => {
                     let request: BridgeFileWriteRequest =
                         serde_json::from_value(call.input.clone()).map_err(|error| {
-                            RuntimeError::Tool(format!("invalid input for file_write: {error}"))
+                            ToolError::new(format!("invalid input for file_write: {error}"))
                         })?;
                     if let Some(session_id) = request.session_id.as_deref()
                         && let Some(output) = self
                             .bridge
                             .write_text_file(session_id, &request.path, &request.content)
-                            .await?
+                            .await
+                            .map_err(|error| ToolError::new(error.to_string()))?
                     {
                         return Ok(ToolExecutionResult::success(serde_json::json!(output)));
                     }

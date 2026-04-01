@@ -78,7 +78,7 @@ The system SHALL provide a workspace Rust generator that emits the checked-in `O
 #### Scenario: Generate preset modules from models.dev
 - **WHEN** the preset generator is run
 - **THEN** it SHALL read the configured provider allowlist from the local models.dev checkout
-- **AND** it SHALL write per-provider preset Rust modules under `crates/provider-openai/src/presets/`
+- **AND** it SHALL write per-provider preset Rust modules under `crates/agent-provider/provider-openai/src/presets/`
 - **AND** those generated modules SHALL expose the same built-in preset constants through `OpenAiConfigPreset`
 
 #### Scenario: Verify generated preset modules are current

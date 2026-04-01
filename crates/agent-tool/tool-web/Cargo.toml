@@ -1,0 +1,7 @@
+[package]
+name = "agent-tool-web"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+agent-tool = { workspace = true }
