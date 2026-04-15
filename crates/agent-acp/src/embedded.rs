@@ -20,8 +20,12 @@ pub async fn run_embedded_stdio() -> Result<()> {
         .with_ansi(false)
         .try_init();
 
+    let agent_home = resolve_agent_home();
+    validate_store_root(&agent_home)
+        .await
+        .with_context(|| format!("incompatible agent store at {}", agent_home.display()))?;
     let store: Arc<dyn Store> = Arc::new(
-        FileStore::new(resolve_agent_home())
+        FileStore::new(&agent_home)
             .await
             .context("failed to initialize file store")?,
     );
@@ -40,8 +44,28 @@ fn resolve_agent_home() -> PathBuf {
         .unwrap_or_else(|| {
             home_dir()
                 .unwrap_or_else(|| PathBuf::from("."))
-                .join(".brain")
+                .join(".agent")
         })
+}
+
+async fn validate_store_root(root: &std::path::Path) -> Result<()> {
+    let sessions_dir = root.join("sessions");
+    let mut entries = match tokio::fs::read_dir(&sessions_dir).await {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error.into()),
+    };
+
+    while let Some(entry) = entries.next_entry().await? {
+        if entry.file_type().await?.is_dir() {
+            anyhow::bail!(
+                "found legacy directory entry under sessions/: {}. Set AGENT_HOME to a clean store root or migrate the legacy data first",
+                entry.path().display()
+            );
+        }
+    }
+
+    Ok(())
 }
 
 async fn build_embedded_core(store: Arc<dyn Store>) -> Result<AgentCoreNative, CoreError> {

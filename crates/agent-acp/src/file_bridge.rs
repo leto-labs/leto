@@ -83,6 +83,14 @@ impl AcpFileBridge {
             .insert(session_id.0.to_string(), cwd.to_path_buf());
     }
 
+    pub(crate) async fn forget_session(&self, session_id: &acp::SessionId) {
+        self.state
+            .write()
+            .await
+            .session_cwds
+            .remove(session_id.0.as_ref());
+    }
+
     pub(crate) fn spawn_local_client_runner(&self, connection: Rc<acp::AgentSideConnection>) {
         let (command_tx, mut command_rx) = mpsc::unbounded_channel();
         *self

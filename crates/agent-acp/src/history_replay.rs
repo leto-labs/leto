@@ -10,7 +10,9 @@ pub fn replay_updates(session: &Session, messages: &[StoredMessage]) -> Vec<acp:
 
     // Emit session info
     updates.push(acp::SessionUpdate::SessionInfoUpdate(
-        acp::SessionInfoUpdate::new().updated_at(session.updated_at.to_rfc3339()),
+        acp::SessionInfoUpdate::new()
+            .title(session.title.clone())
+            .updated_at(session.updated_at.to_rfc3339()),
     ));
 
     // Emit message history

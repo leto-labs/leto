@@ -4,12 +4,15 @@ use agent_runtime::{BlockDelta, Message, RuntimeEvent, ToolCall, ToolExecutionRe
 use agent_store::{InMemoryStore, Session, StoredMessage};
 use async_stream::stream;
 use provider::{
-    Block, BlockKind, ContentBlock, Event, EventStream, FinishReason, MessageRole, Provider,
-    ProviderCapabilities, ProviderInfo, Request, Usage,
+    Block, BlockKind, ContentBlock, Event, EventStream, FinishReason, MessageRole, MockProvider,
+    ModelInfo, Provider, ProviderCapabilities, ProviderInfo, Request, Usage,
 };
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::rc::Rc;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use tokio::io::split;
 use tokio_util::compat::{TokioAsyncReadCompatExt as _, TokioAsyncWriteCompatExt as _};
 
@@ -449,6 +452,89 @@ fn message_has_tool_result(message: &provider::Message) -> bool {
         .any(|block| matches!(block, provider::ContentBlock::ToolResult { .. }))
 }
 
+struct DualModelProvider {
+    inner: MockProvider,
+}
+
+impl DualModelProvider {
+    fn new() -> Self {
+        Self {
+            inner: MockProvider::new(),
+        }
+    }
+}
+
+impl Provider for DualModelProvider {
+    fn stream<'a>(
+        &'a self,
+        request: &'a Request,
+    ) -> futures::future::BoxFuture<'a, Result<EventStream<'a>, provider::Error>> {
+        self.inner.stream(request)
+    }
+
+    fn info(&self) -> ProviderInfo {
+        ProviderInfo {
+            name: "dual-model".into(),
+            default_model_id: Some("mock-echo".into()),
+            capabilities: ProviderCapabilities {
+                system_messages: true,
+                developer_messages: true,
+                input_text: true,
+                input_image_urls: false,
+                tool_calls: true,
+                tool_results: true,
+                reasoning_blocks: false,
+                refusal_blocks: false,
+                tool_call_argument_deltas: true,
+                parallel_tool_calls: false,
+                stream_granularity: provider::StreamGranularity::Block,
+            },
+            models: vec![
+                ModelInfo {
+                    id: Cow::Borrowed("mock-echo"),
+                    name: Cow::Borrowed("Mock Echo"),
+                    family: Some(Cow::Borrowed("mock")),
+                    reasoning_efforts: Cow::Borrowed(&[]),
+                    tool_call: true,
+                    attachment: false,
+                    structured_output: Some(false),
+                    temperature: Some(true),
+                    knowledge: None,
+                    release_date: None,
+                    last_updated: None,
+                    open_weights: None,
+                    input_modalities: Cow::Borrowed(&["text"]),
+                    output_modalities: Cow::Borrowed(&["text"]),
+                    cost: None,
+                    limit: None,
+                    status: None,
+                    capabilities: None,
+                },
+                ModelInfo {
+                    id: Cow::Borrowed("mock-deep"),
+                    name: Cow::Borrowed("Mock Deep"),
+                    family: Some(Cow::Borrowed("mock")),
+                    reasoning_efforts: Cow::Borrowed(&[]),
+                    tool_call: true,
+                    attachment: false,
+                    structured_output: Some(false),
+                    temperature: Some(true),
+                    knowledge: None,
+                    release_date: None,
+                    last_updated: None,
+                    open_weights: None,
+                    input_modalities: Cow::Borrowed(&["text"]),
+                    output_modalities: Cow::Borrowed(&["text"]),
+                    cost: None,
+                    limit: None,
+                    status: None,
+                    capabilities: None,
+                },
+            ],
+        }
+    }
+}
+
 async fn build_test_core(provider: Arc<dyn Provider>, bridge: AcpFileBridge) -> AgentCoreNative {
     let store = Arc::new(InMemoryStore::new());
     AgentCoreNative::builder(store)
@@ -602,6 +688,612 @@ async fn real_backend_file_read_bridges_from_client_workspace() {
             assert!(notifications.iter().any(|notification| {
                 format!("{:?}", notification.update).contains("first line")
             }));
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn real_backend_new_session_exposes_modes_and_available_commands() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let client = BridgeTestClient::default();
+            let (agent_conn, workspace_root) =
+                create_connection_pair(&client, Arc::new(MockProvider::new())).await;
+
+            agent_conn
+                .initialize(acp::InitializeRequest::new(acp::ProtocolVersion::LATEST))
+                .await
+                .expect("initialize");
+
+            let session = agent_conn
+                .new_session(acp::NewSessionRequest::new(workspace_root))
+                .await
+                .expect("new session");
+
+            let modes = session.modes.expect("expected real backend modes");
+            assert_eq!(modes.current_mode_id.0.as_ref(), "simple");
+            assert!(
+                modes
+                    .available_modes
+                    .iter()
+                    .any(|mode| mode.id.0.as_ref() == "robust"),
+                "expected robust loop to be surfaced as an ACP mode"
+            );
+
+            let notifications = client.notifications.lock().unwrap();
+            assert!(notifications.iter().any(|notification| matches!(
+                notification.update,
+                acp::SessionUpdate::AvailableCommandsUpdate(_)
+            )));
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn real_backend_set_session_mode_updates_loop_state_and_load_response() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let client = BridgeTestClient::default();
+            let (agent_conn, workspace_root) =
+                create_connection_pair(&client, Arc::new(MockProvider::new())).await;
+
+            agent_conn
+                .initialize(acp::InitializeRequest::new(acp::ProtocolVersion::LATEST))
+                .await
+                .expect("initialize");
+
+            let session = agent_conn
+                .new_session(acp::NewSessionRequest::new(workspace_root.clone()))
+                .await
+                .expect("new session");
+
+            agent_conn
+                .set_session_mode(acp::SetSessionModeRequest::new(
+                    session.session_id.clone(),
+                    "robust",
+                ))
+                .await
+                .expect("set_session_mode");
+
+            let loaded = agent_conn
+                .load_session(acp::LoadSessionRequest::new(
+                    session.session_id.clone(),
+                    workspace_root,
+                ))
+                .await
+                .expect("load_session");
+
+            assert_eq!(
+                loaded
+                    .modes
+                    .expect("expected load_session modes")
+                    .current_mode_id
+                    .0
+                    .as_ref(),
+                "robust"
+            );
+
+            let notifications = client.notifications.lock().unwrap();
+            assert!(notifications.iter().any(|notification| matches!(
+                &notification.update,
+                acp::SessionUpdate::CurrentModeUpdate(update)
+                    if update.current_mode_id.0.as_ref() == "robust"
+            )));
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn real_backend_does_not_expose_mode_as_config_option() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let client = BridgeTestClient::default();
+            let (agent_conn, workspace_root) =
+                create_connection_pair(&client, Arc::new(MockProvider::new())).await;
+
+            agent_conn
+                .initialize(acp::InitializeRequest::new(acp::ProtocolVersion::LATEST))
+                .await
+                .expect("initialize");
+
+            let session = agent_conn
+                .new_session(acp::NewSessionRequest::new(workspace_root))
+                .await
+                .expect("new session");
+
+            let config_options = session
+                .config_options
+                .expect("expected config options on new session");
+            assert!(
+                config_options
+                    .iter()
+                    .all(|option| option.id.0.as_ref() != "mode" && option.id.0.as_ref() != "loop"),
+                "expected ACP mode selection to be exposed only through session modes"
+            );
+        })
+        .await;
+}
+
+#[cfg(feature = "unstable_session_model")]
+#[tokio::test]
+async fn real_backend_new_session_exposes_models_and_set_session_model_updates_reload() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let client = BridgeTestClient::default();
+            let (agent_conn, workspace_root) =
+                create_connection_pair(&client, Arc::new(DualModelProvider::new())).await;
+
+            agent_conn
+                .initialize(acp::InitializeRequest::new(acp::ProtocolVersion::LATEST))
+                .await
+                .expect("initialize");
+
+            let session = agent_conn
+                .new_session(acp::NewSessionRequest::new(workspace_root.clone()))
+                .await
+                .expect("new session");
+
+            let models = session.models.expect("expected ACP models on new session");
+            assert!(
+                models
+                    .available_models
+                    .iter()
+                    .any(|model| model.model_id.0.as_ref() == "mock-echo"),
+                "expected default model to be surfaced through ACP model state"
+            );
+            assert!(
+                models
+                    .available_models
+                    .iter()
+                    .any(|model| model.model_id.0.as_ref() == "mock-deep"),
+                "expected alternate model to be exposed through ACP model state"
+            );
+            let target_model = if models.current_model_id.0.as_ref() == "mock-deep" {
+                "mock-echo"
+            } else {
+                "mock-deep"
+            };
+
+            let notification_count_before_update = client.notifications.lock().unwrap().len();
+            agent_conn
+                .set_session_model(acp::SetSessionModelRequest::new(
+                    session.session_id.clone(),
+                    target_model,
+                ))
+                .await
+                .expect("set_session_model");
+
+            let loaded = agent_conn
+                .load_session(acp::LoadSessionRequest::new(
+                    session.session_id.clone(),
+                    workspace_root,
+                ))
+                .await
+                .expect("load_session");
+
+            assert_eq!(
+                loaded
+                    .models
+                    .expect("expected load_session models")
+                    .current_model_id
+                    .0
+                    .as_ref(),
+                target_model
+            );
+
+            let notifications = client.notifications.lock().unwrap();
+            assert!(
+                notifications[notification_count_before_update..]
+                    .iter()
+                    .any(|notification| matches!(
+                        notification.update,
+                        acp::SessionUpdate::ConfigOptionUpdate(_)
+                    ))
+            );
+        })
+        .await;
+}
+
+#[cfg(feature = "unstable_session_resume")]
+#[tokio::test]
+async fn real_backend_resume_session_returns_state_without_replaying_history() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let client = BridgeTestClient::default();
+            let (agent_conn, workspace_root) =
+                create_connection_pair(&client, Arc::new(MockProvider::new())).await;
+
+            agent_conn
+                .initialize(acp::InitializeRequest::new(acp::ProtocolVersion::LATEST))
+                .await
+                .expect("initialize");
+
+            let session = agent_conn
+                .new_session(acp::NewSessionRequest::new(workspace_root.clone()))
+                .await
+                .expect("new session");
+
+            agent_conn
+                .prompt(acp::PromptRequest::new(
+                    session.session_id.clone(),
+                    vec![acp::ContentBlock::Text(acp::TextContent::new(
+                        "resume should not replay this",
+                    ))],
+                ))
+                .await
+                .expect("prompt");
+
+            let notification_count_before_resume = client.notifications.lock().unwrap().len();
+            let resumed = agent_conn
+                .resume_session(acp::ResumeSessionRequest::new(
+                    session.session_id.clone(),
+                    workspace_root,
+                ))
+                .await
+                .expect("resume_session");
+
+            assert_eq!(
+                resumed
+                    .modes
+                    .expect("expected resumed modes")
+                    .current_mode_id
+                    .0
+                    .as_ref(),
+                "simple"
+            );
+
+            let notifications = client.notifications.lock().unwrap();
+            let resumed_notifications = &notifications[notification_count_before_resume..];
+            assert!(resumed_notifications.iter().any(|notification| matches!(
+                notification.update,
+                acp::SessionUpdate::AvailableCommandsUpdate(_)
+            )));
+            assert!(resumed_notifications.iter().all(|notification| {
+                !matches!(
+                    notification.update,
+                    acp::SessionUpdate::UserMessageChunk(_)
+                        | acp::SessionUpdate::AgentMessageChunk(_)
+                        | acp::SessionUpdate::AgentThoughtChunk(_)
+                )
+            }));
+        })
+        .await;
+}
+
+#[cfg(all(feature = "unstable_session_fork", feature = "unstable_session_model"))]
+#[tokio::test]
+async fn real_backend_fork_session_copies_transcript_and_overrides() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let client = BridgeTestClient::default();
+            let (agent_conn, workspace_root) =
+                create_connection_pair(&client, Arc::new(DualModelProvider::new())).await;
+
+            agent_conn
+                .initialize(acp::InitializeRequest::new(acp::ProtocolVersion::LATEST))
+                .await
+                .expect("initialize");
+
+            let session = agent_conn
+                .new_session(acp::NewSessionRequest::new(workspace_root.clone()))
+                .await
+                .expect("new session");
+
+            agent_conn
+                .set_session_mode(acp::SetSessionModeRequest::new(
+                    session.session_id.clone(),
+                    "robust",
+                ))
+                .await
+                .expect("set_session_mode");
+            agent_conn
+                .set_session_model(acp::SetSessionModelRequest::new(
+                    session.session_id.clone(),
+                    "mock-deep",
+                ))
+                .await
+                .expect("set_session_model");
+            agent_conn
+                .set_session_config_option(acp::SetSessionConfigOptionRequest::new(
+                    session.session_id.clone(),
+                    "thought_level",
+                    "high",
+                ))
+                .await
+                .expect("set_session_config_option");
+            agent_conn
+                .prompt(acp::PromptRequest::new(
+                    session.session_id.clone(),
+                    vec![acp::ContentBlock::Text(acp::TextContent::new(
+                        "fork this transcript",
+                    ))],
+                ))
+                .await
+                .expect("prompt");
+
+            let forked = agent_conn
+                .fork_session(acp::ForkSessionRequest::new(
+                    session.session_id.clone(),
+                    workspace_root.clone(),
+                ))
+                .await
+                .expect("fork_session");
+
+            assert_eq!(
+                forked
+                    .modes
+                    .expect("expected forked modes")
+                    .current_mode_id
+                    .0
+                    .as_ref(),
+                "robust"
+            );
+            assert_eq!(
+                forked
+                    .models
+                    .expect("expected forked models")
+                    .current_model_id
+                    .0
+                    .as_ref(),
+                "mock-deep"
+            );
+            let thought_level = forked
+                .config_options
+                .expect("expected forked config options")
+                .into_iter()
+                .find(|option| option.id.0.as_ref() == "thought_level")
+                .expect("thought_level config option");
+            assert!(matches!(
+                thought_level.kind,
+                acp::SessionConfigKind::Select(ref select)
+                    if select.current_value.0.as_ref() == "high"
+            ));
+
+            let notification_count_before_load = client.notifications.lock().unwrap().len();
+            agent_conn
+                .load_session(acp::LoadSessionRequest::new(
+                    forked.session_id.clone(),
+                    workspace_root,
+                ))
+                .await
+                .expect("load forked session");
+
+            let notifications = client.notifications.lock().unwrap();
+            assert!(notifications[notification_count_before_load..].iter().any(
+                |notification| matches!(
+                    &notification.update,
+                    acp::SessionUpdate::UserMessageChunk(acp::ContentChunk {
+                        content: acp::ContentBlock::Text(text),
+                        ..
+                    }) if text.text.contains("fork this transcript")
+                )
+            ));
+        })
+        .await;
+}
+
+#[cfg(feature = "unstable_session_close")]
+#[tokio::test]
+async fn real_backend_close_session_cancels_active_turn_and_preserves_history() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let client = BridgeTestClient::default();
+            let (agent_conn, workspace_root) =
+                create_connection_pair(&client, Arc::new(MockProvider::new().with_delay(25))).await;
+            let agent_conn = Rc::new(agent_conn);
+
+            agent_conn
+                .initialize(acp::InitializeRequest::new(acp::ProtocolVersion::LATEST))
+                .await
+                .expect("initialize");
+
+            let session = agent_conn
+                .new_session(acp::NewSessionRequest::new(workspace_root.clone()))
+                .await
+                .expect("new session");
+
+            agent_conn
+                .prompt(acp::PromptRequest::new(
+                    session.session_id.clone(),
+                    vec![acp::ContentBlock::Text(acp::TextContent::new(
+                        "persisted history",
+                    ))],
+                ))
+                .await
+                .expect("prompt");
+
+            let prompt_conn = agent_conn.clone();
+            let session_id = session.session_id.clone();
+            let active_prompt = tokio::task::spawn_local(async move {
+                prompt_conn
+                    .prompt(acp::PromptRequest::new(
+                        session_id,
+                        vec![acp::ContentBlock::Text(acp::TextContent::new(
+                            "slow close target",
+                        ))],
+                    ))
+                    .await
+            });
+
+            tokio::time::sleep(Duration::from_millis(10)).await;
+            agent_conn
+                .close_session(acp::CloseSessionRequest::new(session.session_id.clone()))
+                .await
+                .expect("close_session");
+
+            let prompt_response = active_prompt.await.expect("join prompt").expect("prompt");
+            assert!(matches!(
+                prompt_response.stop_reason,
+                acp::StopReason::Cancelled
+            ));
+
+            let notification_count_before_load = client.notifications.lock().unwrap().len();
+            agent_conn
+                .load_session(acp::LoadSessionRequest::new(
+                    session.session_id.clone(),
+                    workspace_root,
+                ))
+                .await
+                .expect("load_session");
+
+            let notifications = client.notifications.lock().unwrap();
+            assert!(notifications[notification_count_before_load..].iter().any(
+                |notification| matches!(
+                    &notification.update,
+                    acp::SessionUpdate::UserMessageChunk(acp::ContentChunk {
+                        content: acp::ContentBlock::Text(text),
+                        ..
+                    }) if text.text.contains("persisted history")
+                )
+            ));
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn real_backend_list_sessions_without_cwd_returns_all_sessions() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let client = BridgeTestClient::default();
+            let (agent_conn, workspace_root) =
+                create_connection_pair(&client, Arc::new(MockProvider::new())).await;
+            let second_workspace =
+                std::env::temp_dir().join(format!("agent-acp-second-{}", ulid::Ulid::new()));
+
+            agent_conn
+                .initialize(acp::InitializeRequest::new(acp::ProtocolVersion::LATEST))
+                .await
+                .expect("initialize");
+
+            let first = agent_conn
+                .new_session(acp::NewSessionRequest::new(workspace_root.clone()))
+                .await
+                .expect("first session");
+            let second = agent_conn
+                .new_session(acp::NewSessionRequest::new(second_workspace.clone()))
+                .await
+                .expect("second session");
+
+            let sessions = agent_conn
+                .list_sessions(acp::ListSessionsRequest::new())
+                .await
+                .expect("list_sessions");
+
+            assert!(
+                sessions
+                    .sessions
+                    .iter()
+                    .any(|session| session.session_id == first.session_id
+                        && session.cwd == workspace_root)
+            );
+            assert!(
+                sessions
+                    .sessions
+                    .iter()
+                    .any(|session| session.session_id == second.session_id
+                        && session.cwd == second_workspace)
+            );
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn real_backend_prompt_resource_links_preserves_baseline_content() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let client = BridgeTestClient::default();
+            let (agent_conn, workspace_root) =
+                create_connection_pair(&client, Arc::new(MockProvider::new())).await;
+
+            agent_conn
+                .initialize(acp::InitializeRequest::new(acp::ProtocolVersion::LATEST))
+                .await
+                .expect("initialize");
+
+            let session = agent_conn
+                .new_session(acp::NewSessionRequest::new(workspace_root))
+                .await
+                .expect("new session");
+
+            let notification_count_before_prompt = client.notifications.lock().unwrap().len();
+            agent_conn
+                .prompt(acp::PromptRequest::new(
+                    session.session_id.clone(),
+                    vec![
+                        acp::ContentBlock::Text(acp::TextContent::new("inspect")),
+                        acp::ContentBlock::ResourceLink(acp::ResourceLink::new(
+                            "repo-readme",
+                            "file:///tmp/README.md",
+                        )),
+                    ],
+                ))
+                .await
+                .expect("prompt");
+
+            let notifications = client.notifications.lock().unwrap();
+            assert!(
+                notifications[notification_count_before_prompt..]
+                    .iter()
+                    .any(|notification| matches!(
+                        &notification.update,
+                        acp::SessionUpdate::AgentMessageChunk(acp::ContentChunk {
+                            content: acp::ContentBlock::Text(text),
+                            ..
+                        }) if text.text.contains("[resource:file:///tmp/README.md]")
+                    ))
+            );
+            assert!(
+                notifications[notification_count_before_prompt..]
+                    .iter()
+                    .all(|notification| !matches!(
+                        &notification.update,
+                        acp::SessionUpdate::AgentMessageChunk(acp::ContentChunk {
+                            content: acp::ContentBlock::Text(text),
+                            ..
+                        }) if text.text.contains("[unsupported-content]")
+                    ))
+            );
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn real_backend_first_prompt_emits_session_title_update() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let client = BridgeTestClient::default();
+            let (agent_conn, workspace_root) =
+                create_connection_pair(&client, Arc::new(MockProvider::new())).await;
+
+            agent_conn
+                .initialize(acp::InitializeRequest::new(acp::ProtocolVersion::LATEST))
+                .await
+                .expect("initialize");
+
+            let session = agent_conn
+                .new_session(acp::NewSessionRequest::new(workspace_root))
+                .await
+                .expect("new session");
+
+            let notification_count_before_prompt = client.notifications.lock().unwrap().len();
+            agent_conn
+                .prompt(acp::PromptRequest::new(
+                    session.session_id.clone(),
+                    vec![acp::ContentBlock::Text(acp::TextContent::new(
+                        "title me please",
+                    ))],
+                ))
+                .await
+                .expect("prompt");
+
+            let notifications = client.notifications.lock().unwrap();
+            assert!(notifications[notification_count_before_prompt..]
+                .iter()
+                .any(|notification| matches!(
+                    &notification.update,
+                    acp::SessionUpdate::SessionInfoUpdate(update)
+                        if matches!(update.title.as_opt_ref(), Some(Some(title)) if title == "title me please")
+                )));
         })
         .await;
 }

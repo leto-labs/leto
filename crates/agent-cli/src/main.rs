@@ -34,8 +34,12 @@ async fn main() -> Result<()> {
     }
 
     let cwd = std::env::current_dir().context("failed to get current directory")?;
+    let agent_home = cli_agent_home();
+    validate_store_root(&agent_home)
+        .await
+        .with_context(|| format!("incompatible agent store at {}", agent_home.display()))?;
     let store: Arc<dyn Store> = Arc::new(
-        FileStore::new(cli_agent_home())
+        FileStore::new(&agent_home)
             .await
             .context("failed to initialize file store")?,
     );
@@ -99,7 +103,27 @@ fn resolve_agent_home(
 ) -> PathBuf {
     agent_home
         .or(brain_home)
-        .unwrap_or_else(|| home.unwrap_or_else(|| PathBuf::from(".")).join(".brain"))
+        .unwrap_or_else(|| home.unwrap_or_else(|| PathBuf::from(".")).join(".agent"))
+}
+
+async fn validate_store_root(root: &std::path::Path) -> Result<()> {
+    let sessions_dir = root.join("sessions");
+    let mut entries = match tokio::fs::read_dir(&sessions_dir).await {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error.into()),
+    };
+
+    while let Some(entry) = entries.next_entry().await? {
+        if entry.file_type().await?.is_dir() {
+            anyhow::bail!(
+                "found legacy directory entry under sessions/: {}. Set AGENT_HOME to a clean store root or migrate the legacy data first",
+                entry.path().display()
+            );
+        }
+    }
+
+    Ok(())
 }
 
 async fn build_core(store: Arc<dyn Store>) -> Result<AgentCoreNative, CoreError> {
@@ -385,7 +409,7 @@ mod tests {
     fn resolve_agent_home_falls_back_to_user_home_directory() {
         assert_eq!(
             resolve_agent_home(None, None, Some(PathBuf::from("/tmp/home"))),
-            PathBuf::from("/tmp/home/.brain")
+            PathBuf::from("/tmp/home/.agent")
         );
     }
 
@@ -393,7 +417,7 @@ mod tests {
     fn resolve_agent_home_falls_back_to_relative_default_without_home_directory() {
         assert_eq!(
             resolve_agent_home(None, None, None),
-            PathBuf::from("./.brain")
+            PathBuf::from("./.agent")
         );
     }
 }
