@@ -7,3 +7,9 @@
 [submodule "submodules/atif-rust"]
 	path = submodules/atif-rust
 	url = git@github.com:leto-labs/atif-rust.git
+[submodule "submodules/ai-provider-rs"]
+	path = submodules/ai-provider-rs
+	url = git@github.com:leto-labs/ai-provider-rs.git
+[submodule "submodules/chat-rs"]
+	path = submodules/chat-rs
+	url = git@github.com:leto-labs/chat-rs.git

@@ -1,12 +1,13 @@
 [workspace]
 resolver = "2"
+exclude = [
+    "submodules/atif-rust",
+    "submodules/ai-provider-rs",
+    "submodules/chat-rs",
+    "submodules/nori-cli",
+    "submodules/opencode",
+]
 members = [
-    "crates/chat",
-    "crates/chat-slack",
-    "crates/chat-teams",
-    "crates/chat-telegram",
-    "crates/atif",
-    "crates/agent-provider/provider",
     "crates/agent-tool/tool",
     "crates/agent-tool/tool-files",
     "crates/agent-tool/tool-process",
@@ -19,11 +20,6 @@ members = [
     "crates/agent-server",
     "crates/agent-acp",
     "crates/agent-cli",
-    "crates/agent-provider/provider-anthropic",
-    "crates/agent-provider/provider-llamacpp",
-    "crates/agent-provider/provider-mistralrs",
-    "crates/agent-provider/provider-openai",
-    "tools/provider-preset-gen",
 ]
 
 [workspace.package]
@@ -95,12 +91,12 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
 
 # Internal
-atif = { path = "crates/atif" }
-chat = { path = "crates/chat" }
-chat-slack = { path = "crates/chat-slack" }
-chat-teams = { path = "crates/chat-teams" }
-chat-telegram = { path = "crates/chat-telegram" }
-provider = { path = "crates/agent-provider/provider" }
+atif = { path = "submodules/atif-rust/crates/atif" }
+chat = { path = "submodules/chat-rs/crates/chat" }
+chat-slack = { path = "submodules/chat-rs/crates/chat-slack" }
+chat-teams = { path = "submodules/chat-rs/crates/chat-teams" }
+chat-telegram = { path = "submodules/chat-rs/crates/chat-telegram" }
+provider = { path = "submodules/ai-provider-rs/crates/provider" }
 agent-tool = { path = "crates/agent-tool/tool" }
 agent-tool-files = { path = "crates/agent-tool/tool-files" }
 agent-tool-process = { path = "crates/agent-tool/tool-process" }
@@ -113,10 +109,10 @@ agent-core-remote = { path = "crates/agent-core-remote" }
 agent-server = { path = "crates/agent-server" }
 agent-acp = { path = "crates/agent-acp" }
 agent-cli = { path = "crates/agent-cli" }
-provider-anthropic = { path = "crates/agent-provider/provider-anthropic" }
-provider-llamacpp = { path = "crates/agent-provider/provider-llamacpp" }
-provider-mistralrs = { path = "crates/agent-provider/provider-mistralrs" }
-provider-openai = { path = "crates/agent-provider/provider-openai" }
+provider-anthropic = { path = "submodules/ai-provider-rs/crates/provider-anthropic" }
+provider-llamacpp = { path = "submodules/ai-provider-rs/crates/provider-llamacpp" }
+provider-mistralrs = { path = "submodules/ai-provider-rs/crates/provider-mistralrs" }
+provider-openai = { path = "submodules/ai-provider-rs/crates/provider-openai" }
 
 [profile.release]
 opt-level = 3

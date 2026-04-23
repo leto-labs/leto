@@ -41,15 +41,6 @@ The agent loop is a **trait**, not a hardcoded function. Different strategies ar
 
 ``` 
 crates/
-  agent-provider/
-    provider/         Shared v2 provider SDK
-    provider-openai/  Standalone OpenAI-compatible v2 provider crate
-    provider-anthropic/
-                     Standalone Anthropic v2 provider crate
-    provider-mistralrs/
-                     Standalone mistral.rs local v2 provider crate
-    provider-llamacpp/
-                     Standalone llama.cpp local v2 provider crate
   agent-runtime/      Live per-session execution engine
   agent-loops/        Current loop strategies
   agent-tool/
@@ -63,6 +54,10 @@ crates/
   agent-server/       Hosted server surface
   agent-acp/          ACP adapter surface
   agent-cli/          Local CLI surface
+submodules/
+  atif-rust/          Standalone ATIF workspace
+  ai-provider-rs/     Standalone provider family workspace
+  chat-rs/            Standalone chat family workspace
 ```
 
 ## Tech Stack
@@ -79,7 +74,7 @@ crates/
 
 ## Provider Roadmap
 
-The current provider path is centered on `crates/agent-provider/` and keeps
+The current provider path is centered on `submodules/ai-provider-rs` and keeps
 `provider` plus standalone `provider-*` crates grouped as one ecosystem:
 
 1. **MockProvider** *(done)* — echo, no network, no API keys
@@ -94,10 +89,11 @@ The current provider path is centered on `crates/agent-provider/` and keeps
 cargo run -p cli-echo                              # mock provider (no API key needed)
 OPENAI_API_KEY=sk-... cargo run -p cli-echo        # real OpenAI inference
 OPENAI_MODEL=gpt-4o cargo run -p cli-echo          # custom model
-cargo test --workspace                              # run all tests
+cargo test --workspace                              # run leto root workspace tests
+just test                                           # run leto + submodule workspaces
 cargo build --release                               # release build
-cargo check -p provider-mistralrs --features mistralrs
-cargo check -p provider-llamacpp --features llamacpp
+cargo check --manifest-path submodules/ai-provider-rs/Cargo.toml -p provider-mistralrs --features mistralrs
+cargo check --manifest-path submodules/ai-provider-rs/Cargo.toml -p provider-llamacpp --features llamacpp
 ```
 
 ## Spec-Driven Development

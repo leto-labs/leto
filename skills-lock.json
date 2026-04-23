@@ -11,6 +11,11 @@
       "sourceType": "github",
       "computedHash": "9e99c3d2d74d60b4f20eeb13f3011396c656c4b9a4d61b7a3d72c2ad3f5fb413"
     },
+    "opensrc": {
+      "source": "vercel-labs/opensrc",
+      "sourceType": "github",
+      "computedHash": "a03d4eb9013f4beaea383521b2dc432e98b71c0768bc26c37f66e9db00c859ff"
+    },
     "rust-async-patterns": {
       "source": "wshobson/agents",
       "sourceType": "github",

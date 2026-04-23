@@ -34,7 +34,7 @@ flowchart LR
 
 | Component | Responsibility |
 | --- | --- |
-| `crates/atif` | Rust schema and validation types for Harbor ATIF |
+| `submodules/atif-rust/crates/atif` | Rust schema and validation types for Harbor ATIF |
 | `agent-runtime` events | Runtime-facing completion and transcript events |
 | `agent-store` | Trajectory persistence contract |
 | `agent-core` | Append-only trajectory construction and completion-event emission |

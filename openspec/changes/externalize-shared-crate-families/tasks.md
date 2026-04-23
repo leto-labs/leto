@@ -1,0 +1,6 @@
+- [x] Add `submodules/ai-provider-rs` and `submodules/chat-rs` as pinned SSH submodules.
+- [x] Rewire the root `Cargo.toml` workspace members, excludes, and internal `path` dependencies to consume `atif`, `provider-*`, and `chat-*` from vendored submodules.
+- [x] Update repo docs and contributor guidance for the new submodule-based topology and multi-workspace verification flow.
+- [x] Add OpenSpec deltas covering the repo-tooling and provider preset generator path changes.
+- [x] Remove the in-tree `atif`, `chat-*`, `provider-*`, and local provider preset generator copies.
+- [x] Run validation: `cargo test --workspace`, `cargo test --workspace --manifest-path submodules/atif-rust/Cargo.toml`, `cargo test --workspace --manifest-path submodules/ai-provider-rs/Cargo.toml`, `cargo test --workspace --manifest-path submodules/chat-rs/Cargo.toml`, and `openspec validate externalize-shared-crate-families --strict`.

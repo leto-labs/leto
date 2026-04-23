@@ -65,14 +65,16 @@ Core engine/workspace focus:
 Rust workspace (edition 2024). Platform-agnostic AI agent engine. The current
 application-facing stack centers on `agent-core`, `agent-runtime`,
 `agent-store`, `agent-tool`, the `agent-tool-*` family crates, `agent-loops`,
-and the standalone `provider-*` crates. Legacy `brain-*` source is kept only as
-a local gitignored archive under `archive/brain/` when reference material is
-still needed.
+and vendored standalone crate families consumed through pinned submodules.
+Legacy `brain-*` source is kept only as a local gitignored archive under
+`archive/brain/` when reference material is still needed.
 
-Repository layout groups standalone ecosystems under shared folders:
+Repository layout keeps:
 
-- `crates/agent-provider/` contains `provider` plus the standalone `provider-*` crates
-- `crates/agent-tool/` contains `agent-tool` plus the standalone `agent-tool-*` crates
+- `crates/agent-tool/` for the in-repo `agent-tool-*` family
+- `submodules/atif-rust` for the standalone `atif` workspace
+- `submodules/ai-provider-rs` for `provider` plus the standalone `provider-*` crates
+- `submodules/chat-rs` for `chat` plus the standalone `chat-*` crates
 
 ### Conventions
 - Traits as interfaces, not class hierarchies
@@ -94,14 +96,19 @@ Repository layout groups standalone ecosystems under shared folders:
   you intentionally edited.
 - The committed `lefthook` hook only formats staged Rust files and re-stages
   them. It must not run `cargo fmt --all`.
-- Run `cargo test --workspace` before committing
+- Run `just test` before committing
 - Strive for increased test coverage — add or update tests whenever making changes
 - Add Rust doc comments for new or changed public APIs, following rustdoc and general
   best practices so generated documentation stays useful over time
 - Use `just coverage` for an HTML coverage report or `just coverage-summary` for
-  a quick text summary (requires `cargo-llvm-cov`)
+  a quick text summary of the root `leto` workspace (requires `cargo-llvm-cov`)
 
 ### Crate Map
+- `chat` — shared chat adapter SDK from `submodules/chat-rs`
+- `chat-slack` — Slack chat adapter crate from `submodules/chat-rs`
+- `chat-teams` — Teams chat adapter crate from `submodules/chat-rs`
+- `chat-telegram` — Telegram chat adapter crate from `submodules/chat-rs`
+- `atif` — Harbor-compatible trajectory/export schema crate from `submodules/atif-rust`
 - `provider` — shared v2 Provider SDK (request/event/capability/model metadata)
 - `provider-openai` — standalone OpenAI-compatible v2 provider crate
 - `provider-anthropic` — standalone Anthropic v2 provider crate
@@ -127,7 +134,6 @@ Repository layout groups standalone ecosystems under shared folders:
 - `agent-server` — hosted server over the shared `AgentCore` boundary
 - `agent-acp` — ACP adapter surface over `AgentCore`
 - `agent-cli` — local CLI binary crate exposing the `agent` command
-- `atif` — Harbor-compatible trajectory/export schema crate
 - Local-only legacy archive: `archive/brain/crates/brain-*` is not committed
   and exists only for source reference during migration cleanup
 
@@ -151,7 +157,7 @@ three stages:
 **Implementation:**
 1. Read `proposal.md`, `design.md`, `tasks.md`
 2. Implement tasks sequentially, mark `- [x]` as you go
-3. `cargo build --workspace && cargo test --workspace` to verify
+3. Run `cargo build --workspace` for the root workspace and `just test` to verify the full repo
 4. Check for stale references in related openspec docs
 
 **Post-code (sync specs):**
